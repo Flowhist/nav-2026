@@ -1,0 +1,11 @@
+sim_fake_pose_tf:
+  ros__parameters:
+    map_frame: "map"
+    base_frame: "base_link"
+    initialpose_topic: "/initialpose"
+    cmd_vel_topic: "/cmd_vel"
+    publish_rate_hz: 30.0
+    use_cmd_vel: false
+    x: 0.0
+    y: 0.0
+    yaw_deg: 0.0

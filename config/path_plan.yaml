@@ -1,0 +1,49 @@
+path_plan:
+  ros__parameters:
+    # ===== 话题与坐标系 =====
+    # 地图输入（OccupancyGrid）
+    map_topic: "/map"
+    # 目标点输入（PoseStamped）
+    goal_topic: "/goal_pose"
+    # 起点输入（PoseWithCovarianceStamped，RViz 2D Pose Estimate）
+    initialpose_topic: "/initialpose"
+    # 规划结果输出（nav_msgs/Path）
+    path_topic: "/plan"
+    # 全局坐标系（通常是 map）
+    map_frame: "map"
+    # 机器人基座坐标系（通常是 base_link）
+    base_frame: "base_link"
+    # 规划频率(Hz)：越大响应越快，但CPU占用更高
+    plan_rate_hz: 2.0
+
+    # ===== 栅格判定与碰撞安全 =====
+    # 占用阈值(0~100)：越小越保守（更多格子视为障碍）
+    occupied_threshold: 65
+    # 未知区域是否按障碍处理：true更安全，false更激进
+    treat_unknown_as_occupied: true
+    # 膨胀半径(米)：越大离障碍越远，但可通行区域变窄
+    inflation_radius_m: 0.6
+    # 是否允许对角移动：true路径更短，false更“网格化”
+    allow_diagonal: true
+    # 搜索扩展上限：越大越不易失败，但最坏耗时更长
+    max_search_expansions: 200000
+    # 到目标判定容差(米)：越小越精确，但更容易“到不了”
+    goal_tolerance_m: 0.12
+
+    # ===== 重规划与平滑 =====
+    # 地图更新时是否触发重规划
+    replan_on_map_update: false
+    # 偏离路径触发重规划阈值(米)：越小越敏感
+    replan_deviation_m: 0.25
+    # 一次平滑时允许直连的最大长度(米)：越大折点更少
+    smooth_max_segment_m: 2.0
+    # 是否启用曲线平滑（Chaikin）；建议保持 true
+    curve_smooth_enable: true
+    # 曲线平滑迭代次数：1~3 常用，越大越圆滑、点数越多
+    curve_smooth_iterations: 2
+    # 曲线切角比例(0.05~0.45)：越大越“圆”，也越可能贴近障碍
+    curve_smooth_ratio: 0.15
+    # 曲线平滑后的点数上限：防止点数爆炸
+    curve_smooth_max_points: 45
+    # TF不可用时，是否回退使用 /initialpose 作为起点
+    start_from_initialpose_when_tf_unavailable: true

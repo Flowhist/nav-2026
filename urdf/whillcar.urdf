@@ -1,0 +1,223 @@
+<?xml version="1.0"?>
+<!--
+  双轮差速轮椅 URDF（WHILL 底盘）
+  坐标约定：
+  - 旋转中心（两驱动轮中心连线中点）为原点
+  - +x 为车体前进方向
+  - y 轴为左右方向（y<0 左侧，y>0 右侧）
+  - z 轴向上
+-->
+<robot name="whillcar" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ==================== 参数定义（单位：米、千克） ==================== -->
+
+  <!-- 车体外形（由四角点给定）：
+       左前(0.70, 0.31), 右前(0.70, -0.31), 左后(-0.25, 0.31), 右后(-0.25, -0.31)
+       因此：长 0.95, 宽 0.62, 高 0.50
+       几何中心相对原点偏移：(0.225, 0.0, 0.25)
+  -->
+  <xacro:property name="body_width" value="0.62"/>
+  <xacro:property name="body_length" value="0.95"/>
+  <xacro:property name="body_height" value="0.50"/>
+  <xacro:property name="body_center_x" value="0.225"/>
+  <xacro:property name="body_center_y" value="0.0"/>
+  <xacro:property name="body_center_z" value="0.25"/>
+  <xacro:property name="body_visual_center_z" value="0.34"/>
+  <xacro:property name="body_mass" value="40.0"/>
+
+  <!-- 轮组参数 -->
+  <xacro:property name="wheel_radius" value="0.145"/>      <!-- 29cm -->
+  <xacro:property name="wheel_width" value="0.08"/>
+  <xacro:property name="wheel_separation" value="0.50"/>  <!-- 50cm -->
+  <xacro:property name="wheel_mass" value="2.0"/>
+
+  <!-- 传感器平面坐标（相对旋转中心） -->
+  <xacro:property name="imu_x" value="0.16"/>
+  <xacro:property name="imu_y" value="0.0"/>
+  <xacro:property name="imu_z" value="0.35"/>
+
+  <xacro:property name="laser_x" value="0.62"/>
+  <xacro:property name="laser_y" value="0.26"/>
+  <xacro:property name="laser_z" value="0.42"/>
+  <xacro:property name="laser_size" value="0.10"/>
+  <xacro:property name="laser_mass" value="0.6"/>
+
+  <!-- 颜色 -->
+  <material name="white">
+    <color rgba="0.9 0.9 0.9 0.35"/>
+  </material>
+  <material name="black">
+    <color rgba="0.1 0.1 0.1 1.0"/>
+  </material>
+  <material name="blue">
+    <color rgba="0.2 0.3 0.8 1.0"/>
+  </material>
+  <material name="red">
+    <color rgba="0.85 0.2 0.2 1.0"/>
+  </material>
+
+  <!-- ==================== 基座（旋转中心，地面投影） ==================== -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="${body_center_x} ${body_center_y} ${body_visual_center_z}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${body_length} ${body_width} ${body_height}"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+
+    <collision>
+      <origin xyz="${body_center_x} ${body_center_y} ${body_center_z}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${body_length} ${body_width} ${body_height}"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <origin xyz="${body_center_x} ${body_center_y} ${body_center_z}" rpy="0 0 0"/>
+      <mass value="${body_mass}"/>
+      <inertia
+        ixx="${body_mass*(body_width*body_width + body_height*body_height)/12.0}"
+        ixy="0.0" ixz="0.0"
+        iyy="${body_mass*(body_length*body_length + body_height*body_height)/12.0}"
+        iyz="0.0"
+        izz="${body_mass*(body_length*body_length + body_width*body_width)/12.0}"/>
+    </inertial>
+  </link>
+
+  <!-- ==================== 左驱动轮（y<0） ==================== -->
+  <joint name="left_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="left_wheel_link"/>
+    <origin xyz="0 ${-wheel_separation/2} ${wheel_radius}" rpy="${pi/2} 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <link name="left_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${wheel_mass}"/>
+      <inertia
+        ixx="${wheel_mass*wheel_radius*wheel_radius/2.0}"
+        ixy="0.0" ixz="0.0"
+        iyy="${wheel_mass*(3*wheel_radius*wheel_radius + wheel_width*wheel_width)/12.0}"
+        iyz="0.0"
+        izz="${wheel_mass*(3*wheel_radius*wheel_radius + wheel_width*wheel_width)/12.0}"/>
+    </inertial>
+  </link>
+
+  <!-- ==================== 右驱动轮（y>0） ==================== -->
+  <joint name="right_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="right_wheel_link"/>
+    <origin xyz="0 ${wheel_separation/2} ${wheel_radius}" rpy="${pi/2} 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <link name="right_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${wheel_mass}"/>
+      <inertia
+        ixx="${wheel_mass*wheel_radius*wheel_radius/2.0}"
+        ixy="0.0" ixz="0.0"
+        iyy="${wheel_mass*(3*wheel_radius*wheel_radius + wheel_width*wheel_width)/12.0}"
+        iyz="0.0"
+        izz="${wheel_mass*(3*wheel_radius*wheel_radius + wheel_width*wheel_width)/12.0}"/>
+    </inertial>
+  </link>
+
+  <!-- ==================== IMU ==================== -->
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="${imu_x} ${imu_y} ${imu_z}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="imu_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.03 0.02"/>
+      </geometry>
+      <material name="red"/>
+    </visual>
+  </link>
+
+  <!-- ==================== 雷达 ==================== -->
+  <joint name="laser_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="laser_frame"/>
+    <origin xyz="${laser_x} ${laser_y} ${laser_z}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="laser_frame">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${laser_size/2}" length="${laser_size}"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${laser_size/2}" length="${laser_size}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${laser_mass}"/>
+      <inertia
+        ixx="${laser_mass*(3*(laser_size/2)*(laser_size/2) + laser_size*laser_size)/12.0}"
+        ixy="0.0" ixz="0.0"
+        iyy="${laser_mass*(3*(laser_size/2)*(laser_size/2) + laser_size*laser_size)/12.0}"
+        iyz="0.0"
+        izz="${laser_mass*(laser_size/2)*(laser_size/2)/2.0}"/>
+    </inertial>
+  </link>
+
+  <!-- 顶部朝向指示器：沿 +x 指向前方 -->
+  <joint name="front_indicator_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="front_indicator_link"/>
+    <origin xyz="0 0 ${body_height + 0.02}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="front_indicator_link">
+    <visual>
+      <origin xyz="${body_length * 0.2} 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${body_length * 0.4} 0.02 0.02"/>
+      </geometry>
+      <material name="red"/>
+    </visual>
+  </link>
+
+</robot>

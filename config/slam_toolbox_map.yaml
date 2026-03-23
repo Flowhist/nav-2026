@@ -1,0 +1,96 @@
+# SLAM Toolbox 建图模式配置 - 实机版本
+# 用于在线建图和SLAM
+
+slam_toolbox:
+  ros__parameters:
+    # 通用参数
+    use_sim_time: false
+    
+    # QoS 配置 - 使用 RELIABLE 以匹配激光雷达和其他传感器
+    scan_queue_size: 10
+    
+    # Solver插件配置
+    solver_plugin: solver_plugins::CeresSolver
+    
+    # Ceres优化器配置
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: Huber
+    
+    # 运行模式
+    mode: mapping  
+
+    # 基础坐标系
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /scan
+    
+    # 启用里程计辅助 - 提供初始位姿估计，加速扫描匹配收敛
+    # sync版本通过TF树自动使用里程计，不需要use_odom参数
+    
+    # IMU数据 - sync版本不支持直接订阅IMU，但EKF已融合IMU到里程计中
+
+    # 栅格地图分辨率
+    resolution: 0.05 # 一格5cm
+    
+    # 传感器参数
+    scan_queue_size: 10
+    
+    # 激光雷达参数
+    minimum_time_interval: 0.1      # 0.05秒更新(20Hz)
+    minimum_travel_distance: 0.2    # 10cm更新，过滤抖动
+    minimum_travel_heading: 0.1    # 0.86度更新，平衡灵敏度
+    scan_buffer_size: 30             
+    scan_buffer_maximum_scan_distance: 15.0
+    check_min_dist_and_heading_precisely: false  # or, 满足任意条件就更新
+
+    # 激光雷达过滤
+    transform_timeout: 0.15  # 只影响rviz的显示
+    tf_buffer_duration: 60.0  
+    throttle_scans: 1    # 跳帧扫描
+    
+    # 激光雷达范围（根据R2000规格调整）
+    minimum_range: 0.1          # R2000最小测量距离为0.1米
+    min_laser_range: 0.1        # 兼容不同版本参数名
+    max_laser_range: 45.0
+    minimum_angle: -3.14159
+    maximum_angle: 3.14159
+
+    # 粗搜索
+    correlation_search_space_dimension: 0.5  # 适度搜索范围，兼顾纠偏能力
+    correlation_search_space_resolution: 0.01  # 1cm分辨率，要能被地图分辨率整除，越小重影越少，效果越好
+    correlation_search_space_smear_deviation: 0.1  # 标准偏差容忍
+    coarse_search_angle_offset: 0.7    # ±40度角度搜索
+    coarse_angle_resolution: 0.0349     # 2度分辨率
+    minimum_angle_penalty: 0.2
+    minimum_distance_penalty: 0.1
+    use_scan_matching: true             # 启用扫描匹配
+    use_scan_barycenter: true
+    
+    # 细搜索
+    fine_search_angle_offset: 0.00349    # ±0.2度    
+
+    # 闭环检测参数 
+    do_loop_closing: true                # 启用闭环检测，修正累积漂移
+    loop_search_maximum_distance: 4.0          # 适度增大搜索范围
+    loop_match_minimum_chain_size: 5          # 提高链长度（更严格）
+    loop_match_maximum_variance_coarse: 1.0    # 降低方差容忍（更严格）
+    loop_match_minimum_response_coarse: 0.70   # 高阈值，避免误匹配
+    loop_match_minimum_response_fine: 0.80     # 高阈值，确保闭环可靠
+
+    # 在扫描之间使用里程计平滑位姿
+    enable_interactive_mode: true
+  
+    # 位姿图优化
+    optimize_every_n_nodes: 10      # 每10个节点优化一次
+    link_match_minimum_response_fine: 0.1  # 降低匹配阈值
+    link_scan_maximum_distance: 1.5         
+    
+    # 交互式模式（用于SLAM Toolbox Panel）
+    interactive_mode: false
+    
+    # 地图更新参数
+    map_update_interval: 0.5   # 每0.5秒更新一次地图话题

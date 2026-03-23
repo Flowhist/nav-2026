@@ -1,0 +1,5 @@
+# finav 统一雷达配置（建图/导航共用）
+
+lidar_ip: 10.86.81.200
+scan_filter_center_deg: 0.0
+scan_filter_fov_deg: 180.0

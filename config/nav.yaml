@@ -1,0 +1,49 @@
+# nav.yaml  ——  导航控制器参数（Pure Pursuit 版）
+
+nav_control:
+  ros__parameters:
+   
+    # ==================== 话题 & 坐标系 ====================
+    output_cmd_vel_topic: '/cmd_vel'
+    path_topic:           '/plan'
+    base_frame:           'base_link'
+    map_frame:            'map'
+    # 是否接受运行中新的 /plan（适配 path_plan 重规划）
+    # true: 每次收到新路径都会切换到新路径继续跟踪
+    # false: 仅使用首条路径直到到点/重置
+    accept_replanned_path: true
+
+    # ==================== 速度 ====================
+    linear_speed_mps:          0.20   # 直行最大线速 (m/s)
+
+    # ROTATE 模式角速上限（PD 控制原地旋转）
+    angular_speed_degps:       20.0
+    angular_kp:                 1.0   # ROTATE 比例增益
+    angular_kd:                 0.5   # ROTATE 微分阻尼
+
+    # DRIVE 模式角速上限（Pure Pursuit 几何公式，天然稳定，此值仅做安全限位）
+    # ω = v * 2*sin(α) / L，v=0.2 L=0.8 α=30° → ω ≈ 0.25rad/s ≈ 14deg/s
+    drive_angular_speed_degps: 25.0
+
+    # 死区：直线段小角差不修正（防微振）
+    angular_deadband_deg:       5.0
+
+    angular_sign:               1.0   # 转向反向时改为 -1.0
+
+    wheel_separation:           0.5   # 轮距 (m)
+
+    # ==================== Pure Pursuit ====================
+    # 预瞄距离越大越平滑，但弯道响应越滞后；建议 0.6~1.0
+    lookahead_dist:  0.80
+
+    goal_tolerance:  0.10   # 到达终点停止距离 (m)
+
+    # ==================== 模式切换（带迟滞） ====================
+    rotate_threshold_deg:  40.0   # 角差 > 此值 → ROTATE 原地旋转
+    rotate_exit_deg:       20.0   # 角差 < 此值 → 退出 ROTATE 恢复 DRIVE
+
+    # ==================== 摇杆话题 ====================
+    js_state_topic: '/js_state'
+
+    # ==================== 控制频率 ====================
+    control_rate_hz:  10.0

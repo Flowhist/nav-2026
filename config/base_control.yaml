@@ -1,0 +1,44 @@
+# 基础参数配置
+base_control:
+  ros__parameters:
+
+    # ==================== 车轮参数 ====================
+    wheel_radius:     0.145    # 轮半径（m）= 直径 29cm / 2（已调整）
+    wheel_separation: 0.50      # 轮距（m）= 50cm
+
+    # ==================== 发布频率 ====================
+    update_rate: 10.0          # 里程计刷新频率（Hz）
+    cmd_send_rate: 50.0        # 控制指令下发频率（Hz）
+    cmd_timeout: 0.35          # 超过该时间未收到新 cmd_vel 则自动归零（s）
+
+    # ==================== CAN 总线 ====================
+    can_channel:   'PCAN_USBBUS1'
+    can_baud_rate: 500000
+
+    # ==================== 速度控制(cmd_vel) ====================
+    # 【驱动层硬限制】：这里的速度值是底盘驱动的安全上界，超出会被强制截断
+    #  实际运动速度由上层控制器决定
+    cmd_vel_topic: '/cmd_vel'
+    max_linear_speed: 0.6                # 线速硬限（m/s）
+    max_angular_speed: 0.5               # 角速硬限（rad/s）
+    acceleration: 260                    # 加速度（deg/s²）
+
+# 摇杆参数配置
+joystick_control:
+  ros__parameters:
+    publish_rate : 25     # 信号频率
+
+    js_vel_low: 0.2       # 摇杆控制直行速度 低档（m/s）
+    js_vel_high: 0.4      # 摇杆控制直行速度 高档（m/s）
+    js_rot_low: 10        # 摇杆控制旋转速度 低档（deg/s）
+    js_rot_high: 25       # 摇杆控制旋转速度 高档（deg/s）
+
+    # 摇杆从初始位置到推满：0 - 128
+    dead_zone : 20        # 摇杆死区阈值
+    sat_zone : 110        # 摇杆饱和区阈值
+
+# 键盘控制
+js_kb_router:
+  ros__parameters:
+    keyboard_angular_speed: 0.5                  # 键盘统一旋转速度（rad/s）
+    keyboard_linear_speeds: [0.1, 0.2, 0.4, 0.6] # 键盘各档位线速度（m/s）

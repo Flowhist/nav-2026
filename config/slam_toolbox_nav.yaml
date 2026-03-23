@@ -1,0 +1,94 @@
+# SLAM Toolbox 定位模式配置
+# 用于基于已有地图的纯定位
+
+slam_toolbox:
+  ros__parameters:
+    # 通用参数
+    use_sim_time: false
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+    
+    # 运行模式
+    mode: localization
+    
+    # ===== 地图文件配置 =====
+    map_file_name: /home/flowhist/workspace/lately/src/finav/maps/map2/map2
+    map_start_pose: [0.0, 0.0, 0.0]  # 初始位姿 [x, y, theta]
+    map_start_at_dock: true          # 启动时自动加载地图
+    
+    # 基础坐标系
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /scan
+    
+    # 启用里程计
+    use_odom: false
+    odom_topic: /odom
+    
+    # IMU数据
+    use_imu: false
+    imu_topic: /imu/data
+    # 栅格地图分辨率（必须与建图时一致）
+    resolution: 0.05
+    
+    # 传感器参数
+    scan_queue_size: 3
+    minimum_time_interval: 0.2  # 降低处理频率，减少积压
+    minimum_travel_distance: 0.05   # 15cm，过滤EKF微小漂移触发的误校正
+    minimum_travel_heading: 0.15    # ~8.6度
+    scan_buffer_size: 30              # 定位模式使用滚动窗口
+    scan_buffer_maximum_scan_distance: 15.0
+    check_min_dist_and_heading_precisely: false
+    
+    # 激光雷达过滤
+    transform_timeout: 0.2
+    tf_buffer_duration: 60.0  
+    throttle_scans: 2  # 每2帧取1帧，减负
+    
+    # 激光雷达范围（根据R2000规格调整）
+    minimum_range: 0.1          # R2000最小测量距离为0.1米
+    min_laser_range: 0.1        # 兼容不同版本参数名
+    max_laser_range: 45.0
+    minimum_angle: -3.14159
+    maximum_angle: 3.14159
+
+    # 粗搜索
+    correlation_search_space_dimension: 0.5  # 适度搜索范围，兼顾纠偏能力
+    correlation_search_space_resolution: 0.01  # 1cm分辨率，要能被地图分辨率整除，越小重影越少，效果越好
+    correlation_search_space_smear_deviation: 0.1  # 标准偏差容忍
+    coarse_search_angle_offset: 0.7    # ±40度角度搜索
+    coarse_angle_resolution: 0.0349     # 2度分辨率
+    minimum_angle_penalty: 0.2
+    minimum_distance_penalty: 0.1
+    use_scan_matching: true             # 启用扫描匹配
+    use_scan_barycenter: true
+    
+    # 细搜索
+    fine_search_angle_offset: 0.00349    # ±0.2度    
+
+    # 闭环检测参数 
+    do_loop_closing: false               # 定位模式关闭闭环，提升实时性
+    loop_search_maximum_distance: 4.0          # 适度增大搜索范围
+    loop_match_minimum_chain_size: 5          # 提高链长度（更严格）
+    loop_match_maximum_variance_coarse: 1.0    # 降低方差容忍（更严格）
+    loop_match_minimum_response_coarse: 0.70   # 高阈值，避免误匹配
+    loop_match_minimum_response_fine: 0.80     # 高阈值，确保闭环可靠
+
+    # 在扫描之间使用里程计平滑位姿
+    enable_interactive_mode: false
+  
+    # 位姿图优化
+    optimize_every_n_nodes: 30      # 降低优化频率，减少CPU占用
+    link_match_minimum_response_fine: 0.1  # 降低匹配阈值
+    link_scan_maximum_distance: 1.5         
+    
+    # 交互式模式（用于SLAM Toolbox Panel）
+    interactive_mode: false
+    
+    # 地图更新参数
+    # 设为极大值：定位模式不向 /map 话题推送更新，避免产生"正在建图"的视觉效果
+    map_update_interval: 99999.0

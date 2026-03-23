@@ -1,0 +1,25 @@
+dm_imu:
+  ros__parameters:
+    # ==================== 串口连接 ====================
+    port: "/dev/ttyACM1"       # USB串口
+    baudrate: 921600           # 波特率
+    
+    # 坐标系（ekf.yaml 中配置 TF 变换关系）
+    frame_id: "imu_link"
+    
+    # 话题发布配置
+    publish_imu_data: true     # 发布 /imu/data (sensor_msgs/Imu) - 供EKF使用
+    publish_rpy: false          # 发布 /imu/rpy (geometry_msgs/Vector3Stamped)
+    
+    # RPY单位（false=弧度，true=度）
+    publish_rpy_in_degree: false
+    
+    # 固定航向偏置（度）
+    # 顺时针90°请设为 -90.0
+    yaw_offset_deg: 0.0
+
+    # QoS配置
+    qos_reliable: true         # 使用RELIABLE传输
+    
+    # 调试
+    verbose: false             # 打印调试信息

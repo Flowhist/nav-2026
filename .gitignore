@@ -1,0 +1,21 @@
+# Map files and directories
+maps/
+
+# Build and dependencies
+build/
+devel/
+install/
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ROS specific
+.ros/
