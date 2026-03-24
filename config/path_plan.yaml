@@ -12,7 +12,7 @@ path_plan:
     # 机器人基座坐标系（通常是 base_link）
     base_frame: "base_link"
     # 规划频率(Hz)：提高到 5Hz，减小点目标后的等待感
-    plan_rate_hz: 5.0
+    plan_rate_hz: 2.0
 
     # ===== 栅格判定与碰撞安全 =====
     # 占用阈值(0~100)：越小越保守（更多格子视为障碍）
@@ -23,8 +23,12 @@ path_plan:
     inflation_radius_m: 0.1
     # 搜索扩展上限：越大越不易失败，但最坏耗时更长
     max_search_expansions: 200000
-    # 到目标判定容差(米)：越小越精确，但更容易“到不了”
+    # 到目标判定容差(米)：越小越精确
     goal_tolerance_m: 0.12
+    # false: 终点姿态保持沿路径切线，避免仿真到点时瞬间跳成 goal 朝向
+    align_final_pose_yaw_to_goal: false
+    # 新 goal 到来时先发布空路径，让控制器立即停下等待新路径
+    stop_on_new_goal_clear_path: true
 
     # ===== 车体几何（与 URDF 对齐）=====
     # base_link 到车头最前端
@@ -59,3 +63,7 @@ path_plan:
     smooth_max_segment_m: 2.0
     # 路径输出的最小姿态间隔
     path_pose_spacing_m: 0.10
+    # Weighted A* 启发式权重（>=1）：越大通常越快，但路径最优性会下降
+    heuristic_weight: 1.35
+    # 启发式朝向代价权重（m/rad）：适度增大可减少无效摆头搜索
+    heuristic_heading_weight: 0.10

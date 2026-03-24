@@ -35,6 +35,7 @@ State3D = Tuple[int, int, int]
 
 class PathPlanner(Node):
     def __init__(self) -> None:
+        """初始化参数、缓存、订阅发布与定时规划循环。"""
         super().__init__("path_plan")
 
         self.declare_parameter("map_topic", "/map")
@@ -49,10 +50,14 @@ class PathPlanner(Node):
         self.declare_parameter("inflation_radius_m", 0.08)
         self.declare_parameter("max_search_expansions", 200000)
         self.declare_parameter("goal_tolerance_m", 0.12)
+        self.declare_parameter("align_final_pose_yaw_to_goal", False)
+        self.declare_parameter("stop_on_new_goal_clear_path", True)
         self.declare_parameter("replan_on_map_update", True)
         self.declare_parameter("replan_deviation_m", 0.35)
         self.declare_parameter("smooth_max_segment_m", 1.6)
         self.declare_parameter("path_pose_spacing_m", 0.10)
+        self.declare_parameter("heuristic_weight", 1.35)
+        self.declare_parameter("heuristic_heading_weight", 0.10)
 
         self.declare_parameter("vehicle_front_m", 0.70)
         self.declare_parameter("vehicle_rear_m", 0.25)
@@ -82,6 +87,12 @@ class PathPlanner(Node):
             self.get_parameter("max_search_expansions").value
         )
         self.goal_tolerance_m = float(self.get_parameter("goal_tolerance_m").value)
+        self.align_final_pose_yaw_to_goal = bool(
+            self.get_parameter("align_final_pose_yaw_to_goal").value
+        )
+        self.stop_on_new_goal_clear_path = bool(
+            self.get_parameter("stop_on_new_goal_clear_path").value
+        )
         self.replan_on_map_update = bool(
             self.get_parameter("replan_on_map_update").value
         )
@@ -91,6 +102,12 @@ class PathPlanner(Node):
         )
         self.path_pose_spacing_m = float(
             self.get_parameter("path_pose_spacing_m").value
+        )
+        self.heuristic_weight = max(
+            1.0, float(self.get_parameter("heuristic_weight").value)
+        )
+        self.heuristic_heading_weight = max(
+            0.0, float(self.get_parameter("heuristic_heading_weight").value)
         )
 
         self.vehicle_front_m = float(self.get_parameter("vehicle_front_m").value)
@@ -166,6 +183,7 @@ class PathPlanner(Node):
         )
 
     def _build_footprint_samples(self) -> None:
+        """按矩形车体与边距离散采样，生成碰撞检测足迹点集。"""
         dx_step = max(0.04, self.footprint_sample_step_m)
         dy_step = max(0.04, self.footprint_sample_step_m)
         x_min = -self.vehicle_rear_m - self.vehicle_margin_m
@@ -179,6 +197,7 @@ class PathPlanner(Node):
 
     @staticmethod
     def _sample_axis(v_min: float, v_max: float, step: float) -> List[float]:
+        """在给定区间按步长生成包含两端点的一维采样序列。"""
         if step <= 0.0:
             return [v_min, v_max]
         values: List[float] = []
@@ -189,6 +208,7 @@ class PathPlanner(Node):
         return values
 
     def _on_map(self, msg: OccupancyGrid) -> None:
+        """接收地图并重建二值/膨胀障碍栅格。"""
         if msg.header.frame_id and msg.header.frame_id != self.map_frame:
             self.get_logger().warn(
                 f"ignore map frame={msg.header.frame_id}, expected={self.map_frame}"
@@ -209,6 +229,7 @@ class PathPlanner(Node):
             self.map_dirty = True
 
     def _on_goal(self, msg: PoseStamped) -> None:
+        """接收目标位姿并触发下一次重规划。"""
         if msg.header.frame_id and msg.header.frame_id != self.map_frame:
             self.get_logger().warn(
                 f"ignore goal frame={msg.header.frame_id}, expected={self.map_frame}"
@@ -221,6 +242,9 @@ class PathPlanner(Node):
             yaw,
         )
         self.goal_dirty = True
+        if self.stop_on_new_goal_clear_path and self.last_plan_poses:
+            self.last_plan_poses = []
+            self._publish_path([], None)
         self.get_logger().info(
             "new goal: (%.2f, %.2f, %.1fdeg)"
             % (
@@ -231,6 +255,7 @@ class PathPlanner(Node):
         )
 
     def _on_nav_clear(self, _msg: Empty) -> None:
+        """清空当前导航目标与路径状态。"""
         self.goal_pose_world = None
         self.goal_dirty = False
         self.last_plan_poses = []
@@ -238,6 +263,7 @@ class PathPlanner(Node):
         self.get_logger().info("navigation goal cleared")
 
     def _handle_plan_failure(self, reason: str) -> None:
+        """统一处理规划失败：清路径、复位标志并记录日志。"""
         # 规划失败时主动清空旧路径，避免控制器继续跟旧路径，
         # 也避免后续新 goal 被残留状态影响。
         self.last_plan_poses = []
@@ -247,30 +273,31 @@ class PathPlanner(Node):
         self.get_logger().warn(reason)
 
     def _plan_loop(self) -> None:
+        """周期执行规划：判定是否需要重规划并发布路径。"""
         if self.map_msg is None or not self.inflated_grid:
             return
         if self.goal_pose_world is None:
             return
 
-        start_pose = self._get_robot_world_pose()
-        if start_pose is None:
+        current_pose = self._get_robot_world_pose()
+        if current_pose is None:
             return
 
         dist_to_goal = math.hypot(
-            start_pose[0] - self.goal_pose_world[0],
-            start_pose[1] - self.goal_pose_world[1],
+            current_pose[0] - self.goal_pose_world[0],
+            current_pose[1] - self.goal_pose_world[1],
         )
         if dist_to_goal <= self.goal_tolerance_m:
             if self.last_plan_poses:
                 self.last_plan_poses = []
-                self._publish_path([], self.goal_pose_world)
+                self._publish_path([], None)
             return
 
         need_replan = False
         if self.goal_dirty or self.map_dirty or not self.last_plan_poses:
             need_replan = True
         elif (
-            self._distance_to_path((start_pose[0], start_pose[1]), self.last_plan_poses)
+            self._distance_to_path((current_pose[0], current_pose[1]), self.last_plan_poses)
             > self.replan_deviation_m
         ):
             need_replan = True
@@ -278,22 +305,41 @@ class PathPlanner(Node):
         if not need_replan:
             return
 
-        # 底层控制支持原地转向，因此规划起点不必死守“当前车头方向”。
-        # 这里优先把起点朝向对齐到目标方向，可显著降低“背对目标”时的搜索量。
         goal_direction = math.atan2(
-            self.goal_pose_world[1] - start_pose[1],
-            self.goal_pose_world[0] - start_pose[0],
+            self.goal_pose_world[1] - current_pose[1],
+            self.goal_pose_world[0] - current_pose[0],
         )
-        start_headings = self._merge_heading_candidates(
+        fast_start_headings = self._merge_heading_candidates(
             primary_yaw=goal_direction,
-            secondary_yaw=start_pose[2],
+            secondary_yaw=current_pose[2],
+            limit=min(self.heading_bins, 4),
+        )
+        safe_start_headings = self._merge_heading_candidates(
+            primary_yaw=current_pose[2],
+            secondary_yaw=goal_direction,
             limit=min(self.heading_bins, 8),
         )
-        goal_headings = self._ordered_heading_bins(
-            self.goal_pose_world[2], limit=self.heading_bins
-        )
+        if self.align_final_pose_yaw_to_goal:
+            goal_headings = self._ordered_heading_bins(
+                self.goal_pose_world[2], limit=self.heading_bins
+            )
+        else:
+            goal_headings = self._merge_heading_candidates(
+                primary_yaw=goal_direction,
+                secondary_yaw=current_pose[2],
+                limit=self.heading_bins,
+            )
 
-        start_pose = self._nearest_reachable_pose(start_pose, start_headings)
+        start_pose = self._nearest_reachable_pose(
+            current_pose,
+            fast_start_headings,
+            max_radius_cells=8,
+        )
+        if start_pose is None:
+            start_pose = self._nearest_reachable_pose(
+                current_pose,
+                safe_start_headings,
+            )
         goal_pose = self._nearest_free_pose(self.goal_pose_world, goal_headings)
         if start_pose is None or goal_pose is None:
             self._handle_plan_failure("planning failed: no collision-free start/goal pose found")
@@ -306,6 +352,9 @@ class PathPlanner(Node):
 
         # 先用 A* 找到一条安全路径，再做一次直线 shortcut 去掉冗余折点。
         pose_path = self._shortcut_path(pose_path)
+        transition_path = self._build_transition_path(current_pose, start_pose)
+        if transition_path:
+            pose_path = transition_path + pose_path[1:]
         pose_path = self._densify_path(pose_path)
 
         self.last_plan_poses = pose_path
@@ -319,6 +368,7 @@ class PathPlanner(Node):
         )
 
     def _rebuild_processed_map(self) -> None:
+        """将 OccupancyGrid 转为可快速查询的膨胀障碍网格。"""
         assert self.map_msg is not None
         info = self.map_msg.info
         self.map_w = int(info.width)
@@ -366,12 +416,14 @@ class PathPlanner(Node):
         self.inflated_grid = inflated
 
     def _is_grid_free(self, idx: GridIndex) -> bool:
+        """判断栅格索引是否在地图内且为空闲。"""
         x, y = idx
         if x < 0 or y < 0 or x >= self.map_w or y >= self.map_h:
             return False
         return self.inflated_grid[y * self.map_w + x] == 0
 
     def _world_to_grid(self, p: WorldPoint) -> Optional[GridIndex]:
+        """世界坐标转栅格坐标，越界时返回 None。"""
         gx = int((p[0] - self.origin_x) / self.resolution)
         gy = int((p[1] - self.origin_y) / self.resolution)
         if gx < 0 or gy < 0 or gx >= self.map_w or gy >= self.map_h:
@@ -379,28 +431,34 @@ class PathPlanner(Node):
         return (gx, gy)
 
     def _grid_to_world(self, p: GridIndex) -> WorldPoint:
+        """栅格坐标转世界坐标（栅格中心点）。"""
         x = self.origin_x + (p[0] + 0.5) * self.resolution
         y = self.origin_y + (p[1] + 0.5) * self.resolution
         return (x, y)
 
     def _yaw_to_bin(self, yaw: float) -> int:
+        """把连续航向角量化到离散航向 bin。"""
         wrapped = self._norm_angle(yaw)
         return int(round(wrapped / self.heading_step)) % self.heading_bins
 
     def _bin_to_yaw(self, idx: int) -> float:
+        """把离散航向 bin 反算为连续航向角。"""
         return self._norm_angle(idx * self.heading_step)
 
     def _pose_to_state(self, pose: WorldPose) -> Optional[State3D]:
+        """把世界位姿转换为 A* 离散状态。"""
         idx = self._world_to_grid((pose[0], pose[1]))
         if idx is None:
             return None
         return (idx[0], idx[1], self._yaw_to_bin(pose[2]))
 
     def _state_to_pose(self, state: State3D) -> WorldPose:
+        """把 A* 离散状态转换回世界位姿。"""
         x, y = self._grid_to_world((state[0], state[1]))
         return (x, y, self._bin_to_yaw(state[2]))
 
     def _pose_is_free(self, pose: WorldPose) -> bool:
+        """判断给定位姿下整车足迹是否完全无碰撞。"""
         # 用采样后的矩形足迹判断整车是否可放置，不只检查 base_link 一个点。
         px, py, yaw = pose
         cy = math.cos(yaw)
@@ -416,6 +474,7 @@ class PathPlanner(Node):
     def _ordered_heading_bins(
         self, center_yaw: float, limit: Optional[int] = None
     ) -> List[int]:
+        """按离中心角从近到远生成航向候选 bin 列表。"""
         center = self._yaw_to_bin(center_yaw)
         ordered: List[int] = [center]
         max_count = self.heading_bins if limit is None else max(1, limit)
@@ -431,6 +490,7 @@ class PathPlanner(Node):
     def _merge_heading_candidates(
         self, primary_yaw: float, secondary_yaw: float, limit: int
     ) -> List[int]:
+        """合并两组航向候选并去重，保持优先级顺序。"""
         merged: List[int] = []
         seen = set()
         for yaw in (primary_yaw, secondary_yaw):
@@ -449,6 +509,7 @@ class PathPlanner(Node):
         heading_candidates: List[int],
         max_radius_cells: int = 40,
     ) -> Optional[WorldPose]:
+        """在邻域内搜索最近可放置的无碰撞位姿。"""
         base_idx = self._world_to_grid((src_pose[0], src_pose[1]))
         if base_idx is None:
             return None
@@ -475,6 +536,7 @@ class PathPlanner(Node):
         heading_candidates: List[int],
         max_radius_cells: int = 40,
     ) -> Optional[WorldPose]:
+        """搜索从当前姿态可无碰撞过渡到的起点位姿。"""
         # 起点不仅要“摆得下”，还要保证从当前姿态原地转向或短距离过渡过去的
         # 整个过程都不碰撞，避免控制器起步时原地打角擦到障碍物。
         base_idx = self._world_to_grid((src_pose[0], src_pose[1]))
@@ -495,11 +557,25 @@ class PathPlanner(Node):
                         pose = (wx, wy, self._bin_to_yaw(h))
                         if not self._pose_is_free(pose):
                             continue
-                        if self._motion_segment_is_free(src_pose, pose):
-                            return pose
+                        if not self._motion_segment_is_free(src_pose, pose):
+                            continue
+                        return pose
         return None
 
+    def _build_transition_path(
+        self, current_pose: WorldPose, start_pose: WorldPose
+    ) -> List[WorldPose]:
+        """构造当前位姿到规划起点的安全过渡段。"""
+        dist = math.hypot(start_pose[0] - current_pose[0], start_pose[1] - current_pose[1])
+        yaw_delta = abs(self._norm_angle(start_pose[2] - current_pose[2]))
+        if dist < 1e-3 and yaw_delta < math.radians(2.0):
+            return []
+        if not self._motion_segment_is_free(current_pose, start_pose):
+            return []
+        return [current_pose, start_pose]
+
     def _motion_segment_is_free(self, a: WorldPose, b: WorldPose) -> bool:
+        """对线段+航向插值过程做离散采样碰撞检查。"""
         # 对一段运动过程做离散采样，避免“端点不撞但转弯中擦碰”的情况。
         dist = math.hypot(b[0] - a[0], b[1] - a[1])
         yaw_delta = abs(self._norm_angle(b[2] - a[2]))
@@ -518,15 +594,25 @@ class PathPlanner(Node):
 
     @staticmethod
     def _interp_angle(a: float, b: float, t: float) -> float:
+        """按最短角距离对两个航向做插值。"""
         delta = math.atan2(math.sin(b - a), math.cos(b - a))
         return math.atan2(math.sin(a + delta * t), math.cos(a + delta * t))
 
-    def _heuristic(self, a: State3D, goal_idx: GridIndex) -> float:
+    def _heuristic(self, a: State3D, goal_idx: GridIndex, goal_pose: WorldPose) -> float:
+        """A* 启发式：欧氏距离 + 轻量朝向误差代价。"""
         wx, wy = self._grid_to_world((a[0], a[1]))
         gx, gy = self._grid_to_world(goal_idx)
-        return math.hypot(wx - gx, wy - gy)
+        dist = math.hypot(wx - gx, wy - gy)
+        if self.heuristic_heading_weight <= 1e-9:
+            return dist
+
+        desired_yaw = math.atan2(goal_pose[1] - wy, goal_pose[0] - wx)
+        state_yaw = self._bin_to_yaw(a[2])
+        yaw_err = abs(self._norm_angle(desired_yaw - state_yaw))
+        return dist + self.heuristic_heading_weight * yaw_err
 
     def _expand_state(self, state: State3D) -> List[Tuple[State3D, float]]:
+        """按运动原语展开邻居状态并计算转移代价。"""
         pose = self._state_to_pose(state)
         out: List[Tuple[State3D, float]] = []
         for turn_bins in self.turn_options:
@@ -548,15 +634,15 @@ class PathPlanner(Node):
         return out
 
     def _astar(self, start_pose: WorldPose, goal_pose: WorldPose) -> List[WorldPose]:
+        """在离散 SE2 空间执行 A* 并返回位姿路径。"""
         start_state = self._pose_to_state(start_pose)
         goal_idx = self._world_to_grid((goal_pose[0], goal_pose[1]))
         if start_state is None or goal_idx is None:
             return []
 
         open_heap: List[Tuple[float, float, State3D]] = []
-        heapq.heappush(
-            open_heap, (self._heuristic(start_state, goal_idx), 0.0, start_state)
-        )
+        start_h = self._heuristic(start_state, goal_idx, goal_pose)
+        heapq.heappush(open_heap, (self.heuristic_weight * start_h, 0.0, start_state))
 
         g_cost: Dict[State3D, float] = {start_state: 0.0}
         parent: Dict[State3D, State3D] = {}
@@ -587,7 +673,7 @@ class PathPlanner(Node):
                 if ng < g_cost.get(nb, float("inf")):
                     g_cost[nb] = ng
                     parent[nb] = current
-                    f = ng + self._heuristic(nb, goal_idx)
+                    f = ng + self.heuristic_weight * self._heuristic(nb, goal_idx, goal_pose)
                     heapq.heappush(open_heap, (f, ng, nb))
 
         if reached is None:
@@ -608,10 +694,11 @@ class PathPlanner(Node):
                 poses.append(aligned_goal)
             else:
                 poses[-1] = (terminal[0], terminal[1], approach_yaw)
-        return self._annotate_path_yaw(poses, goal_pose[2])
+        return self._annotate_path_yaw(poses, self._final_goal_yaw(goal_pose[2]))
 
     @staticmethod
     def _reconstruct_path(parent: Dict[State3D, State3D], end: State3D) -> List[State3D]:
+        """由 parent 反向回溯得到完整状态路径。"""
         path = [end]
         cur = end
         while cur in parent:
@@ -621,6 +708,7 @@ class PathPlanner(Node):
         return path
 
     def _straight_segment_poses(self, a: WorldPose, b: WorldPose) -> List[WorldPose]:
+        """把两点间直线段按间距离散成位姿序列。"""
         dx = b[0] - a[0]
         dy = b[1] - a[1]
         dist = math.hypot(dx, dy)
@@ -637,6 +725,7 @@ class PathPlanner(Node):
         return poses
 
     def _shortcut_path(self, path: List[WorldPose]) -> List[WorldPose]:
+        """用贪心直连进行路径 shortcut，减少冗余折点。"""
         if len(path) <= 2:
             return path
 
@@ -657,9 +746,10 @@ class PathPlanner(Node):
             simplified.append(path[picked])
             i = picked
 
-        return self._annotate_path_yaw(simplified, path[-1][2])
+        return self._annotate_path_yaw(simplified, self._final_goal_yaw(path[-1][2]))
 
     def _densify_path(self, path: List[WorldPose]) -> List[WorldPose]:
+        """把稀疏路径加密到控制器更易跟踪的点间距。"""
         if len(path) <= 1:
             return path
         out: List[WorldPose] = []
@@ -669,10 +759,15 @@ class PathPlanner(Node):
                 out.extend(segment[1:])
             else:
                 out.extend(segment)
-        out = self._annotate_path_yaw(out, path[-1][2])
+        out = self._annotate_path_yaw(out, self._final_goal_yaw(path[-1][2]))
         return self._deduplicate_pose_path(out)
 
+    def _final_goal_yaw(self, goal_yaw: float) -> Optional[float]:
+        """根据参数决定是否强制使用 goal 朝向。"""
+        return goal_yaw if self.align_final_pose_yaw_to_goal else None
+
     def _deduplicate_pose_path(self, path: List[WorldPose]) -> List[WorldPose]:
+        """移除过密重复点，保留路径几何形状。"""
         if not path:
             return path
         min_dist = max(self.resolution * 0.15, 1e-3)
@@ -690,6 +785,7 @@ class PathPlanner(Node):
     def _annotate_path_yaw(
         self, path: List[WorldPose], goal_yaw: Optional[float] = None
     ) -> List[WorldPose]:
+        """根据相邻点方向为路径补齐航向角。"""
         if not path:
             return path
         out: List[WorldPose] = []
@@ -707,6 +803,7 @@ class PathPlanner(Node):
         return out
 
     def _get_robot_world_pose(self) -> Optional[WorldPose]:
+        """通过 TF 获取机器人在 map 坐标系下位姿。"""
         try:
             tf = self.tf_buffer.lookup_transform(self.map_frame, self.base_frame, Time())
             t = tf.transform.translation
@@ -722,6 +819,7 @@ class PathPlanner(Node):
     def _publish_path(
         self, poses: List[WorldPose], goal_pose: Optional[WorldPose]
     ) -> None:
+        """发布 nav_msgs/Path；空路径时可选择发布单点 goal。"""
         msg = Path()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self.map_frame
@@ -745,6 +843,7 @@ class PathPlanner(Node):
 
     @staticmethod
     def _quat_to_yaw(q) -> float:
+        """四元数转平面 yaw 角。"""
         return math.atan2(
             2.0 * (q.w * q.z + q.x * q.y),
             1.0 - 2.0 * (q.y * q.y + q.z * q.z),
@@ -752,6 +851,7 @@ class PathPlanner(Node):
 
     @staticmethod
     def _yaw_to_quaternion(yaw: float) -> Quaternion:
+        """平面 yaw 角转四元数。"""
         q = Quaternion()
         q.x = 0.0
         q.y = 0.0
@@ -761,10 +861,12 @@ class PathPlanner(Node):
 
     @staticmethod
     def _norm_angle(a: float) -> float:
+        """把角度归一化到 [-pi, pi]。"""
         return math.atan2(math.sin(a), math.cos(a))
 
     @staticmethod
     def _path_length(path: List[WorldPose]) -> float:
+        """计算路径总长度。"""
         if len(path) < 2:
             return 0.0
         s = 0.0
@@ -774,6 +876,7 @@ class PathPlanner(Node):
 
     @staticmethod
     def _distance_to_path(p: WorldPoint, path: List[WorldPose]) -> float:
+        """计算点到折线路径的最短距离。"""
         if not path:
             return float("inf")
         if len(path) == 1:
@@ -798,6 +901,7 @@ class PathPlanner(Node):
 
 
 def main(args=None) -> None:
+    """节点入口函数。"""
     rclpy.init(args=args)
     node = PathPlanner()
     try:

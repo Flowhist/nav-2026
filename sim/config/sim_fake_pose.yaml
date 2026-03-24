@@ -13,6 +13,9 @@ sim_fake_pose_tf:
     demo_angular_speed_rps: 0.65
     demo_waypoint_tolerance_m: 0.10
     demo_heading_slowdown_deg: 40.0
+    sim_startup_anchor_enable: false
+    sim_startup_anchor_trigger_deg: 35.0
+    sim_startup_anchor_distance_m: 0.20
     x: 0.0
     y: 0.0
     yaw_deg: 0.0

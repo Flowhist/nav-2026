@@ -36,6 +36,9 @@ class SimFakePoseTF(Node):
         self.declare_parameter("demo_angular_speed_rps", 0.65)
         self.declare_parameter("demo_waypoint_tolerance_m", 0.10)
         self.declare_parameter("demo_heading_slowdown_deg", 40.0)
+        self.declare_parameter("sim_startup_anchor_enable", True)
+        self.declare_parameter("sim_startup_anchor_trigger_deg", 35.0)
+        self.declare_parameter("sim_startup_anchor_distance_m", 0.20)
         self.declare_parameter("x", 0.0)
         self.declare_parameter("y", 0.0)
         self.declare_parameter("yaw_deg", 0.0)
@@ -62,6 +65,15 @@ class SimFakePoseTF(Node):
         )
         self.demo_heading_slowdown = math.radians(
             float(self.get_parameter("demo_heading_slowdown_deg").value)
+        )
+        self.sim_startup_anchor_enable = bool(
+            self.get_parameter("sim_startup_anchor_enable").value
+        )
+        self.sim_startup_anchor_trigger = math.radians(
+            float(self.get_parameter("sim_startup_anchor_trigger_deg").value)
+        )
+        self.sim_startup_anchor_distance = max(
+            0.0, float(self.get_parameter("sim_startup_anchor_distance_m").value)
         )
 
         self.x = float(self.get_parameter("x").value)
@@ -134,6 +146,8 @@ class SimFakePoseTF(Node):
             self.path_active = False
             self.replan_pause_until_ns = 0
             return
+
+        poses = self._inject_sim_startup_anchor(poses)
 
         had_active_plan = self.path_active and bool(self.path_poses)
         self.path_poses = poses
@@ -218,6 +232,25 @@ class SimFakePoseTF(Node):
         self.yaw = self._norm(self.yaw + w_cmd * dt)
         self.x += v_cmd * math.cos(self.yaw) * dt
         self.y += v_cmd * math.sin(self.yaw) * dt
+
+    def _inject_sim_startup_anchor(self, poses: List[WorldPose]) -> List[WorldPose]:
+        if not self.sim_startup_anchor_enable:
+            return poses
+        if len(poses) < 2 or self.sim_startup_anchor_distance <= 1e-3:
+            return poses
+
+        tx, ty, _ = poses[0]
+        heading_to_first = math.atan2(ty - self.y, tx - self.x)
+        heading_err = abs(self._norm(heading_to_first - self.yaw))
+        if heading_err < self.sim_startup_anchor_trigger:
+            return poses
+
+        anchor = (
+            self.x + self.sim_startup_anchor_distance * math.cos(self.yaw),
+            self.y + self.sim_startup_anchor_distance * math.sin(self.yaw),
+            self.yaw,
+        )
+        return [anchor] + poses
 
     @staticmethod
     def _quat_to_yaw(x: float, y: float, z: float, w: float) -> float:
