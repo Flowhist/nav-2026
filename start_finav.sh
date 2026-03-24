@@ -41,6 +41,11 @@ DRIVER_PID=""
 JOY_PID=""
 SERVER_PID=""
 
+fail() {
+    printf '\033[31m%s\033[0m\n' "$1" >&2
+    exit 1
+}
+
 cleanup() {
     printf '\n\n\n正在停止节点...\n'
     [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null || true
@@ -51,8 +56,26 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-source /opt/ros/humble/setup.bash 2>/dev/null || true
-source "$WORKSPACE_DIR/install/local_setup.bash" 2>/dev/null || source "$WORKSPACE_DIR/install/setup.bash" 2>/dev/null || true
+ROS_SETUP="/opt/ros/humble/setup.bash"
+WORKSPACE_SETUP_LOCAL="$WORKSPACE_DIR/install/local_setup.bash"
+WORKSPACE_SETUP="$WORKSPACE_DIR/install/setup.bash"
+
+[[ -f "$ROS_SETUP" ]] || fail "未找到 $ROS_SETUP，请先安装 ROS 2 Humble。"
+# ROS setup 脚本内部会读取若干未定义变量，需临时关闭 nounset。
+set +u
+source "$ROS_SETUP"
+
+if [[ -f "$WORKSPACE_SETUP_LOCAL" ]]; then
+    source "$WORKSPACE_SETUP_LOCAL"
+elif [[ -f "$WORKSPACE_SETUP" ]]; then
+    source "$WORKSPACE_SETUP"
+else
+    set -u
+    fail "未找到工作区 install/setup.bash。请先在 $WORKSPACE_DIR 执行 colcon build，再重新运行脚本。"
+fi
+set -u
+
+command -v ros2 >/dev/null 2>&1 || fail "当前环境没有 ros2 命令，ROS 环境未正确加载。"
 
 export FASTRTPS_DEFAULT_PROFILES_FILE="$REPO_DIR/config/fastdds_profiles.xml"
 export FINAV_REPO_DIR="$REPO_DIR"
@@ -65,7 +88,12 @@ pkill -9 -f "js_kb_router.py" 2>/dev/null || true
 pkill -9 -f "server/run_server.py" 2>/dev/null || true
 sleep 1
 
-CONTROL_PARAMS="$(ros2 pkg prefix finav)/share/finav/config/base_control.yaml"
+if ! PACKAGE_PREFIX="$(ros2 pkg prefix finav 2>/dev/null)"; then
+    fail "ros2 无法找到 finav 包。请确认已在 $WORKSPACE_DIR 执行 colcon build，并 source install/local_setup.bash。"
+fi
+
+CONTROL_PARAMS="$PACKAGE_PREFIX/share/finav/config/base_control.yaml"
+[[ -f "$CONTROL_PARAMS" ]] || fail "未找到参数文件: $CONTROL_PARAMS"
 
 printf '▶ 启动 base_control\n'
 ros2 run finav base_control.py \
