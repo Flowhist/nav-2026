@@ -9,26 +9,50 @@ path_plan:
     initialpose_topic: "/initialpose"
     # 规划结果输出（nav_msgs/Path）
     path_topic: "/plan"
+    # 路径足迹可视化输出（MarkerArray）
+    footprint_topic: "/plan_footprints"
     # 全局坐标系（通常是 map）
     map_frame: "map"
     # 机器人基座坐标系（通常是 base_link）
     base_frame: "base_link"
-    # 规划频率(Hz)：越大响应越快，但CPU占用更高
-    plan_rate_hz: 2.0
+    # 规划频率(Hz)：提高到 5Hz，减小点目标后的等待感
+    plan_rate_hz: 5.0
 
     # ===== 栅格判定与碰撞安全 =====
     # 占用阈值(0~100)：越小越保守（更多格子视为障碍）
     occupied_threshold: 65
     # 未知区域是否按障碍处理：true更安全，false更激进
     treat_unknown_as_occupied: true
-    # 膨胀半径(米)：越大离障碍越远，但可通行区域变窄
-    inflation_radius_m: 0.6
-    # 是否允许对角移动：true路径更短，false更“网格化”
-    allow_diagonal: true
+    # 障碍额外安全边界(米)：减小一点，提高窄通道通过率
+    inflation_radius_m: 0.05
     # 搜索扩展上限：越大越不易失败，但最坏耗时更长
     max_search_expansions: 200000
     # 到目标判定容差(米)：越小越精确，但更容易“到不了”
     goal_tolerance_m: 0.12
+
+    # ===== 车体几何（与 URDF 对齐）=====
+    # base_link 到车头最前端
+    vehicle_front_m: 0.70
+    # base_link 到车尾最后端
+    vehicle_rear_m: 0.25
+    # base_link 到车体左侧边缘
+    vehicle_left_m: 0.31
+    # base_link 到车体右侧边缘
+    vehicle_right_m: 0.31
+    # 在矩形车体外再加的安全边距
+    vehicle_margin_m: 0.03
+    # 足迹采样间距：适度放宽，换取更快的碰撞检测
+    footprint_sample_step_m: 0.10
+
+    # ===== 朝向离散与运动原语 =====
+    # 航向离散数：16 -> 每格 22.5 度，明显减小搜索状态数
+    heading_bins: 16
+    # 单步扩展长度(米)：步子稍大，加快搜索
+    primitive_step_m: 0.24
+    # 单步允许的航向变化（离散 bin 数）
+    primitive_turn_bins: 1
+    # 转弯代价倍率
+    turn_cost_weight: 0.20
 
     # ===== 重规划与平滑 =====
     # 地图更新时是否触发重规划
@@ -37,13 +61,19 @@ path_plan:
     replan_deviation_m: 0.25
     # 一次平滑时允许直连的最大长度(米)：越大折点更少
     smooth_max_segment_m: 2.0
-    # 是否启用曲线平滑（Chaikin）；建议保持 true
-    curve_smooth_enable: true
-    # 曲线平滑迭代次数：1~3 常用，越大越圆滑、点数越多
-    curve_smooth_iterations: 2
-    # 曲线切角比例(0.05~0.45)：越大越“圆”，也越可能贴近障碍
-    curve_smooth_ratio: 0.15
-    # 曲线平滑后的点数上限：防止点数爆炸
-    curve_smooth_max_points: 45
+    # 先关闭曲线平滑，优先保证出路速度；稳定后再考虑恢复
+    curve_smooth_enable: false
+    # 曲线平滑迭代次数：关闭平滑时不生效
+    curve_smooth_iterations: 1
+    # 曲线切角比例(0.05~0.45)：关闭平滑时不生效
+    curve_smooth_ratio: 0.12
+    # 曲线平滑后的点数上限：关闭平滑时不生效
+    curve_smooth_max_points: 80
+    # 路径输出的最小姿态间隔
+    path_pose_spacing_m: 0.10
+    # 足迹可视化沿路径的采样间距
+    footprint_stride_m: 0.35
+    # 足迹可视化最多显示多少个姿态轮廓
+    footprint_max_markers: 60
     # TF不可用时，是否回退使用 /initialpose 作为起点
     start_from_initialpose_when_tf_unavailable: true

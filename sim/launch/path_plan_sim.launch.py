@@ -4,8 +4,9 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -32,10 +33,16 @@ def generate_launch_description():
         default_value="false",
         description="虚拟位姿是否跟随 /cmd_vel 积分",
     )
+    follow_plan_arg = DeclareLaunchArgument(
+        "follow_plan",
+        default_value="true",
+        description="虚拟位姿是否自动跟随 /plan 做演示",
+    )
 
     map_yaml = LaunchConfiguration("map_yaml")
     use_rviz = LaunchConfiguration("use_rviz")
     use_cmd_vel = LaunchConfiguration("use_cmd_vel")
+    follow_plan = LaunchConfiguration("follow_plan")
 
     map_server = Node(
         package="nav2_map_server",
@@ -68,7 +75,14 @@ def generate_launch_description():
         parameters=[
             fake_pose_cfg,
             {"use_cmd_vel": use_cmd_vel},
+            {"follow_plan": follow_plan},
         ],
+    )
+
+    robot_model_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_share, "launch", "sub", "robot_model.launch.py")
+        )
     )
 
     planner = Node(
@@ -93,8 +107,10 @@ def generate_launch_description():
             map_yaml_arg,
             use_rviz_arg,
             use_cmd_vel_arg,
+            follow_plan_arg,
             map_server,
             map_lifecycle,
+            robot_model_launch,
             fake_pose,
             planner,
             rviz,

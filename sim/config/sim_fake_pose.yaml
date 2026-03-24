@@ -4,8 +4,15 @@ sim_fake_pose_tf:
     base_frame: "base_link"
     initialpose_topic: "/initialpose"
     cmd_vel_topic: "/cmd_vel"
+    plan_topic: "/plan"
     publish_rate_hz: 30.0
     use_cmd_vel: false
+    follow_plan: true
+    demo_linear_speed_mps: 0.35
+    demo_angular_speed_rps: 0.65
+    demo_waypoint_tolerance_m: 0.10
+    demo_goal_hold_s: 2.0
+    demo_heading_slowdown_deg: 40.0
     x: 0.0
     y: 0.0
     yaw_deg: 0.0

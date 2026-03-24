@@ -20,6 +20,7 @@
   <depend>nav_msgs</depend>
   <depend>std_srvs</depend>
   <depend>tf2_ros</depend>
+  <depend>visualization_msgs</depend>
 
   <!-- Navigation2 dependencies -->
   <exec_depend>nav2_bringup</exec_depend>
@@ -37,5 +38,4 @@
   </export>
 
 </package>
-
 
