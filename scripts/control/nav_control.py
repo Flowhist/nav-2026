@@ -5,7 +5,7 @@
 
   DRIVE   |heading_error| < rotate_threshold_deg
             linear  = v_max * cos(heading_error)
-            angular = Kp*err + Kd*d_err 
+            angular = Kp*err + Kd*d_err
   ROTATE  |heading_error| >= rotate_threshold_deg
             linear  = 0
             angular = Kp*err + Kd*d_err
@@ -32,49 +32,50 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 
 class DriveMode(Enum):
-    DRIVE  = auto()
+    DRIVE = auto()
     ROTATE = auto()
 
 
 class ChassisControlNav(Node):
 
     def __init__(self):
+        """初始化控制参数、路径缓存与控制循环。"""
         super().__init__("nav_control")
 
         # 参数声明
         self.declare_parameter("output_cmd_vel_topic", "/cmd_vel")
-        self.declare_parameter("path_topic",  "/plan")
-        self.declare_parameter("base_frame",  "base_link")
-        self.declare_parameter("map_frame",   "map")
+        self.declare_parameter("path_topic", "/plan")
+        self.declare_parameter("base_frame", "base_link")
+        self.declare_parameter("map_frame", "map")
         self.declare_parameter("accept_replanned_path", True)
         self.declare_parameter("replan_pause_s", 0.20)
 
         # 速度
-        self.declare_parameter("linear_speed_mps",          0.20)
-        self.declare_parameter("angular_speed_degps",        20.0)  # ROTATE 上限
-        self.declare_parameter("drive_angular_speed_degps",  20.0)  # DRIVE 上限
-        self.declare_parameter("angular_kp",                  0.8)
-        self.declare_parameter("angular_kd",                  0.4)
-        self.declare_parameter("angular_deadband_deg",         5.0)
-        self.declare_parameter("angular_sign",                 1.0)
+        self.declare_parameter("linear_speed_mps", 0.20)
+        self.declare_parameter("angular_speed_degps", 20.0)  # ROTATE 上限
+        self.declare_parameter("drive_angular_speed_degps", 20.0)  # DRIVE 上限
+        self.declare_parameter("angular_kp", 0.8)
+        self.declare_parameter("angular_kd", 0.4)
+        self.declare_parameter("angular_deadband_deg", 5.0)
+        self.declare_parameter("angular_sign", 1.0)
 
         # 纯追踪
-        self.declare_parameter("lookahead_dist",  0.5)   # 前向预瞄距离 m
-        self.declare_parameter("goal_tolerance",  0.10)  # 到达终点阈值 m
+        self.declare_parameter("lookahead_dist", 0.5)  # 前向预瞄距离 m
+        self.declare_parameter("goal_tolerance", 0.10)  # 到达终点阈值 m
 
         # 模式切换
         self.declare_parameter("rotate_threshold_deg", 40.0)
-        self.declare_parameter("rotate_exit_deg",      20.0)
+        self.declare_parameter("rotate_exit_deg", 20.0)
 
         # 机械 & 频率
         self.declare_parameter("wheel_separation", 0.5)
-        self.declare_parameter("control_rate_hz",  10.0)
+        self.declare_parameter("control_rate_hz", 10.0)
 
         # 读取参数
         self.output_topic = str(self.get_parameter("output_cmd_vel_topic").value)
-        self.path_topic   = str(self.get_parameter("path_topic").value)
-        self.base_frame   = str(self.get_parameter("base_frame").value)
-        self.map_frame    = str(self.get_parameter("map_frame").value)
+        self.path_topic = str(self.get_parameter("path_topic").value)
+        self.base_frame = str(self.get_parameter("base_frame").value)
+        self.map_frame = str(self.get_parameter("map_frame").value)
         self.accept_replanned_path = bool(
             self.get_parameter("accept_replanned_path").value
         )
@@ -82,22 +83,28 @@ class ChassisControlNav(Node):
             0.0, float(self.get_parameter("replan_pause_s").value)
         )
 
-        self.v_max           = float(self.get_parameter("linear_speed_mps").value)
-        self.omega_max       = math.radians(float(self.get_parameter("angular_speed_degps").value))
-        self.drive_omega_max = math.radians(float(self.get_parameter("drive_angular_speed_degps").value))
-        self.ang_kp          = float(self.get_parameter("angular_kp").value)
-        self.ang_kd          = float(self.get_parameter("angular_kd").value)
-        self.ang_db          = math.radians(float(self.get_parameter("angular_deadband_deg").value))
-        self.ang_sign        = float(self.get_parameter("angular_sign").value)
+        self.v_max = float(self.get_parameter("linear_speed_mps").value)
+        self.omega_max = math.radians(
+            float(self.get_parameter("angular_speed_degps").value)
+        )
+        self.drive_omega_max = math.radians(
+            float(self.get_parameter("drive_angular_speed_degps").value)
+        )
+        self.ang_kp = float(self.get_parameter("angular_kp").value)
+        self.ang_kd = float(self.get_parameter("angular_kd").value)
+        self.ang_db = math.radians(
+            float(self.get_parameter("angular_deadband_deg").value)
+        )
+        self.ang_sign = float(self.get_parameter("angular_sign").value)
 
         self.lookahead_dist = float(self.get_parameter("lookahead_dist").value)
-        self.goal_tol       = float(self.get_parameter("goal_tolerance").value)
-        self.goal_tol_sq    = self.goal_tol * self.goal_tol
+        self.goal_tol = float(self.get_parameter("goal_tolerance").value)
+        self.goal_tol_sq = self.goal_tol * self.goal_tol
 
-        rot_thr  = float(self.get_parameter("rotate_threshold_deg").value)
+        rot_thr = float(self.get_parameter("rotate_threshold_deg").value)
         rot_exit = float(self.get_parameter("rotate_exit_deg").value)
         self.thr_rotate = math.radians(rot_thr)
-        self.thr_exit   = math.radians(rot_exit)
+        self.thr_exit = math.radians(rot_exit)
 
         self.wheel_sep = float(self.get_parameter("wheel_separation").value)
         self.ctrl_rate = float(self.get_parameter("control_rate_hz").value)
@@ -106,23 +113,23 @@ class ChassisControlNav(Node):
         self.path_points: List[Tuple[float, float]] = []
         self.path_seg_len: List[float] = []
         self.path_seg_len2: List[float] = []
-        self.path_frame   = self.map_frame
+        self.path_frame = self.map_frame
         self._nearest_seg_hint = 0
         self.has_started = False
         self.mode: Optional[DriveMode] = None
         self._last_log_mode: Optional[DriveMode] = None
-        self._prev_err: float     = 0.0
-        self._prev_time: int   = 0
+        self._prev_err: float = 0.0
+        self._prev_time: int = 0
         self._replan_pause_until_ns = 0
         self._js_active = False
         self._cmd_msg = Twist()
 
         # 订阅与发布
-        self.pub = self.create_publisher(Twist, self.output_topic, 10)      # 发布 /cmd_vel
+        self.pub = self.create_publisher(Twist, self.output_topic, 10)  # 发布 /cmd_vel
         self.create_subscription(Path, self.path_topic, self._on_path, 10)  # 订阅 /path
         self.create_subscription(Empty, "/nav_clear", self._on_nav_clear, 10)
-        
-        self.tf_buffer   = Buffer()
+
+        self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.create_timer(1.0 / max(self.ctrl_rate, 1.0), self._loop)
 
@@ -141,34 +148,40 @@ class ChassisControlNav(Node):
 
     @staticmethod
     def _norm(a: float) -> float:
+        """把角度归一化到 [-pi, pi]。"""
         return math.atan2(math.sin(a), math.cos(a))
 
     @staticmethod
     def _yaw(qx, qy, qz, qw) -> float:
-        return math.atan2(2.0*(qw*qz + qx*qy), 1.0 - 2.0*(qy*qy + qz*qz))
+        """四元数转平面 yaw 角。"""
+        return math.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
 
     def _pub(self, lin: float, ang: float):
+        """发布底盘速度指令。"""
         self._cmd_msg.linear.x = float(lin)
         self._cmd_msg.angular.z = float(ang)
         self.pub.publish(self._cmd_msg)
 
     def _stop(self):
+        """发布零速度，立即停车。"""
         self._pub(0.0, 0.0)
 
     def _reset(self):
-        self.path_points   = []
+        """重置路径跟踪状态机与历史误差缓存。"""
+        self.path_points = []
         self.path_seg_len = []
         self.path_seg_len2 = []
-        self.path_frame    = self.map_frame
+        self.path_frame = self.map_frame
         self._nearest_seg_hint = 0
-        self.has_started  = False
-        self.mode          = None
+        self.has_started = False
+        self.mode = None
         self._last_log_mode = None
-        self._prev_err     = 0.0
+        self._prev_err = 0.0
         self._prev_time = 0
         self._replan_pause_until_ns = 0
 
     def _start_replan_pause(self):
+        """路径切换时先停车并进入短暂停顿窗口。"""
         self._stop()
         self.mode = None
         self._last_log_mode = None
@@ -181,6 +194,7 @@ class ChassisControlNav(Node):
             self._replan_pause_until_ns = 0
 
     def _rebuild_path_cache(self):
+        """重建路径段长度缓存，加速最近点与前瞻点搜索。"""
         self.path_seg_len = []
         self.path_seg_len2 = []
         n = len(self.path_points)
@@ -200,6 +214,7 @@ class ChassisControlNav(Node):
     # === 路径回调 ============================================================
 
     def _on_path(self, msg: Path):
+        """处理路径消息：首条路径锁定或运行中重规划切换。"""
         if not msg.poses:
             if self.has_started or self.path_points:
                 self._stop()
@@ -207,7 +222,8 @@ class ChassisControlNav(Node):
                 self.get_logger().info("路径已清空，导航停止")
             return
         new_points = [
-            (float(point.pose.position.x), float(point.pose.position.y)) for point in msg.poses
+            (float(point.pose.position.x), float(point.pose.position.y))
+            for point in msg.poses
         ]
         new_frame = msg.header.frame_id or self.map_frame
 
@@ -247,6 +263,7 @@ class ChassisControlNav(Node):
         )
 
     def _on_nav_clear(self, _msg: Empty):
+        """处理导航清空命令并复位控制状态。"""
         self._stop()
         self._reset()
         self.get_logger().info("收到导航清空指令，已急停并重置状态")
@@ -254,6 +271,7 @@ class ChassisControlNav(Node):
     # === 纯追踪目标点 =========================================================
 
     def _lookahead_target(self, x: float, y: float) -> Tuple[float, float]:
+        """计算纯追踪前瞻点（最近投影点向前 lookahead_dist）。"""
         """
         1. 在路径上找距机器人最近的投影点（最近段上的垂足）
         2. 从该投影点沿路径向前走 lookahead_dist，返回目标点
@@ -331,14 +349,16 @@ class ChassisControlNav(Node):
     # === 位姿获取 =============================================================
 
     def _get_pose(self) -> Optional[Tuple[float, float, float]]:
+        """通过 TF 获取机器人在路径坐标系下位姿。"""
         try:
             tf = self.tf_buffer.lookup_transform(
                 self.path_frame, self.base_frame, Time()
             )
             t, q = tf.transform.translation, tf.transform.rotation
             return (
-                float(t.x), float(t.y),
-                self._yaw(float(q.x), float(q.y), float(q.z), float(q.w))
+                float(t.x),
+                float(t.y),
+                self._yaw(float(q.x), float(q.y), float(q.z), float(q.w)),
             )
         except TransformException:
             return None
@@ -346,42 +366,48 @@ class ChassisControlNav(Node):
     # === 控制计算 =============================================================
 
     def _compute(self, heading_error: float, now: int) -> Tuple[float, float]:
-        """DRIVE: Pure Pursuit 几何公式  |  ROTATE: PD 控制"""
+        """根据当前模式计算线速度与角速度输出（DRIVE/ROTATE）。"""
         abs_err = abs(heading_error)
 
         # PD 微分项（仅 ROTATE 使用）
         if self._prev_time > 0:
-            dt    = max((now - self._prev_time) * 1e-9, 1e-3)
+            dt = max((now - self._prev_time) * 1e-9, 1e-3)
             d_err = (heading_error - self._prev_err) / dt
         else:
             d_err = 0.0
-        self._prev_err     = heading_error
+        self._prev_err = heading_error
         self._prev_time = now
 
         # 初始化模式
         if self.mode is None:
-            self.mode = DriveMode.ROTATE if abs_err >= self.thr_rotate else DriveMode.DRIVE
+            self.mode = (
+                DriveMode.ROTATE if abs_err >= self.thr_rotate else DriveMode.DRIVE
+            )
             self.get_logger().info(
                 f"初始模式: {self.mode.name} | 角差={math.degrees(abs_err):.1f} deg"
             )
 
         # 模式切换（迟滞）
         if self.mode == DriveMode.DRIVE and abs_err >= self.thr_rotate:
-            self.mode          = DriveMode.ROTATE
+            self.mode = DriveMode.ROTATE
             self._prev_time = 0
-            self._prev_err     = 0.0
-            self.get_logger().info(f"DRIVE -> ROTATE | 角差={math.degrees(abs_err):.1f} deg")
+            self._prev_err = 0.0
+            self.get_logger().info(
+                f"DRIVE -> ROTATE | 角差={math.degrees(abs_err):.1f} deg"
+            )
         elif self.mode == DriveMode.ROTATE and abs_err < self.thr_exit:
-            self.mode          = DriveMode.DRIVE
+            self.mode = DriveMode.DRIVE
             self._prev_time = 0
-            self._prev_err     = 0.0
-            self.get_logger().info(f"ROTATE -> DRIVE | 角差={math.degrees(abs_err):.1f} deg")
+            self._prev_err = 0.0
+            self.get_logger().info(
+                f"ROTATE -> DRIVE | 角差={math.degrees(abs_err):.1f} deg"
+            )
 
         # ── ROTATE：PD 原地旋转 ──────────────────────────────────────────────
         if self.mode == DriveMode.ROTATE:
-            ang_pd  = self.ang_kp * heading_error + self.ang_kd * d_err
+            ang_pd = self.ang_kp * heading_error + self.ang_kd * d_err
             ang_raw = ang_pd * self.ang_sign
-            ang     = math.copysign(min(abs(ang_raw), self.omega_max), ang_raw)
+            ang = math.copysign(min(abs(ang_raw), self.omega_max), ang_raw)
             return 0.0, ang
 
         # ── DRIVE：Pure Pursuit 几何公式 ω = v · 2sin(α) / L ───────────────
@@ -389,7 +415,7 @@ class ChassisControlNav(Node):
         lin = self.v_max * max(0.0, math.cos(heading_error))
 
         # 纯追踪曲率：κ = 2sin(α)/L，角速 = v·κ
-        ang_pp  = lin * 2.0 * math.sin(heading_error) / max(self.lookahead_dist, 0.1)
+        ang_pp = lin * 2.0 * math.sin(heading_error) / max(self.lookahead_dist, 0.1)
         ang_raw = ang_pp * self.ang_sign
 
         # 死区（直线小偏差不修正，防微振）
@@ -401,11 +427,11 @@ class ChassisControlNav(Node):
 
         # 轮速限制
         half = 0.5 * self.wheel_sep
-        v_l  = lin - ang * half
-        v_r  = lin + ang * half
+        v_l = lin - ang * half
+        v_r = lin + ang * half
         peak = max(abs(v_l), abs(v_r))
         if peak > self.v_max + 1e-9:
-            s   = self.v_max / peak
+            s = self.v_max / peak
             lin = lin * s
             ang = ang * s
 
@@ -414,6 +440,7 @@ class ChassisControlNav(Node):
     # === 主循环 ===============================================================
 
     def _loop(self):
+        """控制主循环：读取位姿、判定模式并发布控制量。"""
         if self._js_active:
             return
         if not self.has_started:
@@ -430,7 +457,7 @@ class ChassisControlNav(Node):
         x, y, yaw = pose
 
         # 终点检测
-        gx, gy    = self.path_points[-1]
+        gx, gy = self.path_points[-1]
         d2_goal = (gx - x) * (gx - x) + (gy - y) * (gy - y)
         if d2_goal <= self.goal_tol_sq:
             dist_goal = math.sqrt(d2_goal)
@@ -458,6 +485,7 @@ class ChassisControlNav(Node):
 
 
 def main(args=None):
+    """节点入口函数。"""
     rclpy.init(args=args)
     node = ChassisControlNav()
     try:

@@ -29,6 +29,8 @@ path_plan:
     align_final_pose_yaw_to_goal: false
     # 新 goal 到来时先发布空路径，让控制器立即停下等待新路径
     stop_on_new_goal_clear_path: true
+    # 任意重规划触发时先清空当前路径，停车等待下一拍新路径
+    stop_before_replan_clear_path: true
 
     # ===== 车体几何（与 URDF 对齐）=====
     # base_link 到车头最前端

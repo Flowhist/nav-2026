@@ -52,6 +52,7 @@ class PathPlanner(Node):
         self.declare_parameter("goal_tolerance_m", 0.12)
         self.declare_parameter("align_final_pose_yaw_to_goal", False)
         self.declare_parameter("stop_on_new_goal_clear_path", True)
+        self.declare_parameter("stop_before_replan_clear_path", True)
         self.declare_parameter("replan_on_map_update", True)
         self.declare_parameter("replan_deviation_m", 0.35)
         self.declare_parameter("smooth_max_segment_m", 1.6)
@@ -92,6 +93,9 @@ class PathPlanner(Node):
         )
         self.stop_on_new_goal_clear_path = bool(
             self.get_parameter("stop_on_new_goal_clear_path").value
+        )
+        self.stop_before_replan_clear_path = bool(
+            self.get_parameter("stop_before_replan_clear_path").value
         )
         self.replan_on_map_update = bool(
             self.get_parameter("replan_on_map_update").value
@@ -303,6 +307,11 @@ class PathPlanner(Node):
             need_replan = True
 
         if not need_replan:
+            return
+        if self.stop_before_replan_clear_path and self.last_plan_poses:
+            self.last_plan_poses = []
+            self._publish_path([], None)
+            self.get_logger().info("replan requested: hold position and wait for fresh path")
             return
 
         goal_direction = math.atan2(

@@ -83,22 +83,22 @@ install(
 
 # Install Python scripts
 install(PROGRAMS
-  scripts/general/base_control.py
-  scripts/general/js_kb_router.py
-  scripts/general/scan_angle_filter.py
-  scripts/control/nav/nav_control.py
-  scripts/control/nav/path_plan.py
+  scripts/control/path_plan.py
+  scripts/control/nav_control.py
+  scripts/control/base_control.py
+  scripts/control/js_kb_router.py
+  scripts/control/joystick_control.py
+  scripts/lidar/scan_angle_filter.py
+  scripts/imu/dm_imu_publisher.py
+  scripts/tool/TF.sh
+  scripts/tool/save_map.sh
+  scripts/tool/clean_nav.sh
+  scripts/tool/clean_map.sh
+  scripts/tool/manual_save_map.py
   sim/scripts/sim_fake_pose_tf.py
   sim/scripts/sim_plan_visualizer.py
   sim/scripts/sim_send_goal.py
-  scripts/imu/dm_imu_publisher.py
-  scripts/map/manual_save_map.py
-  scripts/control/joystick/joystick_control.py
   start_finav.sh
-  scripts/tool/save_map.sh
-  scripts/tool/TF.sh
-  scripts/tool/clean_map.sh
-  scripts/tool/clean_nav.sh
   DESTINATION lib/${PROJECT_NAME}
 )
 
