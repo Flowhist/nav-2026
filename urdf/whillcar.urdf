@@ -4,8 +4,8 @@
   坐标约定：
   - 旋转中心（两驱动轮中心连线中点）为原点
   - +x 为车体前进方向
-  - y 轴为左右方向（y<0 左侧，y>0 右侧）
-  - z 轴向上
+  - +y 为车体左侧，-y 为车体右侧
+  - +z 轴向上
 -->
 <robot name="whillcar" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
@@ -85,11 +85,11 @@
     </inertial>
   </link>
 
-  <!-- ==================== 左驱动轮（y<0） ==================== -->
+  <!-- ==================== 左驱动轮（+y） ==================== -->
   <joint name="left_wheel_joint" type="continuous">
     <parent link="base_link"/>
     <child link="left_wheel_link"/>
-    <origin xyz="0 ${-wheel_separation/2} ${wheel_radius}" rpy="${pi/2} 0 0"/>
+    <origin xyz="0 ${wheel_separation/2} ${wheel_radius}" rpy="${pi/2} 0 0"/>
     <axis xyz="0 1 0"/>
   </joint>
 
@@ -119,11 +119,11 @@
     </inertial>
   </link>
 
-  <!-- ==================== 右驱动轮（y>0） ==================== -->
+  <!-- ==================== 右驱动轮（-y） ==================== -->
   <joint name="right_wheel_joint" type="continuous">
     <parent link="base_link"/>
     <child link="right_wheel_link"/>
-    <origin xyz="0 ${wheel_separation/2} ${wheel_radius}" rpy="${pi/2} 0 0"/>
+    <origin xyz="0 ${-wheel_separation/2} ${wheel_radius}" rpy="${pi/2} 0 0"/>
     <axis xyz="0 1 0"/>
   </joint>
 

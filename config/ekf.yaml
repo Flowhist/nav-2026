@@ -39,15 +39,12 @@ ekf_filter_node:
     imu0_config: [false, false, false,   # x, y, z (位置)
                   false, false, true,    # roll, pitch, yaw (姿态) - 使用yaw绝对方向
                   false, false, false,   # vx, vy, vz (线速度)
-                  false, false, false,   # vroll, vpitch, vyaw (角速度) - 禁用！与绝对yaw冗余，静止时积分噪声导致漂移
+                  false, false, false,   # vroll, vpitch, vyaw (角速度)
                   false, false, false]   # ax, ay, az (线加速度)
     imu0_differential: false
     imu0_relative: false
     imu0_queue_size: 10
     imu0_remove_gravitational_acceleration: true
-    
-    # 【关键配置】平滑参数 - 让EKF信任SLAM的位姿校正
-    # 降低过程噪声，让外部校正（SLAM）更容易影响状态估计
     
     # 过程噪声协方差 (调整这些值可以改变滤波器对模型的信任度)
     # 顺序: x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
