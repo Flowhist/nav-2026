@@ -17,6 +17,9 @@ def generate_launch_description():
     default_rviz = os.path.join(pkg_share, "sim", "rviz", "path_plan_sim.rviz")
     path_plan_cfg = os.path.join(pkg_share, "config", "path_plan.yaml")
     fake_pose_cfg = os.path.join(pkg_share, "sim", "config", "sim_fake_pose.yaml")
+    plan_visualizer_cfg = os.path.join(
+        pkg_share, "sim", "config", "sim_plan_visualizer.yaml"
+    )
 
     map_yaml_arg = DeclareLaunchArgument(
         "map_yaml",
@@ -93,6 +96,14 @@ def generate_launch_description():
         parameters=[path_plan_cfg],
     )
 
+    plan_visualizer = Node(
+        package="finav",
+        executable="sim_plan_visualizer.py",
+        name="sim_plan_visualizer",
+        output="screen",
+        parameters=[path_plan_cfg, plan_visualizer_cfg],
+    )
+
     rviz = Node(
         package="rviz2",
         executable="rviz2",
@@ -113,6 +124,7 @@ def generate_launch_description():
             robot_model_launch,
             fake_pose,
             planner,
+            plan_visualizer,
             rviz,
         ]
     )

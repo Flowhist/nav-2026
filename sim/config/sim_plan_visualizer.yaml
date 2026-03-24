@@ -1,0 +1,12 @@
+sim_plan_visualizer:
+  ros__parameters:
+    map_frame: "map"
+    path_topic: "/plan"
+    footprint_topic: "/plan_footprints"
+    footprint_stride_m: 0.35
+    footprint_max_markers: 60
+
+    vehicle_front_m: 0.70
+    vehicle_rear_m: 0.25
+    vehicle_left_m: 0.31
+    vehicle_right_m: 0.31

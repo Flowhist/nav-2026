@@ -5,12 +5,8 @@ path_plan:
     map_topic: "/map"
     # 目标点输入（PoseStamped）
     goal_topic: "/goal_pose"
-    # 起点输入（PoseWithCovarianceStamped，RViz 2D Pose Estimate）
-    initialpose_topic: "/initialpose"
     # 规划结果输出（nav_msgs/Path）
     path_topic: "/plan"
-    # 路径足迹可视化输出（MarkerArray）
-    footprint_topic: "/plan_footprints"
     # 全局坐标系（通常是 map）
     map_frame: "map"
     # 机器人基座坐标系（通常是 base_link）
@@ -24,7 +20,7 @@ path_plan:
     # 未知区域是否按障碍处理：true更安全，false更激进
     treat_unknown_as_occupied: true
     # 障碍额外安全边界(米)：减小一点，提高窄通道通过率
-    inflation_radius_m: 0.05
+    inflation_radius_m: 0.1
     # 搜索扩展上限：越大越不易失败，但最坏耗时更长
     max_search_expansions: 200000
     # 到目标判定容差(米)：越小越精确，但更容易“到不了”
@@ -45,7 +41,7 @@ path_plan:
     footprint_sample_step_m: 0.10
 
     # ===== 朝向离散与运动原语 =====
-    # 航向离散数：16 -> 每格 22.5 度，明显减小搜索状态数
+    # 航向离散数：16 -> 每格 22.5 度
     heading_bins: 16
     # 单步扩展长度(米)：步子稍大，加快搜索
     primitive_step_m: 0.24
@@ -59,21 +55,7 @@ path_plan:
     replan_on_map_update: false
     # 偏离路径触发重规划阈值(米)：越小越敏感
     replan_deviation_m: 0.25
-    # 一次平滑时允许直连的最大长度(米)：越大折点更少
+    # 一次 shortcut 允许直连的最大长度(米)：越大折点更少
     smooth_max_segment_m: 2.0
-    # 先关闭曲线平滑，优先保证出路速度；稳定后再考虑恢复
-    curve_smooth_enable: false
-    # 曲线平滑迭代次数：关闭平滑时不生效
-    curve_smooth_iterations: 1
-    # 曲线切角比例(0.05~0.45)：关闭平滑时不生效
-    curve_smooth_ratio: 0.12
-    # 曲线平滑后的点数上限：关闭平滑时不生效
-    curve_smooth_max_points: 80
     # 路径输出的最小姿态间隔
     path_pose_spacing_m: 0.10
-    # 足迹可视化沿路径的采样间距
-    footprint_stride_m: 0.35
-    # 足迹可视化最多显示多少个姿态轮廓
-    footprint_max_markers: 60
-    # TF不可用时，是否回退使用 /initialpose 作为起点
-    start_from_initialpose_when_tf_unavailable: true

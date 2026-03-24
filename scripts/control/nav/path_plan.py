@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """path_plan.py
 轻量全局路径规划节点：
-  - 订阅 /map, /goal_pose, /initialpose
+  - 订阅 /map, /goal_pose
   - 通过 TF 查询 map->base_link 当前位姿
   - 基于真实矩形车体足迹做碰撞检查
   - 使用离散航向的 SE2 A* 规划，避免仅靠圆形膨胀
@@ -13,7 +13,7 @@ import math
 from typing import Dict, List, Optional, Tuple
 
 import rclpy
-from geometry_msgs.msg import Point, PoseStamped, PoseWithCovarianceStamped, Quaternion
+from geometry_msgs.msg import PoseStamped, Quaternion
 from nav_msgs.msg import OccupancyGrid, Path
 from rclpy.node import Node
 from rclpy.qos import (
@@ -25,7 +25,6 @@ from rclpy.qos import (
 from rclpy.time import Time
 from std_msgs.msg import Empty
 from tf2_ros import Buffer, TransformException, TransformListener
-from visualization_msgs.msg import Marker, MarkerArray
 
 
 GridIndex = Tuple[int, int]
@@ -40,9 +39,7 @@ class PathPlanner(Node):
 
         self.declare_parameter("map_topic", "/map")
         self.declare_parameter("goal_topic", "/goal_pose")
-        self.declare_parameter("initialpose_topic", "/initialpose")
         self.declare_parameter("path_topic", "/plan")
-        self.declare_parameter("footprint_topic", "/plan_footprints")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("plan_rate_hz", 2.0)
@@ -55,14 +52,7 @@ class PathPlanner(Node):
         self.declare_parameter("replan_on_map_update", True)
         self.declare_parameter("replan_deviation_m", 0.35)
         self.declare_parameter("smooth_max_segment_m", 1.6)
-        self.declare_parameter("curve_smooth_enable", True)
-        self.declare_parameter("curve_smooth_iterations", 1)
-        self.declare_parameter("curve_smooth_ratio", 0.12)
-        self.declare_parameter("curve_smooth_max_points", 80)
         self.declare_parameter("path_pose_spacing_m", 0.10)
-        self.declare_parameter("footprint_stride_m", 0.35)
-        self.declare_parameter("footprint_max_markers", 60)
-        self.declare_parameter("start_from_initialpose_when_tf_unavailable", True)
 
         self.declare_parameter("vehicle_front_m", 0.70)
         self.declare_parameter("vehicle_rear_m", 0.25)
@@ -78,9 +68,7 @@ class PathPlanner(Node):
 
         self.map_topic = str(self.get_parameter("map_topic").value)
         self.goal_topic = str(self.get_parameter("goal_topic").value)
-        self.initialpose_topic = str(self.get_parameter("initialpose_topic").value)
         self.path_topic = str(self.get_parameter("path_topic").value)
-        self.footprint_topic = str(self.get_parameter("footprint_topic").value)
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.base_frame = str(self.get_parameter("base_frame").value)
         self.plan_rate_hz = float(self.get_parameter("plan_rate_hz").value)
@@ -101,27 +89,8 @@ class PathPlanner(Node):
         self.smooth_max_segment_m = float(
             self.get_parameter("smooth_max_segment_m").value
         )
-        self.curve_smooth_enable = bool(
-            self.get_parameter("curve_smooth_enable").value
-        )
-        self.curve_smooth_iterations = int(
-            self.get_parameter("curve_smooth_iterations").value
-        )
-        self.curve_smooth_ratio = float(self.get_parameter("curve_smooth_ratio").value)
-        self.curve_smooth_max_points = int(
-            self.get_parameter("curve_smooth_max_points").value
-        )
         self.path_pose_spacing_m = float(
             self.get_parameter("path_pose_spacing_m").value
-        )
-        self.footprint_stride_m = float(
-            self.get_parameter("footprint_stride_m").value
-        )
-        self.footprint_max_markers = int(
-            self.get_parameter("footprint_max_markers").value
-        )
-        self.start_from_initialpose_when_tf_unavailable = bool(
-            self.get_parameter("start_from_initialpose_when_tf_unavailable").value
         )
 
         self.vehicle_front_m = float(self.get_parameter("vehicle_front_m").value)
@@ -154,24 +123,21 @@ class PathPlanner(Node):
         self.origin_x = 0.0
         self.origin_y = 0.0
 
-        self.binary_grid: List[int] = []
         self.inflated_grid: List[int] = []
         self.map_seq = -1
         self.map_dirty = False
 
         self.goal_pose_world: Optional[WorldPose] = None
         self.goal_dirty = False
-        self.initialpose_world: Optional[WorldPose] = None
 
         self.last_plan_poses: List[WorldPose] = []
-        self.last_goal_pose: Optional[WorldPose] = None
 
         self.heading_step = 2.0 * math.pi / float(self.heading_bins)
+        self.turn_options = sorted(set((-self.primitive_turn_bins, 0, self.primitive_turn_bins)))
         self.footprint_samples: List[WorldPoint] = []
         self._build_footprint_samples()
 
         self.path_pub = self.create_publisher(Path, self.path_topic, 10)
-        self.footprint_pub = self.create_publisher(MarkerArray, self.footprint_topic, 10)
         map_qos = QoSProfile(
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1,
@@ -180,20 +146,16 @@ class PathPlanner(Node):
         )
         self.create_subscription(OccupancyGrid, self.map_topic, self._on_map, map_qos)
         self.create_subscription(PoseStamped, self.goal_topic, self._on_goal, 10)
-        self.create_subscription(
-            PoseWithCovarianceStamped, self.initialpose_topic, self._on_initialpose, 10
-        )
         self.create_subscription(Empty, "/nav_clear", self._on_nav_clear, 10)
 
         plan_period = 1.0 / max(self.plan_rate_hz, 0.5)
         self.create_timer(plan_period, self._plan_loop)
 
         self.get_logger().info(
-            "path_plan started | map=%s goal=%s init=%s out=%s | footprint(front=%.2f rear=%.2f left=%.2f right=%.2f margin=%.2f)"
+            "path_plan started | map=%s goal=%s out=%s | footprint(front=%.2f rear=%.2f left=%.2f right=%.2f margin=%.2f)"
             % (
                 self.map_topic,
                 self.goal_topic,
-                self.initialpose_topic,
                 self.path_topic,
                 self.vehicle_front_m,
                 self.vehicle_rear_m,
@@ -268,27 +230,21 @@ class PathPlanner(Node):
             )
         )
 
-    def _on_initialpose(self, msg: PoseWithCovarianceStamped) -> None:
-        if msg.header.frame_id and msg.header.frame_id != self.map_frame:
-            self.get_logger().warn(
-                f"ignore initialpose frame={msg.header.frame_id}, expected={self.map_frame}"
-            )
-            return
-        self.initialpose_world = (
-            float(msg.pose.pose.position.x),
-            float(msg.pose.pose.position.y),
-            self._quat_to_yaw(msg.pose.pose.orientation),
-        )
-        self.goal_dirty = True
-
     def _on_nav_clear(self, _msg: Empty) -> None:
         self.goal_pose_world = None
         self.goal_dirty = False
-        self.last_goal_pose = None
         self.last_plan_poses = []
         self._publish_path([], None)
-        self._publish_footprint_markers([])
         self.get_logger().info("navigation goal cleared")
+
+    def _handle_plan_failure(self, reason: str) -> None:
+        # 规划失败时主动清空旧路径，避免控制器继续跟旧路径，
+        # 也避免后续新 goal 被残留状态影响。
+        self.last_plan_poses = []
+        self.goal_dirty = False
+        self.map_dirty = False
+        self._publish_path([], None)
+        self.get_logger().warn(reason)
 
     def _plan_loop(self) -> None:
         if self.map_msg is None or not self.inflated_grid:
@@ -297,8 +253,6 @@ class PathPlanner(Node):
             return
 
         start_pose = self._get_robot_world_pose()
-        if start_pose is None and self.start_from_initialpose_when_tf_unavailable:
-            start_pose = self.initialpose_world
         if start_pose is None:
             return
 
@@ -324,30 +278,41 @@ class PathPlanner(Node):
         if not need_replan:
             return
 
-        start_pose = self._nearest_free_pose(start_pose, keep_heading=True)
-        goal_pose = self._nearest_free_pose(self.goal_pose_world, keep_heading=False)
+        # 底层控制支持原地转向，因此规划起点不必死守“当前车头方向”。
+        # 这里优先把起点朝向对齐到目标方向，可显著降低“背对目标”时的搜索量。
+        goal_direction = math.atan2(
+            self.goal_pose_world[1] - start_pose[1],
+            self.goal_pose_world[0] - start_pose[0],
+        )
+        start_headings = self._merge_heading_candidates(
+            primary_yaw=goal_direction,
+            secondary_yaw=start_pose[2],
+            limit=min(self.heading_bins, 8),
+        )
+        goal_headings = self._ordered_heading_bins(
+            self.goal_pose_world[2], limit=self.heading_bins
+        )
+
+        start_pose = self._nearest_reachable_pose(start_pose, start_headings)
+        goal_pose = self._nearest_free_pose(self.goal_pose_world, goal_headings)
         if start_pose is None or goal_pose is None:
-            self.get_logger().warn("no collision-free start/goal pose found")
+            self._handle_plan_failure("planning failed: no collision-free start/goal pose found")
             return
 
         pose_path = self._astar(start_pose, goal_pose)
         if not pose_path:
-            self.get_logger().warn("planning failed: no path")
+            self._handle_plan_failure("planning failed: no path")
             return
 
-        pose_path = self._smooth_path(pose_path)
+        # 先用 A* 找到一条安全路径，再做一次直线 shortcut 去掉冗余折点。
+        pose_path = self._shortcut_path(pose_path)
         pose_path = self._densify_path(pose_path)
-        if not self._path_is_collision_free(pose_path):
-            self.get_logger().warn("planning failed after smoothing: path in collision")
-            return
 
         self.last_plan_poses = pose_path
-        self.last_goal_pose = goal_pose
         self.goal_dirty = False
         self.map_dirty = False
 
         self._publish_path(pose_path, goal_pose)
-        self._publish_footprint_markers(pose_path)
         self.get_logger().info(
             "path published: %d poses, len=%.2fm"
             % (len(pose_path), self._path_length(pose_path))
@@ -376,7 +341,6 @@ class PathPlanner(Node):
             0, int(math.ceil(self.inflation_radius_m / max(self.resolution, 1e-6)))
         )
         if inflation_cells == 0:
-            self.binary_grid = binary
             self.inflated_grid = binary[:]
             return
 
@@ -399,7 +363,6 @@ class PathPlanner(Node):
                     if 0 <= nx < self.map_w and 0 <= ny < self.map_h:
                         inflated[ny * self.map_w + nx] = 1
 
-        self.binary_grid = binary
         self.inflated_grid = inflated
 
     def _is_grid_free(self, idx: GridIndex) -> bool:
@@ -438,6 +401,7 @@ class PathPlanner(Node):
         return (x, y, self._bin_to_yaw(state[2]))
 
     def _pose_is_free(self, pose: WorldPose) -> bool:
+        # 用采样后的矩形足迹判断整车是否可放置，不只检查 base_link 一个点。
         px, py, yaw = pose
         cy = math.cos(yaw)
         sy = math.sin(yaw)
@@ -449,22 +413,45 @@ class PathPlanner(Node):
                 return False
         return True
 
+    def _ordered_heading_bins(
+        self, center_yaw: float, limit: Optional[int] = None
+    ) -> List[int]:
+        center = self._yaw_to_bin(center_yaw)
+        ordered: List[int] = [center]
+        max_count = self.heading_bins if limit is None else max(1, limit)
+        for delta in range(1, self.heading_bins):
+            ordered.append((center + delta) % self.heading_bins)
+            if len(ordered) >= max_count:
+                break
+            ordered.append((center - delta) % self.heading_bins)
+            if len(ordered) >= max_count:
+                break
+        return ordered
+
+    def _merge_heading_candidates(
+        self, primary_yaw: float, secondary_yaw: float, limit: int
+    ) -> List[int]:
+        merged: List[int] = []
+        seen = set()
+        for yaw in (primary_yaw, secondary_yaw):
+            for heading_bin in self._ordered_heading_bins(yaw):
+                if heading_bin in seen:
+                    continue
+                seen.add(heading_bin)
+                merged.append(heading_bin)
+                if len(merged) >= limit:
+                    return merged
+        return merged
+
     def _nearest_free_pose(
-        self, src_pose: WorldPose, keep_heading: bool, max_radius_cells: int = 40
+        self,
+        src_pose: WorldPose,
+        heading_candidates: List[int],
+        max_radius_cells: int = 40,
     ) -> Optional[WorldPose]:
         base_idx = self._world_to_grid((src_pose[0], src_pose[1]))
         if base_idx is None:
             return None
-
-        heading_candidates: List[int]
-        if keep_heading:
-            heading_candidates = [self._yaw_to_bin(src_pose[2])]
-        else:
-            start_bin = self._yaw_to_bin(src_pose[2])
-            heading_candidates = [
-                (start_bin + delta) % self.heading_bins
-                for delta in range(self.heading_bins)
-            ]
 
         for radius in range(0, max_radius_cells + 1):
             for dy in range(-radius, radius + 1):
@@ -482,7 +469,38 @@ class PathPlanner(Node):
                             return pose
         return None
 
+    def _nearest_reachable_pose(
+        self,
+        src_pose: WorldPose,
+        heading_candidates: List[int],
+        max_radius_cells: int = 40,
+    ) -> Optional[WorldPose]:
+        # 起点不仅要“摆得下”，还要保证从当前姿态原地转向或短距离过渡过去的
+        # 整个过程都不碰撞，避免控制器起步时原地打角擦到障碍物。
+        base_idx = self._world_to_grid((src_pose[0], src_pose[1]))
+        if base_idx is None:
+            return None
+
+        for radius in range(0, max_radius_cells + 1):
+            for dy in range(-radius, radius + 1):
+                for dx in range(-radius, radius + 1):
+                    if radius > 0 and max(abs(dx), abs(dy)) != radius:
+                        continue
+                    gx = base_idx[0] + dx
+                    gy = base_idx[1] + dy
+                    if not self._is_grid_free((gx, gy)):
+                        continue
+                    wx, wy = self._grid_to_world((gx, gy))
+                    for h in heading_candidates:
+                        pose = (wx, wy, self._bin_to_yaw(h))
+                        if not self._pose_is_free(pose):
+                            continue
+                        if self._motion_segment_is_free(src_pose, pose):
+                            return pose
+        return None
+
     def _motion_segment_is_free(self, a: WorldPose, b: WorldPose) -> bool:
+        # 对一段运动过程做离散采样，避免“端点不撞但转弯中擦碰”的情况。
         dist = math.hypot(b[0] - a[0], b[1] - a[1])
         yaw_delta = abs(self._norm_angle(b[2] - a[2]))
         yaw_arc = max(self.vehicle_front_m + self.vehicle_rear_m, 0.2) * yaw_delta
@@ -510,14 +528,8 @@ class PathPlanner(Node):
 
     def _expand_state(self, state: State3D) -> List[Tuple[State3D, float]]:
         pose = self._state_to_pose(state)
-        moves: List[int] = [
-            -self.primitive_turn_bins,
-            0,
-            self.primitive_turn_bins,
-        ]
-
         out: List[Tuple[State3D, float]] = []
-        for turn_bins in moves:
+        for turn_bins in self.turn_options:
             new_heading_bin = (state[2] + turn_bins) % self.heading_bins
             new_yaw = self._bin_to_yaw(new_heading_bin)
             avg_yaw = self._interp_angle(pose[2], new_yaw, 0.5)
@@ -526,7 +538,8 @@ class PathPlanner(Node):
             nb_idx = self._world_to_grid((nx, ny))
             if nb_idx is None:
                 continue
-            nb_pose = (self._grid_to_world(nb_idx)[0], self._grid_to_world(nb_idx)[1], new_yaw)
+            wx, wy = self._grid_to_world(nb_idx)
+            nb_pose = (wx, wy, new_yaw)
             if not self._motion_segment_is_free(pose, nb_pose):
                 continue
             nb_state = (nb_idx[0], nb_idx[1], new_heading_bin)
@@ -623,10 +636,12 @@ class PathPlanner(Node):
         poses.append((b[0], b[1], yaw))
         return poses
 
-    def _smooth_path(self, path: List[WorldPose]) -> List[WorldPose]:
+    def _shortcut_path(self, path: List[WorldPose]) -> List[WorldPose]:
         if len(path) <= 2:
             return path
 
+        # 贪心地把多段短边合并成更长的直线段，能减轻下游跟踪负担，
+        # 同时比曲线平滑更省计算，也更容易读懂和维护。
         simplified: List[WorldPose] = [path[0]]
         i = 0
         while i < len(path) - 1:
@@ -636,33 +651,13 @@ class PathPlanner(Node):
                     math.hypot(path[j][0] - path[i][0], path[j][1] - path[i][1])
                     <= self.smooth_max_segment_m
                 ):
-                    segment = self._straight_segment_poses(path[i], path[j])
-                    if self._path_is_collision_free(segment):
+                    if self._motion_segment_is_free(path[i], path[j]):
                         picked = j
                         break
             simplified.append(path[picked])
             i = picked
 
-        simplified = self._annotate_path_yaw(simplified, path[-1][2])
-        if not self.curve_smooth_enable or len(simplified) <= 2:
-            return simplified
-
-        smoothed_points = [(p[0], p[1]) for p in simplified]
-        ratio = min(0.45, max(0.05, self.curve_smooth_ratio))
-        for _ in range(max(0, self.curve_smooth_iterations)):
-            if len(smoothed_points) >= self.curve_smooth_max_points:
-                break
-            candidate_points = self._chaikin_once(smoothed_points, ratio)
-            candidate = self._annotate_path_yaw_from_points(
-                candidate_points, simplified[0][2], simplified[-1][2]
-            )
-            candidate = self._densify_path(candidate)
-            if not self._path_is_collision_free(candidate):
-                break
-            smoothed_points = candidate_points
-        return self._annotate_path_yaw_from_points(
-            smoothed_points, simplified[0][2], simplified[-1][2]
-        )
+        return self._annotate_path_yaw(simplified, path[-1][2])
 
     def _densify_path(self, path: List[WorldPose]) -> List[WorldPose]:
         if len(path) <= 1:
@@ -676,32 +671,6 @@ class PathPlanner(Node):
                 out.extend(segment)
         out = self._annotate_path_yaw(out, path[-1][2])
         return self._deduplicate_pose_path(out)
-
-    def _chaikin_once(self, path: List[WorldPoint], ratio: float) -> List[WorldPoint]:
-        if len(path) <= 2:
-            return path
-        out: List[WorldPoint] = [path[0]]
-        for i in range(len(path) - 1):
-            ax, ay = path[i]
-            bx, by = path[i + 1]
-            q = ((1.0 - ratio) * ax + ratio * bx, (1.0 - ratio) * ay + ratio * by)
-            r = (ratio * ax + (1.0 - ratio) * bx, ratio * ay + (1.0 - ratio) * by)
-            out.append(q)
-            out.append(r)
-        out.append(path[-1])
-        return self._deduplicate_points(out)
-
-    def _deduplicate_points(self, path: List[WorldPoint]) -> List[WorldPoint]:
-        if not path:
-            return path
-        min_dist = max(self.resolution * 0.2, 1e-3)
-        filtered: List[WorldPoint] = [path[0]]
-        for p in path[1:]:
-            if math.hypot(p[0] - filtered[-1][0], p[1] - filtered[-1][1]) >= min_dist:
-                filtered.append(p)
-        if filtered[-1] != path[-1]:
-            filtered.append(path[-1])
-        return filtered
 
     def _deduplicate_pose_path(self, path: List[WorldPose]) -> List[WorldPose]:
         if not path:
@@ -736,34 +705,6 @@ class PathPlanner(Node):
                 )
             out.append((pose[0], pose[1], yaw))
         return out
-
-    def _annotate_path_yaw_from_points(
-        self, path: List[WorldPoint], start_yaw: float, goal_yaw: float
-    ) -> List[WorldPose]:
-        if not path:
-            return []
-        out: List[WorldPose] = []
-        for i, (x, y) in enumerate(path):
-            if i == 0:
-                yaw = start_yaw
-            elif i < len(path) - 1:
-                nx, ny = path[i + 1]
-                yaw = math.atan2(ny - y, nx - x)
-            else:
-                yaw = goal_yaw
-            out.append((x, y, yaw))
-        return self._deduplicate_pose_path(out)
-
-    def _path_is_collision_free(self, path: List[WorldPose]) -> bool:
-        if not path:
-            return False
-        for pose in path:
-            if not self._pose_is_free(pose):
-                return False
-        for i in range(len(path) - 1):
-            if not self._motion_segment_is_free(path[i], path[i + 1]):
-                return False
-        return True
 
     def _get_robot_world_pose(self) -> Optional[WorldPose]:
         try:
@@ -801,104 +742,6 @@ class PathPlanner(Node):
             msg.poses.append(pose)
 
         self.path_pub.publish(msg)
-
-    def _publish_footprint_markers(self, poses: List[WorldPose]) -> None:
-        msg = MarkerArray()
-
-        clear = Marker()
-        clear.header.frame_id = self.map_frame
-        clear.header.stamp = self.get_clock().now().to_msg()
-        clear.action = Marker.DELETEALL
-        msg.markers.append(clear)
-
-        if not poses:
-            self.footprint_pub.publish(msg)
-            return
-
-        sampled = self._sample_footprint_poses(poses)
-        timestamp = self.get_clock().now().to_msg()
-
-        centerline = Marker()
-        centerline.header.frame_id = self.map_frame
-        centerline.header.stamp = timestamp
-        centerline.ns = "plan_centerline"
-        centerline.id = 0
-        centerline.type = Marker.LINE_STRIP
-        centerline.action = Marker.ADD
-        centerline.scale.x = 0.04
-        centerline.color.r = 0.10
-        centerline.color.g = 0.85
-        centerline.color.b = 0.20
-        centerline.color.a = 0.95
-        centerline.points = [self._world_point_to_msg((p[0], p[1])) for p in poses]
-        msg.markers.append(centerline)
-
-        for i, pose in enumerate(sampled):
-            marker = Marker()
-            marker.header.frame_id = self.map_frame
-            marker.header.stamp = timestamp
-            marker.ns = "plan_footprints"
-            marker.id = i + 1
-            marker.type = Marker.LINE_STRIP
-            marker.action = Marker.ADD
-            marker.scale.x = 0.018
-            marker.color.r = 1.0
-            marker.color.g = 0.55
-            marker.color.b = 0.05
-            marker.color.a = 0.75 if i < len(sampled) - 1 else 1.0
-            marker.points = self._footprint_outline_points(pose)
-            msg.markers.append(marker)
-
-        self.footprint_pub.publish(msg)
-
-    def _sample_footprint_poses(self, poses: List[WorldPose]) -> List[WorldPose]:
-        if not poses:
-            return []
-        max_markers = max(1, self.footprint_max_markers)
-        stride = max(self.footprint_stride_m, self.path_pose_spacing_m, 0.05)
-        sampled = [poses[0]]
-        accum = 0.0
-        for i in range(1, len(poses)):
-            seg = math.hypot(poses[i][0] - poses[i - 1][0], poses[i][1] - poses[i - 1][1])
-            accum += seg
-            if accum >= stride:
-                sampled.append(poses[i])
-                accum = 0.0
-        if sampled[-1] != poses[-1]:
-            sampled.append(poses[-1])
-        if len(sampled) <= max_markers:
-            return sampled
-        step = max(1, int(math.ceil(len(sampled) / max_markers)))
-        reduced = sampled[::step]
-        if reduced[-1] != sampled[-1]:
-            reduced.append(sampled[-1])
-        return reduced[:max_markers]
-
-    def _footprint_outline_points(self, pose: WorldPose) -> List[Point]:
-        x, y, yaw = pose
-        corners_local = [
-            (self.vehicle_front_m, self.vehicle_left_m),
-            (self.vehicle_front_m, -self.vehicle_right_m),
-            (-self.vehicle_rear_m, -self.vehicle_right_m),
-            (-self.vehicle_rear_m, self.vehicle_left_m),
-            (self.vehicle_front_m, self.vehicle_left_m),
-        ]
-        cy = math.cos(yaw)
-        sy = math.sin(yaw)
-        points: List[Point] = []
-        for lx, ly in corners_local:
-            wx = x + lx * cy - ly * sy
-            wy = y + lx * sy + ly * cy
-            points.append(self._world_point_to_msg((wx, wy)))
-        return points
-
-    @staticmethod
-    def _world_point_to_msg(p: WorldPoint) -> Point:
-        msg = Point()
-        msg.x = float(p[0])
-        msg.y = float(p[1])
-        msg.z = 0.03
-        return msg
 
     @staticmethod
     def _quat_to_yaw(q) -> float:

@@ -12,6 +12,8 @@ nav_control:
     # true: 每次收到新路径都会切换到新路径继续跟踪
     # false: 仅使用首条路径直到到点/重置
     accept_replanned_path: true
+    # 收到新的 /plan 后先急停，再等待一小段时间后按新路径继续
+    replan_pause_s: 0.20
 
     # ==================== 速度 ====================
     linear_speed_mps:          0.20   # 直行最大线速 (m/s)

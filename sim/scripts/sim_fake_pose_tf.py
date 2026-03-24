@@ -31,10 +31,10 @@ class SimFakePoseTF(Node):
         self.declare_parameter("publish_rate_hz", 30.0)
         self.declare_parameter("use_cmd_vel", False)
         self.declare_parameter("follow_plan", True)
+        self.declare_parameter("replan_pause_s", 0.20)
         self.declare_parameter("demo_linear_speed_mps", 0.35)
         self.declare_parameter("demo_angular_speed_rps", 0.65)
         self.declare_parameter("demo_waypoint_tolerance_m", 0.10)
-        self.declare_parameter("demo_goal_hold_s", 2.0)
         self.declare_parameter("demo_heading_slowdown_deg", 40.0)
         self.declare_parameter("x", 0.0)
         self.declare_parameter("y", 0.0)
@@ -48,6 +48,9 @@ class SimFakePoseTF(Node):
         self.publish_rate_hz = float(self.get_parameter("publish_rate_hz").value)
         self.use_cmd_vel = bool(self.get_parameter("use_cmd_vel").value)
         self.follow_plan = bool(self.get_parameter("follow_plan").value)
+        self.replan_pause_s = max(
+            0.0, float(self.get_parameter("replan_pause_s").value)
+        )
         self.demo_linear_speed_mps = float(
             self.get_parameter("demo_linear_speed_mps").value
         )
@@ -57,7 +60,6 @@ class SimFakePoseTF(Node):
         self.demo_waypoint_tolerance_m = float(
             self.get_parameter("demo_waypoint_tolerance_m").value
         )
-        self.demo_goal_hold_s = float(self.get_parameter("demo_goal_hold_s").value)
         self.demo_heading_slowdown = math.radians(
             float(self.get_parameter("demo_heading_slowdown_deg").value)
         )
@@ -71,8 +73,7 @@ class SimFakePoseTF(Node):
         self.path_poses: List[WorldPose] = []
         self.path_active = False
         self.path_index = 0
-        self.hold_until_ns = 0
-        self.start_pose_from_path: Optional[WorldPose] = None
+        self.replan_pause_until_ns = 0
 
         self.tf_pub = TransformBroadcaster(self)
         self.create_subscription(
@@ -85,13 +86,14 @@ class SimFakePoseTF(Node):
         self.create_timer(1.0 / max(self.publish_rate_hz, 1.0), self._loop)
 
         self.get_logger().info(
-            "sim_fake_pose_tf started | pose=(%.2f, %.2f, %.1fdeg) | use_cmd_vel=%s | follow_plan=%s"
+            "sim_fake_pose_tf started | pose=(%.2f, %.2f, %.1fdeg) | use_cmd_vel=%s | follow_plan=%s | replan_pause=%.2fs"
             % (
                 self.x,
                 self.y,
                 math.degrees(self.yaw),
                 str(self.use_cmd_vel),
                 str(self.follow_plan),
+                self.replan_pause_s,
             )
         )
 
@@ -106,7 +108,7 @@ class SimFakePoseTF(Node):
         q = msg.pose.pose.orientation
         self.yaw = self._quat_to_yaw(q.x, q.y, q.z, q.w)
         self.path_active = False
-        self.hold_until_ns = 0
+        self.replan_pause_until_ns = 0
         self.get_logger().info(
             "pose set by /initialpose: (%.2f, %.2f, %.1fdeg)"
             % (self.x, self.y, math.degrees(self.yaw))
@@ -130,24 +132,27 @@ class SimFakePoseTF(Node):
         if len(poses) < 2:
             self.path_poses = poses
             self.path_active = False
+            self.replan_pause_until_ns = 0
             return
 
+        had_active_plan = self.path_active and bool(self.path_poses)
         self.path_poses = poses
-        self.start_pose_from_path = poses[0]
-        self._reset_to_start_pose()
-        self.path_index = 1
+        self.path_index = self._find_nearest_path_index(poses, self.x, self.y)
         self.path_active = self.follow_plan
-        self.hold_until_ns = 0
+        if had_active_plan and self.replan_pause_s > 0.0:
+            self.replan_pause_until_ns = (
+                self.get_clock().now().nanoseconds + int(self.replan_pause_s * 1e9)
+            )
+        else:
+            self.replan_pause_until_ns = 0
         self.get_logger().info(
-            "demo path received: %d poses, restart from first pose" % len(poses)
+            "demo path received: %d poses, switch to new path at index %d%s"
+            % (
+                len(poses),
+                self.path_index,
+                f", pause {self.replan_pause_s:.2f}s" if had_active_plan else "",
+            )
         )
-
-    def _reset_to_start_pose(self) -> None:
-        if not self.start_pose_from_path:
-            return
-        self.x = self.start_pose_from_path[0]
-        self.y = self.start_pose_from_path[1]
-        self.yaw = self.start_pose_from_path[2]
 
     def _loop(self) -> None:
         now = self.get_clock().now()
@@ -157,6 +162,8 @@ class SimFakePoseTF(Node):
             dt = 1e-3
 
         if self.follow_plan and self.path_active and self.path_poses:
+            if now.nanoseconds < self.replan_pause_until_ns:
+                return
             self._step_follow_plan(now.nanoseconds, dt)
         elif self.use_cmd_vel:
             self.yaw = self._norm(self.yaw + self.w * dt)
@@ -176,16 +183,9 @@ class SimFakePoseTF(Node):
         t.transform.rotation.w = math.cos(self.yaw * 0.5)
         self.tf_pub.sendTransform(t)
 
-    def _step_follow_plan(self, now_ns: int, dt: float) -> None:
-        if self.hold_until_ns > 0:
-            if now_ns >= self.hold_until_ns:
-                self._reset_to_start_pose()
-                self.path_index = 1 if len(self.path_poses) > 1 else 0
-                self.hold_until_ns = 0
-            return
-
+    def _step_follow_plan(self, _now_ns: int, dt: float) -> None:
         if self.path_index >= len(self.path_poses):
-            self.hold_until_ns = now_ns + int(self.demo_goal_hold_s * 1e9)
+            self.path_active = False
             return
 
         tx, ty, tyaw = self.path_poses[self.path_index]
@@ -196,7 +196,7 @@ class SimFakePoseTF(Node):
         if dist <= self.demo_waypoint_tolerance_m:
             if self.path_index >= len(self.path_poses) - 1:
                 self.yaw = tyaw
-                self.hold_until_ns = now_ns + int(self.demo_goal_hold_s * 1e9)
+                self.path_active = False
                 return
             self.path_index += 1
             return
@@ -226,6 +226,23 @@ class SimFakePoseTF(Node):
     @staticmethod
     def _norm(a: float) -> float:
         return math.atan2(math.sin(a), math.cos(a))
+
+    @staticmethod
+    def _find_nearest_path_index(
+        poses: List[WorldPose], x: float, y: float
+    ) -> int:
+        if not poses:
+            return 0
+        best_i = 0
+        best_d2 = float("inf")
+        for i, pose in enumerate(poses):
+            dx = pose[0] - x
+            dy = pose[1] - y
+            d2 = dx * dx + dy * dy
+            if d2 < best_d2:
+                best_d2 = d2
+                best_i = i
+        return best_i
 
 
 def main(args: Optional[list] = None) -> None:

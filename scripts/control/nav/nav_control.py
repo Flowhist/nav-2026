@@ -47,6 +47,7 @@ class ChassisControlNav(Node):
         self.declare_parameter("base_frame",  "base_link")
         self.declare_parameter("map_frame",   "map")
         self.declare_parameter("accept_replanned_path", True)
+        self.declare_parameter("replan_pause_s", 0.20)
 
         # 速度
         self.declare_parameter("linear_speed_mps",          0.20)
@@ -76,6 +77,9 @@ class ChassisControlNav(Node):
         self.map_frame    = str(self.get_parameter("map_frame").value)
         self.accept_replanned_path = bool(
             self.get_parameter("accept_replanned_path").value
+        )
+        self.replan_pause_s = max(
+            0.0, float(self.get_parameter("replan_pause_s").value)
         )
 
         self.v_max           = float(self.get_parameter("linear_speed_mps").value)
@@ -109,6 +113,8 @@ class ChassisControlNav(Node):
         self._last_log_mode: Optional[DriveMode] = None
         self._prev_err: float     = 0.0
         self._prev_time: int   = 0
+        self._replan_pause_until_ns = 0
+        self._js_active = False
         self._cmd_msg = Twist()
 
         # 订阅与发布
@@ -127,7 +133,8 @@ class ChassisControlNav(Node):
             f"drive_omega={math.degrees(self.drive_omega_max):.0f}deg/s | "
             f"Kp={self.ang_kp} Kd={self.ang_kd} | "
             f"ROTATE: >{rot_thr:.0f}° <{rot_exit:.0f}° | sign={self.ang_sign} | "
-            f"accept_replan={self.accept_replanned_path}"
+            f"accept_replan={self.accept_replanned_path} | "
+            f"replan_pause={self.replan_pause_s:.2f}s"
         )
 
     # === 工具 ================================================================
@@ -159,6 +166,19 @@ class ChassisControlNav(Node):
         self._last_log_mode = None
         self._prev_err     = 0.0
         self._prev_time = 0
+        self._replan_pause_until_ns = 0
+
+    def _start_replan_pause(self):
+        self._stop()
+        self.mode = None
+        self._last_log_mode = None
+        self._prev_err = 0.0
+        self._prev_time = 0
+        if self.replan_pause_s > 0.0:
+            now_ns = self.get_clock().now().nanoseconds
+            self._replan_pause_until_ns = now_ns + int(self.replan_pause_s * 1e9)
+        else:
+            self._replan_pause_until_ns = 0
 
     def _rebuild_path_cache(self):
         self.path_seg_len = []
@@ -213,8 +233,7 @@ class ChassisControlNav(Node):
         self.path_points = new_points
         self.path_frame = new_frame
         self._rebuild_path_cache()
-        self._prev_time = 0
-        self._prev_err = 0.0
+        self._start_replan_pause()
 
         new_end = self.path_points[-1]
         if old_end is None:
@@ -223,7 +242,8 @@ class ChassisControlNav(Node):
             end_shift = math.hypot(new_end[0] - old_end[0], new_end[1] - old_end[1])
         self.get_logger().info(
             f"路径更新 {len(self.path_points)} 点 | "
-            f"新终点=({new_end[0]:.2f},{new_end[1]:.2f}) | 终点偏移={end_shift:.2f}m"
+            f"新终点=({new_end[0]:.2f},{new_end[1]:.2f}) | 终点偏移={end_shift:.2f}m | "
+            f"暂停跟踪 {self.replan_pause_s:.2f}s"
         )
 
     def _on_nav_clear(self, _msg: Empty):
@@ -399,6 +419,11 @@ class ChassisControlNav(Node):
         if not self.has_started:
             return
 
+        now = self.get_clock().now().nanoseconds
+        if now < self._replan_pause_until_ns:
+            self._stop()
+            return
+
         pose = self._get_pose()
         if pose is None:
             return
@@ -418,7 +443,6 @@ class ChassisControlNav(Node):
         tx, ty = self._lookahead_target(x, y)
 
         # 控制
-        now = self.get_clock().now().nanoseconds
         heading_error = self._norm(math.atan2(ty - y, tx - x) - yaw)
         lin, ang = self._compute(heading_error, now)
         self._pub(lin, ang)

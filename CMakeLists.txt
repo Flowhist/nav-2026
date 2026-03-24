@@ -89,6 +89,7 @@ install(PROGRAMS
   scripts/control/nav/nav_control.py
   scripts/control/nav/path_plan.py
   sim/scripts/sim_fake_pose_tf.py
+  sim/scripts/sim_plan_visualizer.py
   sim/scripts/sim_send_goal.py
   scripts/imu/dm_imu_publisher.py
   scripts/map/manual_save_map.py
