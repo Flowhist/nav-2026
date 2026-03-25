@@ -417,7 +417,8 @@ class _BridgeNode:
             msg.pose.covariance[7] = 0.25
             msg.pose.covariance[35] = 0.0685
             self.pub_initial.publish(msg)
-            _BridgeNode._update_target_state(self, "initial_pose", x, y, yaw_deg)
+            self.state_store.update_status({"robot": {"initial_pose": None}})
+            self.state_store.update_scene({"initial_pose": None})
             _BridgeNode._event(self, "info", "initialpose published", {"x": x, "y": y, "yaw_deg": yaw_deg})
 
         elif ctype == "save_map":

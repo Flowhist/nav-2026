@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # save_map.sh
-# 保存当前 SLAM 地图（调用 scripts/map/manual_save_map.py）
+# 保存当前 SLAM 地图（调用 scripts/tool/manual_save_map.py）
 #
 # 用法：
 #   bash scripts/tool/save_map.sh                     # 默认地图名 manual_map
@@ -41,7 +41,7 @@ source "$WORKSPACE_DIR/install/local_setup.bash" 2>/dev/null || source "$WORKSPA
 export FASTRTPS_DEFAULT_PROFILES_FILE="$REPO_DIR/config/fastdds_profiles.xml"
 
 # ── 保存地图 ─────────────────────────────────────────────────────────── #
-SAVE_SCRIPT="$REPO_DIR/scripts/map/manual_save_map.py"
+SAVE_SCRIPT="$REPO_DIR/scripts/tool/manual_save_map.py"
 
 if [[ ! -f "$SAVE_SCRIPT" ]]; then
     printf '[ERROR] 未找到保存脚本: %s\n' "$SAVE_SCRIPT"

@@ -17,6 +17,19 @@ async function pollScene() {
   }
 }
 
+function resetLiveScene() {
+  appState.mapVersion = -1;
+  appState.scene = {
+    map: null,
+    scan: { points: [] },
+    plan: { points: 0, points_xy: [] },
+    robot_pose_map: null,
+    goal_pose: null,
+    initial_pose: null,
+  };
+  appState.navDrag = null;
+}
+
 function updateSceneHints() {
   const map = appState.scene.map;
   const hasMap = !!map;
@@ -349,6 +362,9 @@ async function stopRuntime(mode, options = {}) {
         appState.status = { ...(appState.status || {}), runtime: data.runtime };
         renderRuntimeControls();
       }
+      resetLiveScene();
+      renderLiveCanvases();
+      updateSceneHints();
     } catch (err) {
       console.error(err);
     }

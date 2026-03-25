@@ -25,6 +25,30 @@ class RuntimeManager:
         self._log_cache: Dict[str, Dict[str, object]] = {}
         self._sync_status()
 
+    def _clear_live_scene(self) -> None:
+        now = time.time()
+        self.state_store.update_status(
+            {
+                "robot": {
+                    "pose_map": None,
+                    "plan": {"points": 0, "length_m": 0.0, "updated_at": now},
+                    "goal_pose": None,
+                    "initial_pose": None,
+                }
+            }
+        )
+        self.state_store.update_scene(
+            {
+                "map": None,
+                "scan": {"frame_id": "map", "points": [], "updated_at": now},
+                "plan": {"points": 0, "points_xy": [], "length_m": 0.0, "updated_at": now},
+                "robot_pose_map": None,
+                "goal_pose": None,
+                "initial_pose": None,
+            },
+            map_changed=True,
+        )
+
     def snapshot(self) -> Dict[str, object]:
         with self._lock:
             return self._snapshot_unlocked()
@@ -128,6 +152,7 @@ class RuntimeManager:
             self.state_store.add_event("warn", f"{mode} cleanup finished with warnings", {"detail": "; ".join(errors)})
         else:
             self.state_store.add_event("info", f"{mode} cleanup finished")
+        self._clear_live_scene()
         return self.snapshot()
 
     def stop_all(self) -> Dict[str, object]:

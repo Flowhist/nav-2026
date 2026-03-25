@@ -267,9 +267,10 @@ function drawArrow(ctx, view, canvas, pose, color, label) {
   const center = worldToScreen(view, canvas, pose.x, pose.y);
   const length = 18 * (window.devicePixelRatio || 1);
   const yaw = (pose.yaw_deg || 0) * Math.PI / 180;
+  const screenYaw = Math.PI - yaw;
   const tip = {
-    x: center.x + Math.cos(yaw) * length,
-    y: center.y - Math.sin(yaw) * length,
+    x: center.x + Math.cos(screenYaw) * length,
+    y: center.y - Math.sin(screenYaw) * length,
   };
 
   ctx.save();
@@ -285,12 +286,12 @@ function drawArrow(ctx, view, canvas, pose, color, label) {
   ctx.beginPath();
   ctx.moveTo(tip.x, tip.y);
   ctx.lineTo(
-    tip.x - Math.cos(yaw - Math.PI / 6) * wing,
-    tip.y + Math.sin(yaw - Math.PI / 6) * wing,
+    tip.x - Math.cos(screenYaw - Math.PI / 6) * wing,
+    tip.y + Math.sin(screenYaw - Math.PI / 6) * wing,
   );
   ctx.lineTo(
-    tip.x - Math.cos(yaw + Math.PI / 6) * wing,
-    tip.y + Math.sin(yaw + Math.PI / 6) * wing,
+    tip.x - Math.cos(screenYaw + Math.PI / 6) * wing,
+    tip.y + Math.sin(screenYaw + Math.PI / 6) * wing,
   );
   ctx.closePath();
   ctx.fill();
