@@ -313,6 +313,11 @@ class _BridgeNode:
     def _on_js_state(self: Any, msg: Any) -> None:
         self._joystick_active = bool(msg.data)
         _BridgeNode._touch(self, "js_state")
+        if self._joystick_active:
+            # Joystick takeover must clear any latched web teleop state,
+            # otherwise the last web command can resume after joystick release.
+            self.bridge.stop_teleop()
+            _BridgeNode._publish_web_stop(self)
         self.state_store.update_status(
             {
                 "teleop": {

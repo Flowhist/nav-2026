@@ -69,7 +69,7 @@
               </div>
             </section>
 
-            <section class="glass panel">
+            <section id="teleopPanel" class="glass panel teleop-panel">
               <div class="panel-head">
                 <h3>网页键盘控制</h3>
                 <button id="teleopToggle" class="toggle-btn">开启</button>
@@ -105,6 +105,10 @@
                     <span>高速 · 0.60 m/s · 0.50 rad/s</span>
                   </button>
                 </div>
+              </div>
+              <div id="teleopBlocker" class="teleop-blocker hidden" aria-live="polite">
+                <strong>摇杆控制中</strong>
+                <span>摇杆接管时网页键盘控制已锁定</span>
               </div>
             </section>
 
@@ -195,6 +199,7 @@
               <button id="btnRefreshMaps">刷新</button>
             </div>
             <div id="mapList" class="map-list"></div>
+            <button id="btnDeletePreviewMap" class="danger wide" disabled>删除所选地图</button>
           </aside>
           <section class="preview-main glass">
             <div class="pane-head">

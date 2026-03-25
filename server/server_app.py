@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import mimetypes
+import shutil
 import threading
 import time
 from http import HTTPStatus
@@ -178,6 +179,19 @@ class ServerApp:
                     app.bridge.command({"type": "save_map", "name": body.get("name", "manual_map")})
                     self._json(HTTPStatus.OK, {"ok": True})
                     return
+                if path.startswith("/api/maps/") and path.endswith("/delete"):
+                    name = unquote(path.removeprefix("/api/maps/").removesuffix("/delete")).strip("/")
+                    target = app._resolve_map_dir(name)
+                    if target is None:
+                        self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid map name"})
+                        return
+                    if not target.exists() or not target.is_dir():
+                        self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"map not found: {name}"})
+                        return
+                    shutil.rmtree(target)
+                    app.state.add_event("info", "map deleted", {"name": name})
+                    self._json(HTTPStatus.OK, {"ok": True, "name": name})
+                    return
                 if path == "/api/runtime/mapping/start":
                     self._json(HTTPStatus.OK, {"ok": True, "runtime": app.runtime.start("mapping")})
                     return
@@ -279,6 +293,14 @@ class ServerApp:
             return None
         target = (self.config_dir / rel_name).resolve()
         if not str(target).startswith(str(self.config_dir.resolve())):
+            return None
+        return target
+
+    def _resolve_map_dir(self, name: str) -> Optional[Path]:
+        if not name or "/" in name or "\\" in name:
+            return None
+        target = (self.maps_dir / name).resolve()
+        if not str(target).startswith(str(self.maps_dir.resolve())):
             return None
         return target
 

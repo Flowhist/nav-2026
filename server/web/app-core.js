@@ -147,7 +147,7 @@ function buildMapRaster(mapData, prefix) {
     for (let x = 0; x < mapData.width; x += 1) {
       const src = y * mapData.width + x;
       const dstY = mapData.height - 1 - y;
-      const dstX = mapData.width - 1 - x;
+      const dstX = x;
       const dst = (dstY * mapData.width + dstX) * 4;
       const value = mapData.data[src];
       let color;
@@ -194,7 +194,7 @@ function buildView(canvas, mapData) {
 
 function worldToBaseScreen(view, x, y) {
   return {
-    x: view.offsetX + (view.maxX - x) * view.scale,
+    x: view.offsetX + (x - view.minX) * view.scale,
     y: view.offsetY + view.drawHeight - (y - view.minY) * view.scale,
   };
 }
@@ -253,7 +253,7 @@ function clientToWorld(canvas, clientX, clientY) {
     y: (clientY - rect.top) * (canvas.height / rect.height),
   };
   const basePoint = invertCameraPoint(canvas, screenPoint);
-  const worldX = view.maxX - (basePoint.x - view.offsetX) / view.scale;
+  const worldX = view.minX + (basePoint.x - view.offsetX) / view.scale;
   const worldY = view.minY + (view.drawHeight - (basePoint.y - view.offsetY)) / view.scale;
 
   if (worldX < view.minX || worldX > view.maxX || worldY < view.minY || worldY > view.maxY) {
@@ -267,10 +267,17 @@ function drawArrow(ctx, view, canvas, pose, color, label) {
   const center = worldToScreen(view, canvas, pose.x, pose.y);
   const length = 18 * (window.devicePixelRatio || 1);
   const yaw = (pose.yaw_deg || 0) * Math.PI / 180;
-  const screenYaw = Math.PI - yaw;
+  const camera = getViewport(canvas);
+  const cosRot = Math.cos(camera.rotation);
+  const sinRot = Math.sin(camera.rotation);
+  const rotateVector = (dx, dy) => ({
+    x: dx * cosRot - dy * sinRot,
+    y: dx * sinRot + dy * cosRot,
+  });
+  const forward = rotateVector(Math.cos(yaw) * length, -Math.sin(yaw) * length);
   const tip = {
-    x: center.x + Math.cos(screenYaw) * length,
-    y: center.y - Math.sin(screenYaw) * length,
+    x: center.x + forward.x,
+    y: center.y + forward.y,
   };
 
   ctx.save();
@@ -283,16 +290,18 @@ function drawArrow(ctx, view, canvas, pose, color, label) {
   ctx.stroke();
 
   const wing = 7 * (window.devicePixelRatio || 1);
+  const leftWing = rotateVector(
+    -Math.cos(yaw - Math.PI / 6) * wing,
+    Math.sin(yaw - Math.PI / 6) * wing,
+  );
+  const rightWing = rotateVector(
+    -Math.cos(yaw + Math.PI / 6) * wing,
+    Math.sin(yaw + Math.PI / 6) * wing,
+  );
   ctx.beginPath();
   ctx.moveTo(tip.x, tip.y);
-  ctx.lineTo(
-    tip.x - Math.cos(screenYaw - Math.PI / 6) * wing,
-    tip.y + Math.sin(screenYaw - Math.PI / 6) * wing,
-  );
-  ctx.lineTo(
-    tip.x - Math.cos(screenYaw + Math.PI / 6) * wing,
-    tip.y + Math.sin(screenYaw + Math.PI / 6) * wing,
-  );
+  ctx.lineTo(tip.x + leftWing.x, tip.y + leftWing.y);
+  ctx.lineTo(tip.x + rightWing.x, tip.y + rightWing.y);
   ctx.closePath();
   ctx.fill();
 
@@ -385,6 +394,13 @@ function renderStatus(status) {
   const teleop = status.teleop || {};
   const joystickState = teleop.joystick_online ? (teleop.joystick_active ? "激活中" : "关闭") : "离线";
 
+  if (teleop.joystick_active && appState.teleop.keyboardEnabled && typeof setKeyboardTeleop === "function") {
+    setKeyboardTeleop(false);
+  }
+  if (typeof syncTeleopAvailability === "function") {
+    syncTeleopAvailability();
+  }
+
   setText("rosConnected", ros.connected ? "在线" : "离线");
   setText("tfMapOdom", `${fmt(tf.map_odom)} Hz`);
   setText("tfOdomBase", `${fmt(tf.odom_base_link)} Hz`);
@@ -396,7 +412,10 @@ function renderStatus(status) {
   setText("velOdom", `vx=${fmt(vel.vx, 3)} m/s, wz=${fmt(vel.wz, 3)} rad/s`);
   setText("planPts", String(plan.points ?? "--"));
   setText("planLen", `${fmt(plan.length_m, 2)} m`);
-  setText("teleopState", teleop.active ? "发送中" : appState.teleop.keyboardEnabled ? "待命中" : "离线");
+  setText(
+    "teleopState",
+    teleop.joystick_active ? "摇杆接管" : teleop.active ? "发送中" : appState.teleop.keyboardEnabled ? "待命中" : "离线",
+  );
   setText("joystickState", joystickState);
   renderRuntimeControls();
 }

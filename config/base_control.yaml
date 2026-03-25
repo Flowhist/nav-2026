@@ -42,4 +42,5 @@ js_kb_router:
   ros__parameters:
     keyboard_angular_speed: 0.5                  # 键盘统一旋转速度（rad/s）
     keyboard_linear_speeds: [0.1, 0.2, 0.4, 0.6] # 键盘各档位线速度（m/s）
+    router_rate: 50.0                            # 路由器轮询/仲裁发布频率（Hz）
     web_cmd_timeout: 0.4                         # 网页控制输入超时（s）

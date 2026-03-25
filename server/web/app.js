@@ -21,10 +21,25 @@ function syncTeleopButtons() {
 }
 
 function syncTeleopAvailability() {
-  const enabled = !!appState.teleop.keyboardEnabled;
+  const joystickActive = !!appState.status?.teleop?.joystick_active;
+  const enabled = !!appState.teleop.keyboardEnabled && !joystickActive;
+  const panel = $("teleopPanel");
+  const blocker = $("teleopBlocker");
+
+  panel?.classList.toggle("teleop-locked", joystickActive);
+  blocker?.classList.toggle("hidden", !joystickActive);
+  if ($("teleopToggle")) $("teleopToggle").disabled = joystickActive;
+  if ($("speedStageToggle")) $("speedStageToggle").disabled = joystickActive;
+  document.querySelectorAll("#stagePanel .stage-option").forEach((btn) => {
+    btn.disabled = joystickActive;
+  });
   document.querySelectorAll(".teleop-btn").forEach((btn) => {
     btn.disabled = !enabled;
   });
+  if (joystickActive) {
+    toggleStageMenu(false);
+    stopTeleop(false);
+  }
 }
 
 async function applyTeleopCommand(kind, options = {}) {
@@ -102,20 +117,24 @@ async function loadTeleopConfig() {
   syncTeleopStage();
 }
 
-function setKeyboardTeleop(enabled) {
+function setKeyboardTeleop(enabled, options = {}) {
+  const { sendStop = true } = options;
+  if (enabled && appState.status?.teleop?.joystick_active) {
+    enabled = false;
+  }
   appState.teleop.keyboardEnabled = enabled;
   $("teleopToggle").classList.toggle("active", enabled);
   $("teleopToggle").textContent = enabled ? "关闭" : "开启";
   $("teleopHint").textContent = enabled
     ? "开启状态\n输入一次持续运动，W/A/S/D 移动，Space 急停，J/K 调整前进档位"
     : "关闭状态\n开启后可用 W/A/S/D、Space、J/K 控制";
-  if (!enabled) stopTeleop(true);
+  if (!enabled) stopTeleop(sendStop);
   syncTeleopAvailability();
-  renderStatus(appState.status);
+  if (!appState.status?.teleop?.joystick_active) renderStatus(appState.status);
 }
 
 function handleKeyboardTeleop(event) {
-  if (!appState.teleop.keyboardEnabled) return;
+  if (!appState.teleop.keyboardEnabled || appState.status?.teleop?.joystick_active) return;
   if (event.target && ["INPUT", "TEXTAREA"].includes(event.target.tagName)) return;
 
   const key = event.key.toLowerCase();
@@ -393,7 +412,7 @@ function bind() {
 
   document.querySelectorAll(".teleop-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (!appState.teleop.keyboardEnabled) return;
+      if (!appState.teleop.keyboardEnabled || appState.status?.teleop?.joystick_active) return;
       applyTeleopCommand(btn.dataset.cmd, { force: btn.dataset.cmd === "stop" }).catch(console.error);
     });
   });
@@ -422,6 +441,7 @@ function bind() {
     appState.dockAutoFollow[appState.dockView] = isNearBottom(event.currentTarget);
   });
   $("btnRefreshMaps").addEventListener("click", () => loadSavedMaps().catch(console.error));
+  $("btnDeletePreviewMap").addEventListener("click", () => deleteSelectedPreviewMap().catch(console.error));
   $("btnRefreshConfigs").addEventListener("click", () => loadConfigs().catch(console.error));
   $("configBackBtn").addEventListener("click", showConfigOverview);
   $("configSaveBtn").addEventListener("click", () => saveConfigEditor().catch(console.error));

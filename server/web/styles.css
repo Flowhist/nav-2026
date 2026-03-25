@@ -62,6 +62,26 @@ button:hover {
   background: rgba(255, 255, 255, 0.92);
 }
 
+button:disabled,
+button.active:disabled,
+button.primary:disabled,
+button.danger:disabled {
+  color: rgba(22, 35, 27, 0.42);
+  background: rgba(222, 228, 220, 0.76);
+  border-color: rgba(67, 90, 67, 0.08);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+}
+
+button:disabled:hover,
+button.active:disabled:hover,
+button.primary:disabled:hover,
+button.danger:disabled:hover {
+  transform: none;
+  background: rgba(222, 228, 220, 0.76);
+}
+
 button.active,
 button.primary {
   color: #f7f9f7;
@@ -83,6 +103,13 @@ input {
   padding: 12px 14px;
   background: rgba(255, 255, 255, 0.82);
   color: var(--text);
+}
+
+input:disabled {
+  color: rgba(22, 35, 27, 0.48);
+  background: rgba(232, 237, 230, 0.82);
+  border-color: rgba(79, 99, 80, 0.1);
+  cursor: not-allowed;
 }
 
 .shell {
@@ -539,6 +566,47 @@ label {
 
 .toggle-btn {
   min-width: 90px;
+}
+
+.teleop-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.teleop-panel.teleop-locked > *:not(.teleop-blocker) {
+  opacity: 0.42;
+  filter: grayscale(0.3);
+}
+
+.teleop-blocker {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px;
+  text-align: center;
+  color: #20352b;
+  background: rgba(240, 244, 239, 0.76);
+  backdrop-filter: blur(3px);
+  border-radius: inherit;
+}
+
+.teleop-blocker.hidden {
+  display: none;
+}
+
+.teleop-blocker strong {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.teleop-blocker span {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .dpad {

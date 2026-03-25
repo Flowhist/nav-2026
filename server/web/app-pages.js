@@ -85,6 +85,7 @@ function renderMapList() {
   box.innerHTML = "";
   if (!appState.savedMaps.length) {
     box.innerHTML = `<div class="subtle">未发现可预览地图</div>`;
+    $("btnDeletePreviewMap").disabled = true;
     return;
   }
 
@@ -95,6 +96,7 @@ function renderMapList() {
     btn.addEventListener("click", () => loadPreviewMap(item.name));
     box.appendChild(btn);
   });
+  $("btnDeletePreviewMap").disabled = !appState.previewMapName;
 }
 
 function renderNavMapPicker() {
@@ -152,13 +154,25 @@ function applyRunState(id, runtime, activeText) {
 function renderRuntimeControls() {
   const mapping = getRuntime("mapping");
   const navigation = getRuntime("navigation");
+  const mappingBusy = mapping.running || mapping.stopping;
+  const navigationBusy = navigation.running || navigation.stopping;
+  const navCommandsEnabled = navigation.running && !navigation.stopping;
   applyRunState("mappingRunState", mapping, "运行中");
   applyRunState("navigationRunState", navigation, "运行中");
 
-  $("btnStartMapping").disabled = mapping.running || mapping.stopping;
-  $("btnStopMapping").disabled = !mapping.running && !mapping.stopping;
-  $("btnStartNavigation").disabled = navigation.running || navigation.stopping || !appState.savedMaps.length;
-  $("btnStopNavigation").disabled = !navigation.running && !navigation.stopping;
+  $("btnStartMapping").disabled = mappingBusy;
+  $("btnStopMapping").disabled = !mappingBusy;
+  $("btnSaveMap").disabled = !mapping.running || mapping.stopping;
+  $("mapName").disabled = !mapping.running || mapping.stopping;
+  $("btnStartNavigation").disabled = navigationBusy || !appState.savedMaps.length;
+  $("btnStopNavigation").disabled = !navigationBusy;
+  $("navMapToggle").disabled = navigationBusy || !appState.savedMaps.length;
+  $("btnArmInit").disabled = !navCommandsEnabled;
+  $("btnArmGoal").disabled = !navCommandsEnabled;
+  $("btnCancelNav").disabled = !navCommandsEnabled;
+  if (!navCommandsEnabled && appState.navPlacementMode && typeof setNavPlacementMode === "function") {
+    setNavPlacementMode(null);
+  }
 }
 
 function splitYamlComment(line) {
@@ -377,7 +391,18 @@ async function loadSavedMaps() {
   try {
     const data = await api("/api/maps");
     appState.savedMaps = data.maps || [];
-    if (!appState.previewMapName && appState.savedMaps.length) {
+    if (!appState.savedMaps.length) {
+      appState.previewMapName = "";
+      appState.previewMap = null;
+      appState.navMapName = "";
+      $("previewTitle").textContent = "地图预览";
+      $("previewMeta").textContent = "从 `maps/` 目录读取 `.pgm` 与 `.yaml`";
+      renderMapList();
+      renderNavMapPicker();
+      renderPreviewCanvas();
+      return;
+    }
+    if (!appState.previewMapName || !appState.savedMaps.some((item) => item.name === appState.previewMapName)) {
       appState.previewMapName = appState.savedMaps[0].name;
     }
     renderMapList();
@@ -385,6 +410,23 @@ async function loadSavedMaps() {
     if (appState.previewMapName) {
       await loadPreviewMap(appState.previewMapName, false);
     }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function deleteSelectedPreviewMap() {
+  const name = appState.previewMapName;
+  if (!name) return;
+  if (!window.confirm(`确认删除地图“${name}”吗？该目录及其全部文件会被删除。`)) return;
+  try {
+    await api(`/api/maps/${encodeURIComponent(name)}/delete`, "POST", {});
+    if (appState.navMapName === name) appState.navMapName = "";
+    if (appState.previewMapName === name) {
+      appState.previewMapName = "";
+      appState.previewMap = null;
+    }
+    await loadSavedMaps();
   } catch (err) {
     console.error(err);
   }
@@ -398,6 +440,7 @@ async function loadPreviewMap(name, rerenderList = true) {
     $("previewTitle").textContent = `地图预览 · ${name}`;
     $("previewMeta").textContent = `尺寸 ${appState.previewMap.width} × ${appState.previewMap.height}，分辨率 ${fmt(appState.previewMap.resolution, 3)} m/px`;
     if (rerenderList) renderMapList();
+    else $("btnDeletePreviewMap").disabled = false;
     renderPreviewCanvas();
   } catch (err) {
     console.error(err);
