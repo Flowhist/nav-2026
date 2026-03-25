@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 js_kb_router.py
-Keyboard teleop router with joystick priority.
+Keyboard/Web teleop router with joystick priority.
 """
 
 import sys
@@ -24,18 +24,22 @@ class KeyboardTeleopRouter(Node):
         self.declare_parameter("keyboard_linear_speeds", [0.1, 0.2, 0.4, 0.6])
         self.declare_parameter("keyboard_angular_speed", 0.5)
         self.declare_parameter("js_cmd_timeout", 0.4)
+        self.declare_parameter("web_cmd_timeout", 0.4)
         self.declare_parameter("stop_timeout", 1.0)
 
         speeds = [float(v) for v in self.get_parameter("keyboard_linear_speeds").value]
         self._kb_speeds = [abs(v) for v in speeds if abs(float(v)) > 1e-6] or [0.1, 0.2, 0.4, 0.6]
         self._kb_rot_spd = abs(float(self.get_parameter("keyboard_angular_speed").value))
         self._js_cmd_timeout = max(0.05, float(self.get_parameter("js_cmd_timeout").value))
+        self._web_cmd_timeout = max(0.05, float(self.get_parameter("web_cmd_timeout").value))
         self.stop_timeout = max(0.1, float(self.get_parameter("stop_timeout").value))
 
         # ── 订阅数据缓存 ──────────────────────────────────────────────── #
         self._js = False
         self._js_last_cmd = Twist()
         self._js_last_time = 0.0
+        self._web_last_cmd = Twist()
+        self._web_last_time = 0.0
 
         self.last_time = 0.0
 
@@ -52,6 +56,7 @@ class KeyboardTeleopRouter(Node):
         self._cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.create_subscription(Bool, "/js_state", self._on_js_state, 10)
         self.create_subscription(Twist, "/js_cmd_vel", self._on_js_cmd_vel, 10)
+        self.create_subscription(Twist, "/web_cmd_vel", self._on_web_cmd_vel, 10)
 
         # ── 定时器 ────────────────────────────────────────────────────── #
         self.create_timer(0.02, self._control_tick)  # 50Hz 键盘轮询 + 仲裁发布
@@ -65,8 +70,8 @@ class KeyboardTeleopRouter(Node):
             self.get_logger().warn("stdin is not a tty, keyboard control disabled")
 
         self.get_logger().info(
-            "js_kb_router started | linear_speeds=%s | angular=%.2f rad/s | F toggle | J/K stage | Space stop"
-            % (self._kb_speeds, self._kb_rot_spd)
+            "js_kb_router started | linear_speeds=%s | angular=%.2f rad/s | web_timeout=%.2fs | F toggle | J/K stage | Space stop"
+            % (self._kb_speeds, self._kb_rot_spd, self._web_cmd_timeout)
         )
 
     # ── 订阅回调 ────────────────────────────────────────────────────── #
@@ -81,6 +86,11 @@ class KeyboardTeleopRouter(Node):
         self._js_last_cmd = m
         self._js_last_time = time.monotonic()
         self.last_time = self._js_last_time
+
+    def _on_web_cmd_vel(self, m):
+        self._web_last_cmd = m
+        self._web_last_time = time.monotonic()
+        self.last_time = self._web_last_time
 
     # ── 键盘轮询 + 持续发布 ──────────────────────────────────────────── #
     def _control_tick(self):
@@ -125,6 +135,9 @@ class KeyboardTeleopRouter(Node):
         elif self._kb_enabled:
             msg.linear.x = self._kb_linear
             msg.angular.z = self._kb_angular
+            self._cmd_pub.publish(msg)
+        elif (now - self._web_last_time) <= self._web_cmd_timeout:
+            msg = self._web_last_cmd
             self._cmd_pub.publish(msg)
         elif (now - self.last_time) <= self.stop_timeout:
             self._cmd_pub.publish(msg)

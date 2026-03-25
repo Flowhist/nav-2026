@@ -154,19 +154,23 @@ class ServerApp:
                     return
 
                 if path == "/api/teleop/cmd_vel":
-                    app.bridge.command(
-                        {
-                            "type": "set_cmd_vel",
-                            "linear_x": body.get("linear_x", 0.0),
-                            "angular_z": body.get("angular_z", 0.0),
-                            "timeout_ms": body.get("timeout_ms", 300),
-                        }
+                    app.bridge.set_teleop_state(
+                        float(body.get("linear_x", 0.0)),
+                        float(body.get("angular_z", 0.0)),
+                    )
+                    self._json(HTTPStatus.OK, {"ok": True})
+                    return
+
+                if path == "/api/teleop/state":
+                    app.bridge.set_teleop_state(
+                        float(body.get("linear_x", 0.0)),
+                        float(body.get("angular_z", 0.0)),
                     )
                     self._json(HTTPStatus.OK, {"ok": True})
                     return
 
                 if path == "/api/teleop/stop":
-                    app.bridge.command({"type": "stop"})
+                    app.bridge.stop_teleop()
                     self._json(HTTPStatus.OK, {"ok": True})
                     return
 

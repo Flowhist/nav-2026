@@ -40,7 +40,6 @@ const appState = {
   },
   teleop: {
     keyboardEnabled: false,
-    timer: null,
     currentCommand: "stop",
     speedStages: [0.1, 0.2, 0.4, 0.6],
     angularSpeed: 0.5,
@@ -70,9 +69,14 @@ function fmt(n, digits = 2) {
   return Number(n).toFixed(digits);
 }
 
-async function api(path, method = "GET", body = null) {
-  const opt = { method, headers: { "Content-Type": "application/json" } };
-  if (body) opt.body = JSON.stringify(body);
+async function api(path, method = "GET", body = null, options = {}) {
+  const { headers = {}, ...rest } = options;
+  const opt = {
+    method,
+    headers: { "Content-Type": "application/json", ...headers },
+    ...rest,
+  };
+  if (body !== null && body !== undefined) opt.body = JSON.stringify(body);
   const res = await fetch(path, opt);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();

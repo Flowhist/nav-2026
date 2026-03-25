@@ -14,6 +14,11 @@ class RosBridge:
     def __init__(self, state_store: StateStore) -> None:
         self.state_store = state_store
         self._cmd_q: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=200)
+        self._teleop_lock = threading.Lock()
+        self._teleop_linear = 0.0
+        self._teleop_angular = 0.0
+        self._teleop_active = False
+        self._teleop_stop_pending = False
         self._thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
@@ -28,13 +33,48 @@ class RosBridge:
         except queue.Full:
             self.state_store.add_event("warn", "command queue full, drop command", payload)
 
+    def set_teleop_state(self, linear_x: float, angular_z: float) -> None:
+        with self._teleop_lock:
+            self._teleop_linear = float(linear_x)
+            self._teleop_angular = float(angular_z)
+            self._teleop_active = abs(self._teleop_linear) > 1e-6 or abs(self._teleop_angular) > 1e-6
+            self._teleop_stop_pending = not self._teleop_active
+
+        self.state_store.update_status(
+            {
+                "teleop": {
+                    "active": self._teleop_active,
+                    "timeout_at": None,
+                }
+            }
+        )
+
+    def stop_teleop(self) -> None:
+        with self._teleop_lock:
+            self._teleop_linear = 0.0
+            self._teleop_angular = 0.0
+            self._teleop_active = False
+            self._teleop_stop_pending = True
+
+        self.state_store.update_status({"teleop": {"active": False, "timeout_at": None}})
+
+    def take_teleop_state(self) -> Tuple[float, float, bool, bool]:
+        with self._teleop_lock:
+            linear = self._teleop_linear
+            angular = self._teleop_angular
+            active = self._teleop_active
+            stop_pending = self._teleop_stop_pending
+            if stop_pending:
+                self._teleop_stop_pending = False
+            return linear, angular, active, stop_pending
+
     def _run(self) -> None:
         try:
             import rclpy
             from rclpy.executors import MultiThreadedExecutor
 
             rclpy.init(args=None)
-            node = _BridgeNode(self.state_store, self._cmd_q)
+            node = _BridgeNode(self.state_store, self._cmd_q, self)
             executor = MultiThreadedExecutor(num_threads=3)
             executor.add_node(node)
 
@@ -47,18 +87,23 @@ class RosBridge:
 
 
 class _BridgeNode:
-    def __new__(cls, state_store: StateStore, cmd_q: "queue.Queue[Dict[str, Any]]"):
+    def __new__(cls, state_store: StateStore, cmd_q: "queue.Queue[Dict[str, Any]]", bridge: RosBridge):
         from rclpy.node import Node
 
         class BridgeNode(Node):
             pass
 
         obj = BridgeNode("web_control_server")
-        cls._init_bridge(obj, state_store, cmd_q)
+        cls._init_bridge(obj, state_store, cmd_q, bridge)
         return obj
 
     @staticmethod
-    def _init_bridge(self: Any, state_store: StateStore, cmd_q: "queue.Queue[Dict[str, Any]]") -> None:
+    def _init_bridge(
+        self: Any,
+        state_store: StateStore,
+        cmd_q: "queue.Queue[Dict[str, Any]]",
+        bridge: RosBridge,
+    ) -> None:
         from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
         from nav_msgs.msg import OccupancyGrid, Odometry, Path
         from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
@@ -69,6 +114,7 @@ class _BridgeNode:
 
         self.state_store = state_store
         self.cmd_q = cmd_q
+        self.bridge = bridge
 
         self.PoseStamped = PoseStamped
         self.PoseWithCovarianceStamped = PoseWithCovarianceStamped
@@ -79,6 +125,7 @@ class _BridgeNode:
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.pub_goal = self.create_publisher(PoseStamped, "/goal_pose", 10)
+        self.pub_web_cmd = self.create_publisher(Twist, "/web_cmd_vel", 10)
         self.pub_cmd = self.create_publisher(Twist, "/cmd_vel", 10)
         self.pub_initial = self.create_publisher(PoseWithCovarianceStamped, "/initialpose", 10)
         self.pub_nav_clear = self.create_publisher(Empty, "/nav_clear", 10)
@@ -107,12 +154,10 @@ class _BridgeNode:
         self._last_seen: Dict[str, float] = {}
         self._last_map_stamp: Optional[Tuple[int, int]] = None
 
-        self._teleop_timeout_at: Optional[float] = None
-        self._teleop_active = False
         self._joystick_active = False
 
-        self.create_timer(0.05, lambda: _BridgeNode._process_commands(self))
-        self.create_timer(0.1, lambda: _BridgeNode._teleop_guard(self))
+        self.create_timer(0.02, lambda: _BridgeNode._publish_web_teleop(self))
+        self.create_timer(0.02, lambda: _BridgeNode._process_commands(self))
         self.create_timer(0.25, lambda: _BridgeNode._refresh_pose_map(self))
         self.create_timer(1.0, lambda: _BridgeNode._publish_metrics(self))
 
@@ -288,11 +333,29 @@ class _BridgeNode:
         self.state_store.update_scene({"robot_pose_map": pose_payload})
 
     @staticmethod
-    def _publish_stop(self: Any) -> None:
+    def _publish_web_stop(self: Any) -> None:
+        msg = self.Twist()
+        msg.linear.x = 0.0
+        msg.angular.z = 0.0
+        self.pub_web_cmd.publish(msg)
+
+    @staticmethod
+    def _publish_direct_stop(self: Any) -> None:
         msg = self.Twist()
         msg.linear.x = 0.0
         msg.angular.z = 0.0
         self.pub_cmd.publish(msg)
+
+    @staticmethod
+    def _publish_web_teleop(self: Any) -> None:
+        linear, angular, active, stop_pending = self.bridge.take_teleop_state()
+        if not active and not stop_pending:
+            return
+
+        msg = self.Twist()
+        msg.linear.x = linear
+        msg.angular.z = angular
+        self.pub_web_cmd.publish(msg)
 
     @staticmethod
     def _update_target_state(self: Any, key: str, x: float, y: float, yaw_deg: float) -> None:
@@ -315,101 +378,60 @@ class _BridgeNode:
             except queue.Empty:
                 break
 
-            ctype = cmd.get("type", "")
-            if ctype == "set_cmd_vel":
-                lin = float(cmd.get("linear_x", 0.0))
-                ang = float(cmd.get("angular_z", 0.0))
-                timeout_ms = int(cmd.get("timeout_ms", 300))
-
-                msg = self.Twist()
-                msg.linear.x = lin
-                msg.angular.z = ang
-                self.pub_cmd.publish(msg)
-
-                self._teleop_active = abs(lin) > 1e-6 or abs(ang) > 1e-6
-                if self._teleop_active:
-                    self._teleop_timeout_at = time.monotonic() + max(100, timeout_ms) / 1000.0
-                else:
-                    self._teleop_timeout_at = None
-
-                self.state_store.update_status(
-                    {
-                        "teleop": {
-                            "active": self._teleop_active,
-                            "timeout_at": time.time() + max(100, timeout_ms) / 1000.0 if self._teleop_active else None,
-                        }
-                    }
-                )
-
-            elif ctype == "stop":
-                _BridgeNode._publish_stop(self)
-                self._teleop_active = False
-                self._teleop_timeout_at = None
-                self.state_store.update_status({"teleop": {"active": False, "timeout_at": None}})
-                _BridgeNode._event(self, "info", "robot stopped")
-
-            elif ctype == "set_goal":
-                x = float(cmd.get("x", 0.0))
-                y = float(cmd.get("y", 0.0))
-                yaw_deg = float(cmd.get("yaw_deg", 0.0))
-                yaw = math.radians(yaw_deg)
-
-                msg = self.PoseStamped()
-                msg.header.stamp = self.get_clock().now().to_msg()
-                msg.header.frame_id = "map"
-                msg.pose.position.x = x
-                msg.pose.position.y = y
-                msg.pose.orientation.z = math.sin(yaw * 0.5)
-                msg.pose.orientation.w = math.cos(yaw * 0.5)
-                self.pub_goal.publish(msg)
-                _BridgeNode._update_target_state(self, "goal_pose", x, y, yaw_deg)
-                _BridgeNode._event(self, "info", "goal published", {"x": x, "y": y, "yaw_deg": yaw_deg})
-
-            elif ctype == "set_initialpose":
-                x = float(cmd.get("x", 0.0))
-                y = float(cmd.get("y", 0.0))
-                yaw_deg = float(cmd.get("yaw_deg", 0.0))
-                yaw = math.radians(yaw_deg)
-
-                msg = self.PoseWithCovarianceStamped()
-                msg.header.stamp = self.get_clock().now().to_msg()
-                msg.header.frame_id = "map"
-                msg.pose.pose.position.x = x
-                msg.pose.pose.position.y = y
-                msg.pose.pose.orientation.z = math.sin(yaw * 0.5)
-                msg.pose.pose.orientation.w = math.cos(yaw * 0.5)
-                msg.pose.covariance[0] = 0.25
-                msg.pose.covariance[7] = 0.25
-                msg.pose.covariance[35] = 0.0685
-                self.pub_initial.publish(msg)
-                _BridgeNode._update_target_state(self, "initial_pose", x, y, yaw_deg)
-                _BridgeNode._event(self, "info", "initialpose published", {"x": x, "y": y, "yaw_deg": yaw_deg})
-
-            elif ctype == "save_map":
-                name = str(cmd.get("name", "manual_map")).strip() or "manual_map"
-                _BridgeNode._save_map(self, name)
-
-            elif ctype == "cancel_nav":
-                _BridgeNode._publish_stop(self)
-                self.pub_nav_clear.publish(self.Empty())
-                self.state_store.update_status({"robot": {"goal_pose": None, "plan": {"points": 0, "length_m": 0.0, "updated_at": time.time()}}})
-                self.state_store.update_scene({"goal_pose": None, "plan": {"points": 0, "length_m": 0.0, "points_xy": [], "updated_at": time.time()}})
-                _BridgeNode._event(self, "info", "navigation state cleared and robot stopped")
+            _BridgeNode._handle_command(self, cmd)
 
     @staticmethod
-    def _teleop_guard(self: Any) -> None:
-        if not self._teleop_active:
-            return
-        if self._teleop_timeout_at is None:
-            return
-        if time.monotonic() < self._teleop_timeout_at:
-            return
+    def _handle_command(self: Any, cmd: Dict[str, Any]) -> None:
+        ctype = cmd.get("type", "")
+        if ctype == "set_goal":
+            x = float(cmd.get("x", 0.0))
+            y = float(cmd.get("y", 0.0))
+            yaw_deg = float(cmd.get("yaw_deg", 0.0))
+            yaw = math.radians(yaw_deg)
 
-        _BridgeNode._publish_stop(self)
-        self._teleop_active = False
-        self._teleop_timeout_at = None
-        self.state_store.update_status({"teleop": {"active": False, "timeout_at": None}})
-        _BridgeNode._event(self, "info", "teleop timeout stop")
+            msg = self.PoseStamped()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = "map"
+            msg.pose.position.x = x
+            msg.pose.position.y = y
+            msg.pose.orientation.z = math.sin(yaw * 0.5)
+            msg.pose.orientation.w = math.cos(yaw * 0.5)
+            self.pub_goal.publish(msg)
+            _BridgeNode._update_target_state(self, "goal_pose", x, y, yaw_deg)
+            _BridgeNode._event(self, "info", "goal published", {"x": x, "y": y, "yaw_deg": yaw_deg})
+
+        elif ctype == "set_initialpose":
+            x = float(cmd.get("x", 0.0))
+            y = float(cmd.get("y", 0.0))
+            yaw_deg = float(cmd.get("yaw_deg", 0.0))
+            yaw = math.radians(yaw_deg)
+
+            msg = self.PoseWithCovarianceStamped()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = "map"
+            msg.pose.pose.position.x = x
+            msg.pose.pose.position.y = y
+            msg.pose.pose.orientation.z = math.sin(yaw * 0.5)
+            msg.pose.pose.orientation.w = math.cos(yaw * 0.5)
+            msg.pose.covariance[0] = 0.25
+            msg.pose.covariance[7] = 0.25
+            msg.pose.covariance[35] = 0.0685
+            self.pub_initial.publish(msg)
+            _BridgeNode._update_target_state(self, "initial_pose", x, y, yaw_deg)
+            _BridgeNode._event(self, "info", "initialpose published", {"x": x, "y": y, "yaw_deg": yaw_deg})
+
+        elif ctype == "save_map":
+            name = str(cmd.get("name", "manual_map")).strip() or "manual_map"
+            _BridgeNode._save_map(self, name)
+
+        elif ctype == "cancel_nav":
+            self.bridge.stop_teleop()
+            _BridgeNode._publish_web_stop(self)
+            _BridgeNode._publish_direct_stop(self)
+            self.pub_nav_clear.publish(self.Empty())
+            self.state_store.update_status({"robot": {"goal_pose": None, "plan": {"points": 0, "length_m": 0.0, "updated_at": time.time()}}})
+            self.state_store.update_scene({"goal_pose": None, "plan": {"points": 0, "length_m": 0.0, "points_xy": [], "updated_at": time.time()}})
+            _BridgeNode._event(self, "info", "navigation state cleared and robot stopped")
 
     @staticmethod
     def _publish_metrics(self: Any) -> None:

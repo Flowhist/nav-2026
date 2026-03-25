@@ -27,18 +27,37 @@ function syncTeleopAvailability() {
   });
 }
 
-async function sendCmd(lin, ang, timeoutMs = 320) {
-  await api("/api/teleop/cmd_vel", "POST", { linear_x: lin, angular_z: ang, timeout_ms: timeoutMs });
+async function applyTeleopCommand(kind, options = {}) {
+  const { force = false } = options;
+  const command = kind || "stop";
+  if (!force && appState.teleop.currentCommand === command) return;
+
+  appState.teleop.currentCommand = command;
+  syncTeleopButtons();
+
+  if (command === "stop") {
+    await api("/api/teleop/stop", "POST", {});
+    return;
+  }
+
+  const [lin, ang] = resolveTeleopCommand(command);
+  await api("/api/teleop/state", "POST", {
+    command,
+    linear_x: lin,
+    angular_z: ang,
+  });
 }
 
-function stopTeleopLoop(sendStop = true) {
-  if (appState.teleop.timer) {
-    window.clearInterval(appState.teleop.timer);
-    appState.teleop.timer = null;
-  }
+function stopTeleop(sendStop = true) {
   appState.teleop.currentCommand = "stop";
   syncTeleopButtons();
   if (sendStop) api("/api/teleop/stop", "POST", {}).catch(console.error);
+}
+
+function sendTeleopStopBeacon() {
+  if (!navigator.sendBeacon) return;
+  const body = new Blob(["{}"], { type: "application/json" });
+  navigator.sendBeacon("/api/teleop/stop", body);
 }
 
 function resolveTeleopCommand(kind) {
@@ -83,21 +102,6 @@ async function loadTeleopConfig() {
   syncTeleopStage();
 }
 
-function startTeleopLoop(kind) {
-  const [lin, ang] = resolveTeleopCommand(kind);
-  stopTeleopLoop(false);
-  appState.teleop.currentCommand = kind;
-  syncTeleopButtons();
-  sendCmd(lin, ang).catch(console.error);
-  if (kind !== "stop") {
-    appState.teleop.timer = window.setInterval(() => {
-      sendCmd(lin, ang).catch(console.error);
-    }, 140);
-  } else {
-    api("/api/teleop/stop", "POST", {}).catch(console.error);
-  }
-}
-
 function setKeyboardTeleop(enabled) {
   appState.teleop.keyboardEnabled = enabled;
   $("teleopToggle").classList.toggle("active", enabled);
@@ -105,7 +109,7 @@ function setKeyboardTeleop(enabled) {
   $("teleopHint").textContent = enabled
     ? "开启状态\n输入一次持续运动，W/A/S/D 移动，Space 急停，J/K 调整前进档位"
     : "关闭状态\n开启后可用 W/A/S/D、Space、J/K 控制";
-  if (!enabled) stopTeleopLoop(true);
+  if (!enabled) stopTeleop(true);
   syncTeleopAvailability();
   renderStatus(appState.status);
 }
@@ -117,30 +121,33 @@ function handleKeyboardTeleop(event) {
   const key = event.key.toLowerCase();
   if (key === "w") {
     event.preventDefault();
-    startTeleopLoop("forward");
+    applyTeleopCommand("forward").catch(console.error);
   } else if (key === "s") {
     event.preventDefault();
-    
-    startTeleopLoop("backward");
+    applyTeleopCommand("backward").catch(console.error);
   } else if (key === "a") {
     event.preventDefault();
-    startTeleopLoop("left");
+    applyTeleopCommand("left").catch(console.error);
   } else if (key === "d") {
     event.preventDefault();
-    startTeleopLoop("right");
+    applyTeleopCommand("right").catch(console.error);
   } else if (key === " ") {
     event.preventDefault();
-    startTeleopLoop("stop");
+    applyTeleopCommand("stop", { force: true }).catch(console.error);
   } else if (key === "j") {
     event.preventDefault();
     appState.teleop.stageIndex = clamp(appState.teleop.stageIndex - 1, 0, appState.teleop.speedStages.length - 1);
     syncTeleopStage();
-    if (["forward", "backward"].includes(appState.teleop.currentCommand)) startTeleopLoop(appState.teleop.currentCommand);
+    if (["forward", "backward"].includes(appState.teleop.currentCommand)) {
+      applyTeleopCommand(appState.teleop.currentCommand, { force: true }).catch(console.error);
+    }
   } else if (key === "k") {
     event.preventDefault();
     appState.teleop.stageIndex = clamp(appState.teleop.stageIndex + 1, 0, appState.teleop.speedStages.length - 1);
     syncTeleopStage();
-    if (["forward", "backward"].includes(appState.teleop.currentCommand)) startTeleopLoop(appState.teleop.currentCommand);
+    if (["forward", "backward"].includes(appState.teleop.currentCommand)) {
+      applyTeleopCommand(appState.teleop.currentCommand, { force: true }).catch(console.error);
+    }
   }
 }
 
@@ -360,7 +367,9 @@ function bind() {
       appState.teleop.stageIndex = Number(btn.dataset.stage);
       syncTeleopStage();
       toggleStageMenu(false);
-      if (["forward", "backward"].includes(appState.teleop.currentCommand)) startTeleopLoop(appState.teleop.currentCommand);
+      if (["forward", "backward"].includes(appState.teleop.currentCommand)) {
+        applyTeleopCommand(appState.teleop.currentCommand, { force: true }).catch(console.error);
+      }
     });
   });
 
@@ -385,7 +394,7 @@ function bind() {
   document.querySelectorAll(".teleop-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (!appState.teleop.keyboardEnabled) return;
-      startTeleopLoop(btn.dataset.cmd);
+      applyTeleopCommand(btn.dataset.cmd, { force: btn.dataset.cmd === "stop" }).catch(console.error);
     });
   });
 
@@ -447,7 +456,10 @@ function bind() {
     renderPreviewCanvas();
   });
   window.addEventListener("blur", () => {
-    if (appState.teleop.keyboardEnabled) startTeleopLoop("stop");
+    if (appState.teleop.keyboardEnabled) stopTeleop(true);
+  });
+  window.addEventListener("pagehide", () => {
+    if (appState.teleop.keyboardEnabled) sendTeleopStopBeacon();
   });
 
   syncTeleopStage();
