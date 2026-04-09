@@ -257,7 +257,7 @@
 
     <include>
       <name>finav_vehicle</name>
-      <pose>-0.15 -5.65 0.16 0 0 1.5707963</pose>
+      <pose>-0.15 -5.65 0 0 0 1.5707963</pose>
       <uri>model://whillcar</uri>
     </include>
 

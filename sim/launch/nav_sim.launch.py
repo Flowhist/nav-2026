@@ -115,7 +115,7 @@ def generate_launch_description():
     use_rviz_arg = DeclareLaunchArgument("use_rviz", default_value="true")
     x_arg = DeclareLaunchArgument("x", default_value="-0.15")
     y_arg = DeclareLaunchArgument("y", default_value="-5.65")
-    z_arg = DeclareLaunchArgument("z", default_value="0.16")
+    z_arg = DeclareLaunchArgument("z", default_value="0.0")
     yaw_arg = DeclareLaunchArgument("yaw", default_value="1.5707963")
     scan_filter_center_deg_arg = DeclareLaunchArgument(
         "scan_filter_center_deg",
@@ -140,16 +140,7 @@ def generate_launch_description():
     gz_scan_topic = "/scan"
     ros_scan_bridge_topic = "/scan_gz"
     gz_clock_topic = ["/world/", world_name, "/clock"]
-    gz_imu_topic = [
-        "/world/",
-        world_name,
-        "/model/finav_vehicle/link/imu_link/sensor/imu_sensor/imu",
-    ]
-    gz_joint_state_topic = [
-        "/world/",
-        world_name,
-        "/model/finav_vehicle/joint_state",
-    ]
+    gz_set_pose_service = ["/world/", world_name, "/set_pose"]
     gz_resource_path = os.path.join(pkg_share, "sim", "gazebo", "models")
 
     if sim_backend["backend"] == "ros_gz_sim":
@@ -183,15 +174,11 @@ def generate_launch_description():
             arguments=[
                 [*gz_clock_topic, "@rosgraph_msgs/msg/Clock[gz.msgs.Clock"],
                 [gz_scan_topic, "@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan"],
-                [*gz_imu_topic, "@sensor_msgs/msg/Imu[gz.msgs.IMU"],
-                "/model/finav_vehicle/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
-                "/model/finav_vehicle/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry",
-                [*gz_joint_state_topic, "@sensor_msgs/msg/JointState[gz.msgs.Model"],
+                [*gz_set_pose_service, "@ros_gz_interfaces/srv/SetEntityPose"],
             ],
             remappings=[
                 (gz_clock_topic, "/clock"),
                 (gz_scan_topic, ros_scan_bridge_topic),
-                ("/model/finav_vehicle/cmd_vel", "/cmd_vel"),
             ],
         )
         gz_topic_adapter = Node(
@@ -202,15 +189,38 @@ def generate_launch_description():
             parameters=[
                 {
                     "scan_src_topic": ros_scan_bridge_topic,
-                    "imu_src_topic": gz_imu_topic,
-                    "odom_src_topic": "/model/finav_vehicle/odometry",
-                    "joint_state_src_topic": gz_joint_state_topic,
+                    "imu_src_topic": "/imu_unused",
+                    "odom_src_topic": "/odom_unused",
+                    "joint_state_src_topic": "/joint_states_unused",
                     "scan_topic": "/scan",
                     "imu_topic": "/imu/data",
                     "odom_topic": "/odom",
                     "joint_states_topic": "/joint_states",
                     "odom_frame": "odom",
                     "base_frame": "base_link",
+                }
+            ],
+        )
+        sim_drive = Node(
+            package="finav",
+            executable="sim_gazebo_drive.py",
+            name="sim_gazebo_drive",
+            output="screen",
+            parameters=[
+                {
+                    "use_sim_time": True,
+                    "world_name": world_name,
+                    "model_name": "finav_vehicle",
+                    "cmd_vel_topic": "/cmd_vel",
+                    "odom_topic": "/odom",
+                    "odom_frame": "odom",
+                    "base_frame": "base_link",
+                    "publish_rate_hz": 30.0,
+                    "cmd_timeout": 0.35,
+                    "pose_z": z,
+                    "x": x,
+                    "y": y,
+                    "yaw": yaw,
                 }
             ],
         )
@@ -264,6 +274,7 @@ def generate_launch_description():
         )
         bridge = None
         gz_topic_adapter = None
+        sim_drive = None
         unpause_world = None
         robot_description = ParameterValue(
             Command(["xacro ", urdf_file]), value_type=str
@@ -357,6 +368,7 @@ def generate_launch_description():
             *([spawn_entity] if spawn_entity is not None else []),
             *([bridge] if bridge is not None else []),
             *([gz_topic_adapter] if gz_topic_adapter is not None else []),
+            *([sim_drive] if sim_drive is not None else []),
             *([TimerAction(period=1.0, actions=[unpause_world])] if unpause_world is not None else []),
             TimerAction(period=1.0, actions=[scan_filter]),
             TimerAction(period=2.0, actions=[slam_toolbox_nav_launch]),

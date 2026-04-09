@@ -46,7 +46,7 @@ class KeyboardTeleopRouter(Node):
         self.last_time = 0.0
 
         # ── 键盘控制状态 ──────────────────────────────────────────────── #
-        self._kb_enabled = False
+        self._kb_enabled = True
         self._kb_last_time = 0.0
         self._kb_linear = 0.0
         self._kb_angular = 0.0
@@ -72,7 +72,7 @@ class KeyboardTeleopRouter(Node):
             self.get_logger().warn("stdin is not a tty, keyboard control disabled")
 
         self.get_logger().info(
-            "js_kb_router started | linear_speeds=%s | angular=%.2f rad/s | router_rate=%.2f Hz | web_timeout=%.2fs | F toggle | J/K stage | Space stop"
+            "js_kb_router started | linear_speeds=%s | angular=%.2f rad/s | router_rate=%.2f Hz | web_timeout=%.2fs | WSAD move | J up | K down | Space stop"
             % (self._kb_speeds, self._kb_rot_spd, self._router_rate, self._web_cmd_timeout)
         )
 
@@ -104,7 +104,7 @@ class KeyboardTeleopRouter(Node):
             rlist, _, _ = select.select([sys.stdin], [], [], 0)
             if rlist:
                 key = sys.stdin.read(1).lower()
-                if key == "f":  # F：切换开关
+                if key == "f":
                     self._kb_enabled = not self._kb_enabled
                     self._kb_linear = 0.0
                     self._kb_angular = 0.0
@@ -121,11 +121,11 @@ class KeyboardTeleopRouter(Node):
                     elif key == "d":
                         self._kb_linear = 0.0
                         self._kb_angular = -self._kb_rot_spd
-                    elif key == "k":
+                    elif key == "j":
                         self._kb_spd_idx = min(
                             self._kb_spd_idx + 1, len(self._kb_speeds) - 1
                         )
-                    elif key == "j":
+                    elif key == "k":
                         self._kb_spd_idx = max(self._kb_spd_idx - 1, 0)
                     elif key == " ":
                         self._kb_linear = 0.0

@@ -95,6 +95,7 @@ install(PROGRAMS
   scripts/tool/clean_map.sh
   scripts/tool/manual_save_map.py
   sim/scripts/sim_chassis_sensor_pub.py
+  sim/scripts/sim_gazebo_drive.py
   sim/scripts/sim_plan_visualizer.py
   sim/scripts/sim_send_goal.py
   sim/scripts/gz_topic_adapter.py
