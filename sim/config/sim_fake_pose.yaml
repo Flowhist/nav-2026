@@ -1,4 +1,4 @@
-sim_fake_pose_tf:
+sim_chassis_sensor_pub:
   ros__parameters:
     map_frame: "map"
     base_frame: "base_link"

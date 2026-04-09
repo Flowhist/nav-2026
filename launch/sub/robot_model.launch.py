@@ -9,6 +9,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -20,6 +21,13 @@ def generate_launch_description():
 
     # 使用xacro处理URDF文件（处理xacro:property等宏）
     robot_description = ParameterValue(Command(["xacro ", urdf_file]), value_type=str)
+
+    use_joint_state_publisher_arg = DeclareLaunchArgument(
+        "use_joint_state_publisher",
+        default_value="true",
+        description="是否启动joint_state_publisher",
+    )
+    use_joint_state_publisher = LaunchConfiguration("use_joint_state_publisher")
 
     # Robot State Publisher节点（发布TF和机器人状态）
     robot_state_publisher_node = Node(
@@ -41,6 +49,7 @@ def generate_launch_description():
         executable="joint_state_publisher",
         name="joint_state_publisher",
         output="screen",
+        condition=IfCondition(use_joint_state_publisher),
         parameters=[
             {
                 "use_sim_time": False,
@@ -50,6 +59,7 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            use_joint_state_publisher_arg,
             robot_state_publisher_node,
             joint_state_publisher_node,
         ]

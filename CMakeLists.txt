@@ -77,7 +77,6 @@ install(DIRECTORY
 install(
   DIRECTORY sim
   DESTINATION share/${PROJECT_NAME}/
-  PATTERN "launch" EXCLUDE
   PATTERN "__pycache__" EXCLUDE
 )
 
@@ -95,7 +94,7 @@ install(PROGRAMS
   scripts/tool/clean_nav.sh
   scripts/tool/clean_map.sh
   scripts/tool/manual_save_map.py
-  sim/scripts/sim_fake_pose_tf.py
+  sim/scripts/sim_chassis_sensor_pub.py
   sim/scripts/sim_plan_visualizer.py
   sim/scripts/sim_send_goal.py
   start_finav.sh

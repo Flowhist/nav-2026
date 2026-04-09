@@ -15,7 +15,7 @@ def generate_launch_description():
     pkg_share = get_package_share_directory("finav")
     default_map_yaml = os.path.join(pkg_share, "maps", "map4", "map4.yaml")
     default_rviz = os.path.join(pkg_share, "sim", "rviz", "path_plan_sim.rviz")
-    path_plan_cfg = os.path.join(pkg_share, "sim", "config", "path_plan_sim.yaml")
+    path_plan_cfg = os.path.join(pkg_share, "config", "path_plan.yaml")
     fake_pose_cfg = os.path.join(pkg_share, "sim", "config", "sim_fake_pose.yaml")
     plan_visualizer_cfg = os.path.join(
         pkg_share, "sim", "config", "sim_plan_visualizer.yaml"
@@ -72,8 +72,8 @@ def generate_launch_description():
 
     fake_pose = Node(
         package="finav",
-        executable="sim_fake_pose_tf.py",
-        name="sim_fake_pose_tf",
+        executable="sim_chassis_sensor_pub.py",
+        name="sim_chassis_sensor_pub",
         output="screen",
         parameters=[
             fake_pose_cfg,
