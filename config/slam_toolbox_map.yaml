@@ -26,7 +26,7 @@ slam_toolbox:
     odom_frame: odom
     map_frame: map
     base_frame: base_link
-    scan_topic: /scan
+    scan_topic: /scan_filtered
     
     # 启用里程计辅助 - 提供初始位姿估计，加速扫描匹配收敛
     # sync版本通过TF树自动使用里程计，不需要use_odom参数
