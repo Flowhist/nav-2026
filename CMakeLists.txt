@@ -97,6 +97,7 @@ install(PROGRAMS
   sim/scripts/sim_chassis_sensor_pub.py
   sim/scripts/sim_plan_visualizer.py
   sim/scripts/sim_send_goal.py
+  sim/scripts/gz_topic_adapter.py
   start_finav.sh
   DESTINATION lib/${PROJECT_NAME}
 )

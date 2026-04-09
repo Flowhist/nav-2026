@@ -27,6 +27,8 @@
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>nav2_map_server</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
 
   <!-- SLAM Toolbox for mapping and localization -->
   <exec_depend>slam_toolbox</exec_depend>
@@ -39,4 +41,3 @@
   </export>
 
 </package>
-

@@ -2,9 +2,18 @@
 
 import os
 
-from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
+from ament_index_python.packages import (
+    PackageNotFoundError,
+    get_package_share_directory,
+)
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+    TimerAction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
@@ -64,7 +73,11 @@ def generate_launch_description():
     )
     default_rviz = os.path.join(pkg_share, "rviz", "mapping.rviz")
     urdf_file = os.path.join(pkg_share, "urdf", "whillcar.urdf")
+    gz_model_file = os.path.join(
+        pkg_share, "sim", "gazebo", "models", "whillcar", "model.sdf"
+    )
     lidar_cfg = _load_lidar_config(os.path.join(pkg_share, "config", "lidar.yaml"))
+    default_world_name = os.path.splitext(os.path.basename(default_world))[0]
 
     world_arg = DeclareLaunchArgument(
         "world",
@@ -75,6 +88,11 @@ def generate_launch_description():
         "use_rviz",
         default_value="true",
         description="Whether to start RViz",
+    )
+    world_name_arg = DeclareLaunchArgument(
+        "world_name",
+        default_value=default_world_name,
+        description="Gazebo world name used by ros_gz_bridge topic paths",
     )
     x_arg = DeclareLaunchArgument("x", default_value="-0.15")
     y_arg = DeclareLaunchArgument("y", default_value="-5.65")
@@ -92,6 +110,7 @@ def generate_launch_description():
     )
 
     world = LaunchConfiguration("world")
+    world_name = LaunchConfiguration("world_name")
     use_rviz = LaunchConfiguration("use_rviz")
     x = LaunchConfiguration("x")
     y = LaunchConfiguration("y")
@@ -99,33 +118,103 @@ def generate_launch_description():
     yaw = LaunchConfiguration("yaw")
     scan_filter_center_deg = LaunchConfiguration("scan_filter_center_deg")
     scan_filter_fov_deg = LaunchConfiguration("scan_filter_fov_deg")
+    gz_scan_topic = "/scan"
+    ros_scan_bridge_topic = "/scan_gz"
+    gz_clock_topic = ["/world/", world_name, "/clock"]
+    gz_imu_topic = [
+        "/world/",
+        world_name,
+        "/model/finav_vehicle/link/imu_link/sensor/imu_sensor/imu",
+    ]
+    gz_joint_state_topic = [
+        "/world/",
+        world_name,
+        "/model/finav_vehicle/joint_state",
+    ]
+    gz_resource_path = os.path.join(pkg_share, "sim", "gazebo", "models")
 
     if sim_backend["backend"] == "ros_gz_sim":
-        gazebo = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(sim_backend["share"], "launch", "gz_sim.launch.py")
-            ),
-            launch_arguments={"gz_args": ["-r ", world]}.items(),
+        gz_resource_env = SetEnvironmentVariable(
+            name="IGN_GAZEBO_RESOURCE_PATH",
+            value=[
+                os.environ.get("IGN_GAZEBO_RESOURCE_PATH", ""),
+                os.pathsep,
+                gz_resource_path,
+            ],
         )
-        spawn_entity = Node(
-            package="ros_gz_sim",
-            executable="create",
-            name="spawn_finav",
+        gz_sim_resource_env = SetEnvironmentVariable(
+            name="GZ_SIM_RESOURCE_PATH",
+            value=[
+                os.environ.get("GZ_SIM_RESOURCE_PATH", ""),
+                os.pathsep,
+                gz_resource_path,
+            ],
+        )
+        gazebo = ExecuteProcess(
+            cmd=["ign", "gazebo", "-r", world],
+            shell=False,
+            output="screen",
+        )
+        spawn_entity = None
+        bridge = Node(
+            package="ros_gz_bridge",
+            executable="parameter_bridge",
+            name="ros_gz_bridge",
             output="screen",
             arguments=[
-                "-name",
-                "finav_vehicle",
-                "-topic",
-                "/robot_description",
-                "-x",
-                x,
-                "-y",
-                y,
-                "-z",
-                z,
-                "-Y",
-                yaw,
+                [*gz_clock_topic, "@rosgraph_msgs/msg/Clock[gz.msgs.Clock"],
+                [gz_scan_topic, "@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan"],
+                [*gz_imu_topic, "@sensor_msgs/msg/Imu[gz.msgs.IMU"],
+                "/model/finav_vehicle/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
+                "/model/finav_vehicle/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry",
+                [*gz_joint_state_topic, "@sensor_msgs/msg/JointState[gz.msgs.Model"],
             ],
+            remappings=[
+                (gz_clock_topic, "/clock"),
+                (gz_scan_topic, ros_scan_bridge_topic),
+                ("/model/finav_vehicle/cmd_vel", "/cmd_vel"),
+            ],
+        )
+        gz_topic_adapter = Node(
+            package="finav",
+            executable="gz_topic_adapter.py",
+            name="gz_topic_adapter",
+            output="screen",
+            parameters=[
+                {
+                    "scan_src_topic": ros_scan_bridge_topic,
+                    "imu_src_topic": gz_imu_topic,
+                    "odom_src_topic": "/model/finav_vehicle/odometry",
+                    "joint_state_src_topic": gz_joint_state_topic,
+                    "scan_topic": "/scan",
+                    "imu_topic": "/imu/data",
+                    "odom_topic": "/odom",
+                    "joint_states_topic": "/joint_states",
+                    "odom_frame": "odom",
+                    "base_frame": "base_link",
+                }
+            ],
+        )
+        unpause_world = ExecuteProcess(
+            cmd=[
+                "ign",
+                "service",
+                "-s",
+                ["/world/", world_name, "/control"],
+                "--reqtype",
+                "ignition.msgs.WorldControl",
+                "--reptype",
+                "ignition.msgs.Boolean",
+                "--timeout",
+                "3000",
+                "--req",
+                "pause: false",
+            ],
+            shell=False,
+            output="screen",
+        )
+        robot_description = ParameterValue(
+            Command(["xacro ", urdf_file]), value_type=str
         )
     else:
         gazebo = IncludeLaunchDescription(
@@ -154,8 +243,12 @@ def generate_launch_description():
                 yaw,
             ],
         )
-
-    robot_description = ParameterValue(Command(["xacro ", urdf_file]), value_type=str)
+        bridge = None
+        gz_topic_adapter = None
+        unpause_world = None
+        robot_description = ParameterValue(
+            Command(["xacro ", urdf_file]), value_type=str
+        )
 
     robot_state_publisher = Node(
         package="robot_state_publisher",
@@ -209,15 +302,20 @@ def generate_launch_description():
         [
             world_arg,
             use_rviz_arg,
+            world_name_arg,
             x_arg,
             y_arg,
             z_arg,
             yaw_arg,
             scan_filter_center_deg_arg,
             scan_filter_fov_deg_arg,
+            *([gz_resource_env, gz_sim_resource_env] if sim_backend["backend"] == "ros_gz_sim" else []),
             gazebo,
             robot_state_publisher,
-            spawn_entity,
+            *([spawn_entity] if spawn_entity is not None else []),
+            *([bridge] if bridge is not None else []),
+            *([gz_topic_adapter] if gz_topic_adapter is not None else []),
+            *([TimerAction(period=1.0, actions=[unpause_world])] if unpause_world is not None else []),
             TimerAction(period=1.0, actions=[scan_filter]),
             TimerAction(period=2.0, actions=[slam_toolbox_launch]),
             rviz,
