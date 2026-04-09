@@ -2,7 +2,7 @@
 
 import os
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
@@ -34,9 +34,30 @@ def _load_lidar_config(config_path: str):
     return defaults
 
 
+def _resolve_sim_backend():
+    try:
+        return {
+            "backend": "ros_gz_sim",
+            "share": get_package_share_directory("ros_gz_sim"),
+        }
+    except PackageNotFoundError:
+        pass
+
+    try:
+        return {
+            "backend": "gazebo_ros",
+            "share": get_package_share_directory("gazebo_ros"),
+        }
+    except PackageNotFoundError as exc:
+        raise RuntimeError(
+            "No simulator backend found. Install either 'ros-humble-ros-gz-sim' "
+            "(Ignition/Gazebo Sim) or 'ros-humble-gazebo-ros-pkgs' (Gazebo Classic)."
+        ) from exc
+
+
 def generate_launch_description():
     pkg_share = get_package_share_directory("finav")
-    gazebo_ros_share = get_package_share_directory("gazebo_ros")
+    sim_backend = _resolve_sim_backend()
 
     default_world = os.path.join(
         pkg_share, "sim", "gazebo", "worlds", "office_corridor_sketch.world"
@@ -79,12 +100,60 @@ def generate_launch_description():
     scan_filter_center_deg = LaunchConfiguration("scan_filter_center_deg")
     scan_filter_fov_deg = LaunchConfiguration("scan_filter_fov_deg")
 
-    gazebo = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(gazebo_ros_share, "launch", "gazebo.launch.py")
-        ),
-        launch_arguments={"world": world}.items(),
-    )
+    if sim_backend["backend"] == "ros_gz_sim":
+        gazebo = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(sim_backend["share"], "launch", "gz_sim.launch.py")
+            ),
+            launch_arguments={"gz_args": ["-r ", world]}.items(),
+        )
+        spawn_entity = Node(
+            package="ros_gz_sim",
+            executable="create",
+            name="spawn_finav",
+            output="screen",
+            arguments=[
+                "-name",
+                "finav_vehicle",
+                "-topic",
+                "/robot_description",
+                "-x",
+                x,
+                "-y",
+                y,
+                "-z",
+                z,
+                "-Y",
+                yaw,
+            ],
+        )
+    else:
+        gazebo = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(sim_backend["share"], "launch", "gazebo.launch.py")
+            ),
+            launch_arguments={"world": world}.items(),
+        )
+        spawn_entity = Node(
+            package="gazebo_ros",
+            executable="spawn_entity.py",
+            name="spawn_finav",
+            output="screen",
+            arguments=[
+                "-entity",
+                "finav_vehicle",
+                "-topic",
+                "robot_description",
+                "-x",
+                x,
+                "-y",
+                y,
+                "-z",
+                z,
+                "-Y",
+                yaw,
+            ],
+        )
 
     robot_description = ParameterValue(Command(["xacro ", urdf_file]), value_type=str)
 
@@ -98,27 +167,6 @@ def generate_launch_description():
                 "robot_description": robot_description,
                 "use_sim_time": True,
             }
-        ],
-    )
-
-    spawn_entity = Node(
-        package="gazebo_ros",
-        executable="spawn_entity.py",
-        name="spawn_finav",
-        output="screen",
-        arguments=[
-            "-entity",
-            "finav_vehicle",
-            "-topic",
-            "robot_description",
-            "-x",
-            x,
-            "-y",
-            y,
-            "-z",
-            z,
-            "-Y",
-            yaw,
         ],
     )
 
