@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 
 from ament_index_python.packages import (
     PackageNotFoundError,
@@ -37,6 +38,50 @@ def _resolve_default_maps_dir(pkg_share: str) -> str:
         return candidate
 
     return os.path.join(pkg_share, "maps")
+
+
+def _discover_maps(maps_dir: str):
+    if not os.path.isdir(maps_dir):
+        return []
+
+    names = []
+    for name in sorted(os.listdir(maps_dir)):
+        d = os.path.join(maps_dir, name)
+        if not os.path.isdir(d):
+            continue
+
+        yml = os.path.join(d, f"{name}.yaml")
+        if os.path.exists(yml):
+            names.append(name)
+            continue
+
+        has_yaml = any(fn.endswith(".yaml") for fn in os.listdir(d))
+        if has_yaml:
+            names.append(name)
+
+    return names
+
+
+def _select_map_from_terminal(map_names):
+    if not sys.stdin.isatty():
+        return map_names[0]
+
+    print()
+    print("================ 可用地图列表 ================")
+    for i, name in enumerate(map_names, start=1):
+        print(f"  {i}. {name}")
+    print("=============================================")
+    print(f"默认地图: 1 ({map_names[0]})")
+
+    while True:
+        choice = input("请输入地图编号后回车（直接回车使用默认）: ").strip()
+        if choice == "":
+            return map_names[0]
+        if choice.isdigit():
+            idx = int(choice)
+            if 1 <= idx <= len(map_names):
+                return map_names[idx - 1]
+        print("输入无效，请输入上面列表中的数字编号。")
 
 
 def _load_lidar_config(config_path: str):
@@ -103,6 +148,15 @@ def generate_launch_description():
     default_maps_dir = _resolve_default_maps_dir(pkg_share)
     lidar_cfg = _load_lidar_config(os.path.join(pkg_share, "config", "lidar.yaml"))
     default_world_name = os.path.splitext(os.path.basename(default_world))[0]
+    available_maps = _discover_maps(default_maps_dir)
+
+    if available_maps:
+        selected_map_default = _select_map_from_terminal(available_maps)
+        print(f"[nav_sim.launch] 已选择地图: {selected_map_default}")
+    else:
+        selected_map_default = "map4"
+        print(f"[nav_sim.launch] 未发现可用地图，回退默认: {selected_map_default}")
+        print(f"[nav_sim.launch] 请检查地图目录: {default_maps_dir}")
 
     world_arg = DeclareLaunchArgument("world", default_value=default_world)
     world_name_arg = DeclareLaunchArgument(
@@ -110,7 +164,10 @@ def generate_launch_description():
         default_value=default_world_name,
         description="Gazebo world name used by ros_gz_bridge topic paths",
     )
-    map_file_arg = DeclareLaunchArgument("map_file", default_value="map4")
+    map_file_arg = DeclareLaunchArgument(
+        "map_file",
+        default_value=selected_map_default,
+    )
     maps_dir_arg = DeclareLaunchArgument("maps_dir", default_value=default_maps_dir)
     use_rviz_arg = DeclareLaunchArgument("use_rviz", default_value="true")
     x_arg = DeclareLaunchArgument("x", default_value="-0.15")
