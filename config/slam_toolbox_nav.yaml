@@ -26,7 +26,7 @@ slam_toolbox:
     scan_topic: /scan
     
     # 启用里程计
-    use_odom: false
+    use_odom: true
     odom_topic: /odom
     
     # IMU数据
