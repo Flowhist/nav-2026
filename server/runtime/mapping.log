@@ -1,0 +1,373 @@
+[INFO] [launch]: All log files can be found below /home/embotic/.ros/log/2026-04-24-13-59-26-053888-ubuntu-22079
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: 启动 SLAM Toolbox 建图模式（实机）...
+[INFO] [free_lidar_node-1]: process started with pid [22104]
+[INFO] [dm_imu_publisher.py-2]: process started with pid [22106]
+[INFO] [ekf_node-3]: process started with pid [22108]
+[INFO] [robot_state_publisher-4]: process started with pid [22110]
+[INFO] [joint_state_publisher-5]: process started with pid [22112]
+[free_lidar_node-1] ====== FREE ETH version: 3.00.02.005 ======
+[free_lidar_node-1] Connecting to scanner at 192.168.1.111 ... OK
+[free_lidar_node-1] Stop scan output!
+[robot_state_publisher-4] [33m[WARN] [1777010366.456156111] [kdl_parser]: The root link base_link has an inertia specified in the URDF, but KDL does not support a root link with an inertia.  As a workaround, you can add an extra dummy link to your URDF.[0m
+[robot_state_publisher-4] [0m[INFO] [1777010366.456344788] [robot_state_publisher]: got segment base_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010366.456476344] [robot_state_publisher]: got segment front_indicator_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010366.456495928] [robot_state_publisher]: got segment imu_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010366.456504760] [robot_state_publisher]: got segment laser_frame[0m
+[robot_state_publisher-4] [0m[INFO] [1777010366.456512024] [robot_state_publisher]: got segment left_wheel_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010366.456518617] [robot_state_publisher]: got segment right_wheel_link[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010366.756152225] [dm_imu]: 连接IMU: /dev/ttyACM0 @ 921600[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010366.761370699] [dm_imu]: ✓ IMU连接成功，后台读取线程已启动[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010366.762113279] [dm_imu]: DM-IMU 节点已启动 (模式: USB)[0m
+[joint_state_publisher-5] [0m[INFO] [1777010366.788834948] [joint_state_publisher]: Waiting for robot_description to be published on the robot_description topic...[0m
+[INFO] [sync_slam_toolbox_node-6]: process started with pid [22177]
+[free_lidar_node-1] Clear Buf!
+[free_lidar_node-1] Log in success.
+[free_lidar_node-1] Scanner is ready!
+[free_lidar_node-1] Device name: H100
+[free_lidar_node-1] Firmware version: 25011812
+[free_lidar_node-1] Serial number: WL2025930137-C2
+[free_lidar_node-1] Set start angle: -450000, stop angle: 2250000
+[free_lidar_node-1] Set scan frequency: 1500, resolution: 1000
+[free_lidar_node-1] Set reflectivity normalization factor: 1
+[free_lidar_node-1] Start scan output!
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010367.792792899] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010367.793366642] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010367.808790827] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15667.512 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010370.332919644] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15670.059 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010372.881160527] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15672.607 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010375.427988897] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15675.155 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010377.975995157] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15677.703 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010380.522454180] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15680.249 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010383.069597639] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15682.796 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010385.615835446] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15685.343 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010388.161418357] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15687.888 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010390.705818744] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15690.433 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010393.250454243] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15692.977 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[INFO] [launch]: All log files can be found below /home/embotic/.ros/log/2026-04-24-14-00-55-082345-ubuntu-22667
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: 启动 SLAM Toolbox 建图模式（实机）...
+[INFO] [free_lidar_node-1]: process started with pid [22691]
+[INFO] [dm_imu_publisher.py-2]: process started with pid [22693]
+[INFO] [ekf_node-3]: process started with pid [22695]
+[INFO] [robot_state_publisher-4]: process started with pid [22697]
+[INFO] [joint_state_publisher-5]: process started with pid [22699]
+[free_lidar_node-1] ====== FREE ETH version: 3.00.02.005 ======
+[free_lidar_node-1] Connecting to scanner at 192.168.1.111 ... OK
+[free_lidar_node-1] Stop scan output!
+[robot_state_publisher-4] [33m[WARN] [1777010455.500838863] [kdl_parser]: The root link base_link has an inertia specified in the URDF, but KDL does not support a root link with an inertia.  As a workaround, you can add an extra dummy link to your URDF.[0m
+[robot_state_publisher-4] [0m[INFO] [1777010455.501032404] [robot_state_publisher]: got segment base_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010455.501149143] [robot_state_publisher]: got segment front_indicator_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010455.501162488] [robot_state_publisher]: got segment imu_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010455.501170136] [robot_state_publisher]: got segment laser_frame[0m
+[robot_state_publisher-4] [0m[INFO] [1777010455.501176696] [robot_state_publisher]: got segment left_wheel_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010455.501183192] [robot_state_publisher]: got segment right_wheel_link[0m
+[joint_state_publisher-5] [0m[INFO] [1777010455.803080933] [joint_state_publisher]: Waiting for robot_description to be published on the robot_description topic...[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010455.869429731] [dm_imu]: 连接IMU: /dev/ttyACM0 @ 921600[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010455.872487157] [dm_imu]: ✓ IMU连接成功，后台读取线程已启动[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010455.873429998] [dm_imu]: DM-IMU 节点已启动 (模式: USB)[0m
+[INFO] [sync_slam_toolbox_node-6]: process started with pid [22765]
+[free_lidar_node-1] Clear Buf!
+[free_lidar_node-1] Log in success.
+[free_lidar_node-1] Scanner is ready!
+[free_lidar_node-1] Device name: H100
+[free_lidar_node-1] Firmware version: 25011812
+[free_lidar_node-1] Serial number: WL2025930137-C2
+[free_lidar_node-1] Set start angle: -450000, stop angle: 2250000
+[free_lidar_node-1] Set scan frequency: 1500, resolution: 1000
+[free_lidar_node-1] Set reflectivity normalization factor: 1
+[free_lidar_node-1] Start scan output!
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010456.448701066] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010456.449173558] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010459.048860298] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15758.708 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010461.593233481] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15761.319 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010464.141759094] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15763.868 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010466.689494155] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15766.416 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010469.237022360] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15768.963 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010471.784846346] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15771.511 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010474.332592119] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15774.059 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010476.879843988] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15776.606 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010479.427810978] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15779.154 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010481.975758316] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15781.702 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010484.524126014] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15784.250 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010487.072030880] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15786.798 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010489.621027389] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15789.347 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010492.169114076] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15791.895 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010494.716992179] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15794.443 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010497.265378131] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15796.991 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010499.814591845] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15799.540 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010502.362064196] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15802.088 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010504.910752031] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15804.636 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010507.458314744] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15807.184 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010510.006163763] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15809.732 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010512.554016586] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15812.280 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010515.101255979] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15814.827 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010517.648931571] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15817.375 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010520.196955583] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15819.922 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010522.743955466] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15822.470 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010525.292152048] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15825.018 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010527.840002087] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15827.566 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010530.387560145] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15830.114 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010532.935780390] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15832.662 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010535.484177947] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15835.210 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010538.032298529] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15837.758 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010540.580157242] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15840.306 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010543.128269620] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15842.854 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[INFO] [launch]: All log files can be found below /home/embotic/.ros/log/2026-04-24-14-04-05-695378-ubuntu-24356
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: 启动 SLAM Toolbox 建图模式（实机）...
+[INFO] [free_lidar_node-1]: process started with pid [24382]
+[INFO] [dm_imu_publisher.py-2]: process started with pid [24384]
+[INFO] [ekf_node-3]: process started with pid [24386]
+[INFO] [robot_state_publisher-4]: process started with pid [24388]
+[INFO] [joint_state_publisher-5]: process started with pid [24390]
+[free_lidar_node-1] ====== FREE ETH version: 3.00.02.005 ======
+[free_lidar_node-1] Connecting to scanner at 192.168.1.111 ... OK
+[free_lidar_node-1] Stop scan output!
+[robot_state_publisher-4] [33m[WARN] [1777010646.104757583] [kdl_parser]: The root link base_link has an inertia specified in the URDF, but KDL does not support a root link with an inertia.  As a workaround, you can add an extra dummy link to your URDF.[0m
+[robot_state_publisher-4] [0m[INFO] [1777010646.104939924] [robot_state_publisher]: got segment base_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010646.105056536] [robot_state_publisher]: got segment front_indicator_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010646.105070008] [robot_state_publisher]: got segment imu_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010646.105077784] [robot_state_publisher]: got segment laser_frame[0m
+[robot_state_publisher-4] [0m[INFO] [1777010646.105084600] [robot_state_publisher]: got segment left_wheel_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010646.105091225] [robot_state_publisher]: got segment right_wheel_link[0m
+[joint_state_publisher-5] [0m[INFO] [1777010646.409657520] [joint_state_publisher]: Waiting for robot_description to be published on the robot_description topic...[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010646.757501079] [dm_imu]: 连接IMU: /dev/ttyACM0 @ 921600[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010646.761412163] [dm_imu]: ✓ IMU连接成功，后台读取线程已启动[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010646.762655173] [dm_imu]: DM-IMU 节点已启动 (模式: USB)[0m
+[INFO] [sync_slam_toolbox_node-6]: process started with pid [24455]
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010647.073158209] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver[0m
+[free_lidar_node-1] Clear Buf!
+[free_lidar_node-1] Log in success.
+[free_lidar_node-1] Scanner is ready!
+[free_lidar_node-1] Device name: H100
+[free_lidar_node-1] Firmware version: 25011812
+[free_lidar_node-1] Serial number: WL2025930137-C2
+[free_lidar_node-1] Set start angle: -450000, stop angle: 2250000
+[free_lidar_node-1] Set scan frequency: 1500, resolution: 1000
+[free_lidar_node-1] Set reflectivity normalization factor: 1
+[free_lidar_node-1] Start scan output!
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010647.080114434] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010649.771598086] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15949.346 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010652.296410740] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15952.021 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010654.844698145] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15954.569 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010657.393160807] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15957.118 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010659.941437884] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15959.666 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010662.489407710] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15962.214 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010665.037669147] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15964.762 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010667.585700551] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15967.311 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[ekf_node-3] Failed to meet update rate! Took 0.32020988599999999913seconds. Try decreasing the rate, limiting sensor output frequency, or limiting the number of sensors.
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010670.133695973] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15969.858 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010672.681942590] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15972.406 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010675.229958660] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15974.954 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010677.777592340] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15977.502 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010680.325092339] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15980.050 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010682.872342015] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15982.597 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010685.420581946] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15985.145 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010687.968267864] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15987.693 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010690.516886052] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15990.241 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010693.064760974] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15992.789 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010695.612832081] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15995.337 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010698.160057807] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 15997.885 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010700.708780330] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16000.433 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010703.256260661] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16002.981 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010705.803829876] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16005.528 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010708.351939094] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16008.076 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010710.899736801] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16010.624 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010713.447039153] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16013.171 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010715.994313650] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16015.718 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010718.541144857] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16018.265 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010721.087890639] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16020.812 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010723.635116902] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16023.360 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010726.182560756] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16025.907 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010728.730281595] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16028.454 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010731.278225211] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16031.002 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010733.825231058] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16033.549 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010736.372246299] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16036.096 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010738.920540120] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16038.644 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010741.468379291] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16041.191 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010744.015155377] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16043.739 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010746.562919156] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16046.287 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010749.110007669] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16048.835 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010751.658094276] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16051.382 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010754.205777912] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16053.930 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010756.753972875] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16056.478 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010759.300825225] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16059.025 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010761.848775831] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16061.573 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010764.395442161] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16064.120 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010766.943365823] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16066.667 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010769.491026422] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16069.215 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010772.039158219] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16071.762 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010774.586557307] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16074.310 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010777.134856661] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16076.858 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010779.682593103] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16079.406 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010782.231004557] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16081.954 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010784.779003022] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16084.502 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010787.326926878] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16087.050 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010789.875065795] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16089.599 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010792.423452607] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16092.147 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010794.971059669] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16094.695 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010797.519032612] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16097.242 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010800.065928485] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16099.790 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010802.613683214] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16102.338 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010805.160901078] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16104.885 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010807.708652029] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16107.432 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010810.256757917] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16109.980 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010812.804185913] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16112.528 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010815.351784265] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16115.076 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010817.900783151] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16117.624 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010820.448796553] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16120.173 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010822.997620871] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16122.721 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010825.545887398] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16125.269 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010828.094231221] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16127.818 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010830.643399754] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16130.366 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010833.191569809] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16132.915 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010835.739851882] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16135.463 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010838.287507263] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16138.011 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010840.836246082] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16140.559 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010843.384071033] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16143.107 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010845.932255368] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16145.655 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010848.479761202] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16148.203 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010851.027218889] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16150.750 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010853.575144059] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16153.298 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010856.122833236] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16155.846 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010858.670654623] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16158.393 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010861.218095980] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16160.941 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010863.765807920] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16163.489 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010866.314423674] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16166.037 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010868.862293277] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16168.585 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010871.410779678] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16171.134 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010873.958610811] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16173.682 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010876.506926802] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16176.230 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010879.054619301] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16178.778 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010881.603073819] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16181.326 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010884.150414431] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16183.874 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010886.697966902] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16186.421 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010889.245948230] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16188.969 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010891.792940198] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16191.516 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010894.340253757] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16194.063 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010896.886685832] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16196.610 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010899.434398659] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16199.157 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010901.981891493] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16201.705 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010904.529615163] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16204.252 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010907.077771433] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16206.800 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010909.625768479] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16209.348 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010912.173628189] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16211.897 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010914.722246974] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16214.445 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010917.269644872] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16216.993 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010919.818094269] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16219.541 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010922.366038927] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 16222.089 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[INFO] [launch]: All log files can be found below /home/embotic/.ros/log/2026-04-24-14-08-47-158209-ubuntu-27305
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: 启动 SLAM Toolbox 建图模式（实机）...
+[INFO] [free_lidar_node-1]: process started with pid [27347]
+[INFO] [dm_imu_publisher.py-2]: process started with pid [27349]
+[INFO] [ekf_node-3]: process started with pid [27351]
+[INFO] [robot_state_publisher-4]: process started with pid [27353]
+[INFO] [joint_state_publisher-5]: process started with pid [27355]
+[free_lidar_node-1] ====== FREE ETH version: 3.00.02.005 ======
+[free_lidar_node-1] Connecting to scanner at 192.168.1.111 ... OK
+[free_lidar_node-1] Stop scan output!
+[robot_state_publisher-4] [33m[WARN] [1777010927.580821449] [kdl_parser]: The root link base_link has an inertia specified in the URDF, but KDL does not support a root link with an inertia.  As a workaround, you can add an extra dummy link to your URDF.[0m
+[robot_state_publisher-4] [0m[INFO] [1777010927.581049039] [robot_state_publisher]: got segment base_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010927.581240117] [robot_state_publisher]: got segment front_indicator_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010927.581262165] [robot_state_publisher]: got segment imu_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010927.581270933] [robot_state_publisher]: got segment laser_frame[0m
+[robot_state_publisher-4] [0m[INFO] [1777010927.581277654] [robot_state_publisher]: got segment left_wheel_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777010927.581284086] [robot_state_publisher]: got segment right_wheel_link[0m
+[joint_state_publisher-5] [0m[INFO] [1777010928.174273921] [joint_state_publisher]: Waiting for robot_description to be published on the robot_description topic...[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010928.208981179] [dm_imu]: 连接IMU: /dev/ttyACM0 @ 921600[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010928.212352218] [dm_imu]: ✓ IMU连接成功，后台读取线程已启动[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777010928.213515899] [dm_imu]: DM-IMU 节点已启动 (模式: USB)[0m
+[INFO] [sync_slam_toolbox_node-6]: process started with pid [27424]
+[free_lidar_node-1] Clear Buf!
+[free_lidar_node-1] Log in success.
+[free_lidar_node-1] Scanner is ready!
+[free_lidar_node-1] Device name: H100
+[free_lidar_node-1] Firmware version: 25011812
+[free_lidar_node-1] Serial number: WL2025930137-C2
+[free_lidar_node-1] Set start angle: -450000, stop angle: 2250000
+[free_lidar_node-1] Set scan frequency: 1500, resolution: 1000
+[free_lidar_node-1] Set reflectivity normalization factor: 1
+[free_lidar_node-1] Start scan output!
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010928.555957498] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010928.556439208] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.[0m
+[sync_slam_toolbox_node-6] [33m[WARN] [1777010929.892043739] [slam_toolbox]: minimum laser range setting (0.1 m) exceeds the capabilities of the used Lidar (0.1 m)[0m
+[sync_slam_toolbox_node-6] Registering sensor: [Custom Described Lidar]
+[sync_slam_toolbox_node-6] [0m[INFO] [1777010929.943106757] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1777010929.499 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[INFO] [launch]: All log files can be found below /home/embotic/.ros/log/2026-04-24-14-10-22-296306-ubuntu-28279
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: 启动 SLAM Toolbox 建图模式（实机）...
+[INFO] [free_lidar_node-1]: process started with pid [28304]
+[INFO] [dm_imu_publisher.py-2]: process started with pid [28306]
+[INFO] [ekf_node-3]: process started with pid [28308]
+[INFO] [robot_state_publisher-4]: process started with pid [28310]
+[INFO] [joint_state_publisher-5]: process started with pid [28312]
+[free_lidar_node-1] ====== FREE ETH version: 3.00.02.005 ======
+[free_lidar_node-1] Connecting to scanner at 192.168.1.111 ... OK
+[free_lidar_node-1] Stop scan output!
+[robot_state_publisher-4] [33m[WARN] [1777011022.692335538] [kdl_parser]: The root link base_link has an inertia specified in the URDF, but KDL does not support a root link with an inertia.  As a workaround, you can add an extra dummy link to your URDF.[0m
+[robot_state_publisher-4] [0m[INFO] [1777011022.692579833] [robot_state_publisher]: got segment base_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777011022.692723069] [robot_state_publisher]: got segment front_indicator_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777011022.692739709] [robot_state_publisher]: got segment imu_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777011022.692747838] [robot_state_publisher]: got segment laser_frame[0m
+[robot_state_publisher-4] [0m[INFO] [1777011022.692754942] [robot_state_publisher]: got segment left_wheel_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777011022.692761950] [robot_state_publisher]: got segment right_wheel_link[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777011022.977833325] [dm_imu]: 连接IMU: /dev/ttyACM0 @ 921600[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777011022.982166152] [dm_imu]: ✓ IMU连接成功，后台读取线程已启动[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777011022.982852220] [dm_imu]: DM-IMU 节点已启动 (模式: USB)[0m
+[joint_state_publisher-5] [0m[INFO] [1777011023.053486398] [joint_state_publisher]: Waiting for robot_description to be published on the robot_description topic...[0m
+[INFO] [sync_slam_toolbox_node-6]: process started with pid [28375]
+[free_lidar_node-1] Clear Buf!
+[free_lidar_node-1] Log in success.
+[free_lidar_node-1] Scanner is ready!
+[free_lidar_node-1] Device name: H100
+[free_lidar_node-1] Firmware version: 25011812
+[free_lidar_node-1] Serial number: WL2025930137-C2
+[free_lidar_node-1] Set start angle: -450000, stop angle: 2250000
+[free_lidar_node-1] Set scan frequency: 1500, resolution: 1000
+[free_lidar_node-1] Set reflectivity normalization factor: 1
+[free_lidar_node-1] Start scan output!
+[sync_slam_toolbox_node-6] [0m[INFO] [1777011024.096242296] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777011024.097168914] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.[0m
+[sync_slam_toolbox_node-6] [33m[WARN] [1777011024.246100529] [slam_toolbox]: minimum laser range setting (0.1 m) exceeds the capabilities of the used Lidar (0.1 m)[0m
+[sync_slam_toolbox_node-6] Registering sensor: [Custom Described Lidar]
+[sync_slam_toolbox_node-6] [0m[INFO] [1777011024.265129232] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1777011024.086 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m
+[INFO] [launch]: All log files can be found below /home/embotic/.ros/log/2026-04-24-14-12-07-706544-ubuntu-29247
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: 启动 SLAM Toolbox 建图模式（实机）...
+[INFO] [free_lidar_node-1]: process started with pid [29272]
+[INFO] [dm_imu_publisher.py-2]: process started with pid [29274]
+[INFO] [ekf_node-3]: process started with pid [29276]
+[INFO] [robot_state_publisher-4]: process started with pid [29278]
+[INFO] [joint_state_publisher-5]: process started with pid [29280]
+[free_lidar_node-1] ====== FREE ETH version: 3.00.02.005 ======
+[free_lidar_node-1] Connecting to scanner at 192.168.1.111 ... OK
+[free_lidar_node-1] Stop scan output!
+[robot_state_publisher-4] [33m[WARN] [1777011128.113824464] [kdl_parser]: The root link base_link has an inertia specified in the URDF, but KDL does not support a root link with an inertia.  As a workaround, you can add an extra dummy link to your URDF.[0m
+[robot_state_publisher-4] [0m[INFO] [1777011128.114014805] [robot_state_publisher]: got segment base_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777011128.114125849] [robot_state_publisher]: got segment front_indicator_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777011128.114141017] [robot_state_publisher]: got segment imu_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777011128.114148761] [robot_state_publisher]: got segment laser_frame[0m
+[robot_state_publisher-4] [0m[INFO] [1777011128.114156057] [robot_state_publisher]: got segment left_wheel_link[0m
+[robot_state_publisher-4] [0m[INFO] [1777011128.114162522] [robot_state_publisher]: got segment right_wheel_link[0m
+[joint_state_publisher-5] [0m[INFO] [1777011128.597553200] [joint_state_publisher]: Waiting for robot_description to be published on the robot_description topic...[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777011128.689122293] [dm_imu]: 连接IMU: /dev/ttyACM0 @ 921600[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777011128.692665883] [dm_imu]: ✓ IMU连接成功，后台读取线程已启动[0m
+[dm_imu_publisher.py-2] [0m[INFO] [1777011128.693609494] [dm_imu]: DM-IMU 节点已启动 (模式: USB)[0m
+[INFO] [sync_slam_toolbox_node-6]: process started with pid [29344]
+[free_lidar_node-1] Clear Buf!
+[free_lidar_node-1] Log in success.
+[free_lidar_node-1] Scanner is ready!
+[free_lidar_node-1] Device name: H100
+[free_lidar_node-1] Firmware version: 25011812
+[free_lidar_node-1] Serial number: WL2025930137-C2
+[free_lidar_node-1] Set start angle: -450000, stop angle: 2250000
+[free_lidar_node-1] Set scan frequency: 1500, resolution: 1000
+[free_lidar_node-1] Set reflectivity normalization factor: 1
+[free_lidar_node-1] Start scan output!
+[sync_slam_toolbox_node-6] [0m[INFO] [1777011129.518472409] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver[0m
+[sync_slam_toolbox_node-6] [0m[INFO] [1777011129.519086922] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.[0m
+[sync_slam_toolbox_node-6] [33m[WARN] [1777011129.658818294] [slam_toolbox]: minimum laser range setting (0.1 m) exceeds the capabilities of the used Lidar (0.1 m)[0m
+[sync_slam_toolbox_node-6] Registering sensor: [Custom Described Lidar]
+[sync_slam_toolbox_node-6] [0m[INFO] [1777011129.702052720] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1777011129.551 for reason 'the timestamp on the message is earlier than all the data in the transform cache'[0m

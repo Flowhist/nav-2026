@@ -69,6 +69,7 @@ class KeyboardTeleopRouter(Node):
             tty.setcbreak(sys.stdin.fileno())
         else:
             self._old_term = None
+            self._kb_enabled = False
             self.get_logger().warn("stdin is not a tty, keyboard control disabled")
 
         self.get_logger().info(
@@ -138,7 +139,7 @@ class KeyboardTeleopRouter(Node):
         if self._js and (now - self._js_last_time) <= self._js_cmd_timeout:
             msg = self._js_last_cmd
             self._cmd_pub.publish(msg)
-        elif self._kb_enabled:
+        elif self._kb_enabled and self._old_term is not None:
             msg.linear.x = self._kb_linear
             msg.angular.z = self._kb_angular
             self._cmd_pub.publish(msg)

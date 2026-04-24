@@ -263,9 +263,9 @@ bool FreeLidarNode::getScanData()
       
         
         scanmsg.header.frame_id = frame_id_;
-        //时间戳赋予时间提前        
-        rclcpp::Time time(scandata.sec, scandata.nsec);
-        scanmsg.header.stamp = time;
+        // 使用ROS时钟，保证与TF缓存处于同一时间基准
+        rclcpp::Time topic_time = this->get_clock()->now();
+        scanmsg.header.stamp = topic_time;
        // scanmsg.header.seq=(uint32_t)scandata.frame_seq;
 
         scanmsg.angle_min = (float)start_angle_*M_PI/180;
@@ -327,7 +327,7 @@ bool FreeLidarNode::getScanData()
           rclcpp::Time time2(scandata.recv_first_sec, scandata.recv_first_nsec);
           rclcpp::Time time3(scandata.recv_last_sec, scandata.recv_last_nsec);
           rclcpp::Time end_porcess_data_time=this->now();
-          write_timer_stamp(time, time2,time3,this->now(),before_filter_time,after_filter_time,before_sfilter_time,after_sfilter_time,
+          write_timer_stamp(topic_time, time2,time3,this->now(),before_filter_time,after_filter_time,before_sfilter_time,after_sfilter_time,
                             start_porcess_data_time,
                             end_porcess_data_time);
 

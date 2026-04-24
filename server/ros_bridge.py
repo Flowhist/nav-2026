@@ -107,11 +107,10 @@ class _BridgeNode:
         from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
         from nav_msgs.msg import OccupancyGrid, Odometry, Path
         from rclpy.qos import (
-            QoSDurabilityPolicy,
-            QoSHistoryPolicy,
             QoSProfile,
-            QoSReliabilityPolicy,
-            SensorDataQoS,
+            ReliabilityPolicy,
+            DurabilityPolicy,
+            HistoryPolicy,
         )
         from sensor_msgs.msg import LaserScan
         from std_msgs.msg import Bool, Empty
@@ -137,20 +136,22 @@ class _BridgeNode:
         self.pub_nav_clear = self.create_publisher(Empty, "/nav_clear", 10)
 
         map_qos = QoSProfile(
-            history=QoSHistoryPolicy.KEEP_LAST,
+            history=HistoryPolicy.KEEP_LAST,
             depth=1,
-            reliability=QoSReliabilityPolicy.RELIABLE,
-            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
         self.create_subscription(OccupancyGrid, "/map", lambda m: _BridgeNode._on_map(self, m), map_qos)
         self.create_subscription(Odometry, "/odom", lambda m: _BridgeNode._on_odom(self, m), 20)
         self.create_subscription(Path, "/plan", lambda m: _BridgeNode._on_plan(self, m), 10)
-        self.create_subscription(
-            LaserScan,
-            "/scan",
-            lambda m: _BridgeNode._on_scan(self, m),
-            SensorDataQoS(),
+        scan_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10,
         )
+        self.create_subscription(LaserScan, "/scan", lambda m: _BridgeNode._on_scan(self, m), scan_qos)
+
         self.create_subscription(Bool, "/js_state", lambda m: _BridgeNode._on_js_state(self, m), 10)
         self.create_subscription(TFMessage, "/tf", lambda m: _BridgeNode._on_tf(self, m), 50)
 

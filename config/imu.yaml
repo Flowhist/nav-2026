@@ -1,7 +1,7 @@
 dm_imu:
   ros__parameters:
     # ==================== 串口连接 ====================
-    port: "/dev/ttyACM1"       # USB串口
+    port: "/dev/ttyACM0"       # USB串口
     baudrate: 921600           # 波特率
     
     # 坐标系（ekf.yaml 中配置 TF 变换关系）
