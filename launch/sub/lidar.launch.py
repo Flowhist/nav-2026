@@ -3,6 +3,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.actions import SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -17,9 +18,9 @@ def _load_lidar_config():
         "baud": 921600,
         "scan_frequency": 15,
         "scan_resolution": 1000,
-        "start_angle": -90,
-        "stop_angle": 180,
-        "offset_angle": 0,
+        "start_angle": -45,
+        "stop_angle": 225,
+        "offset_angle": -45,
         "range_min": 0.05,
         "range_max": 25.0,
         "filter_switch": 0,
@@ -67,6 +68,8 @@ def _load_lidar_config():
 
 def generate_launch_description():
     cfg = _load_lidar_config()
+    pkg_share = get_package_share_directory("finav")
+    fastdds_path = os.path.join(pkg_share, "config", "fastdds_profiles.xml")
 
     scanner_ip_arg = DeclareLaunchArgument(
         "scanner_ip", default_value=str(cfg["lidar_ip"]), description="雷达IP地址"
@@ -76,6 +79,10 @@ def generate_launch_description():
     return LaunchDescription(
         [
             scanner_ip_arg,
+            SetEnvironmentVariable(
+                name="FASTRTPS_DEFAULT_PROFILES_FILE",
+                value=fastdds_path,
+            ),
             Node(
                 package="finav",
                 executable="free_lidar_node",
