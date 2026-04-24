@@ -12,11 +12,10 @@ baud: 921600
 scan_frequency: 15
 scan_resolution: 1000
 
-# H100 实机回包表明起始角度会被设备钳制到 -45 度。
-# 因此设备侧使用 -45~225 的 270 度扇区，再通过 offset 对齐到车辆坐标系。
+# 新雷达使用自身原生角度定义：
+# 0° 在 +x，90° 在 +y，扫描范围直接为 -45° ~ 225°。
 start_angle: -45
 stop_angle: 225
-offset_angle: -45
 
 range_min: 0.05
 range_max: 25.0

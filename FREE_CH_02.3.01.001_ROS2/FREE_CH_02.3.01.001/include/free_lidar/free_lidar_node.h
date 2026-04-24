@@ -80,7 +80,6 @@ private:
     
     int filter_switch_;
     bool is_ethernet_;
-    int offset_angle_;
     int NOR_switch_;
     int cluster_num_;
     int broad_filter_num_;

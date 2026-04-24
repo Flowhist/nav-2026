@@ -20,7 +20,6 @@ def _load_lidar_config():
         "scan_resolution": 1000,
         "start_angle": -45,
         "stop_angle": 225,
-        "offset_angle": -45,
         "range_min": 0.05,
         "range_max": 25.0,
         "filter_switch": 0,
@@ -48,7 +47,6 @@ def _load_lidar_config():
             defaults["scan_resolution"] = int(data.get("scan_resolution", defaults["scan_resolution"]))
             defaults["start_angle"] = int(data.get("start_angle", defaults["start_angle"]))
             defaults["stop_angle"] = int(data.get("stop_angle", defaults["stop_angle"]))
-            defaults["offset_angle"] = int(data.get("offset_angle", defaults["offset_angle"]))
             defaults["range_min"] = float(data.get("range_min", defaults["range_min"]))
             defaults["range_max"] = float(data.get("range_max", defaults["range_max"]))
             defaults["filter_switch"] = int(data.get("filter_switch", defaults["filter_switch"]))
@@ -102,7 +100,6 @@ def generate_launch_description():
                         "scan_resolution": int(cfg["scan_resolution"]),
                         "start_angle": int(cfg["start_angle"]),
                         "stop_angle": int(cfg["stop_angle"]),
-                        "offset_angle": int(cfg["offset_angle"]),
                         "range_min": float(cfg["range_min"]),
                         "range_max": float(cfg["range_max"]),
                         "filter_switch": int(cfg["filter_switch"]),

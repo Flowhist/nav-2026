@@ -21,7 +21,6 @@ FreeLidarNode::FreeLidarNode():Node("free_lidar_node")
     this->declare_parameter<int32_t>("stop_angle", 225);
     this->declare_parameter<float>("range_min", 0.05);
     this->declare_parameter<float>("range_max", 25.0);
-    this->declare_parameter<int>("offset_angle", -45);
     this->declare_parameter<int>("filter_switch", 0);
     this->declare_parameter<int>("cluster_num", 10);
     this->declare_parameter<int>("broad_filter_num", 20);
@@ -46,7 +45,6 @@ FreeLidarNode::FreeLidarNode():Node("free_lidar_node")
     this->get_parameter<int>("cluster_num", cluster_num_);
     this->get_parameter<int>("broad_filter_num", broad_filter_num_);
     this->get_parameter<bool>("is_ethernet", is_ethernet_);
-    this->get_parameter<int>("offset_angle", offset_angle_);
     this->get_parameter<int>("NOR_switch", NOR_switch_);
     this->get_parameter<std::string>("topic_name", topic_name_);
     this->get_parameter<bool>("is_reverse_postion", is_reverse_postion_);
@@ -270,8 +268,8 @@ bool FreeLidarNode::getScanData()
         scanmsg.header.stamp = time;
        // scanmsg.header.seq=(uint32_t)scandata.frame_seq;
 
-        scanmsg.angle_min = (float)start_angle_*M_PI/180 + (float)offset_angle_ * M_PI / 180;
-        scanmsg.angle_max = (float)stop_angle_*M_PI/180 + (float)offset_angle_ * M_PI / 180;
+        scanmsg.angle_min = (float)start_angle_*M_PI/180;
+        scanmsg.angle_max = (float)stop_angle_*M_PI/180;
         scanmsg.angle_increment = 2*M_PI*scan_resolution_/(360.0f*10000);
         scanmsg.time_increment = 1*scan_resolution_/(float)scan_frequency_/(360.0f*10000);
         scanmsg.scan_time = 1/(float)scan_frequency_;
