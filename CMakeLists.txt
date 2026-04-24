@@ -68,12 +68,19 @@ target_link_libraries(free_lidar_node
 # )
 
 # Install launch files.
-install(DIRECTORY
+set(finav_share_dirs
   launch
   config
   rviz
-  maps
   urdf
+)
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/maps")
+  list(APPEND finav_share_dirs maps)
+endif()
+
+install(DIRECTORY
+  ${finav_share_dirs}
   DESTINATION share/${PROJECT_NAME}/
 )
 
