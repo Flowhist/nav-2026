@@ -17,7 +17,7 @@
 - `server_app.py`
   - HTTP 服务、路由分发、静态文件服务。
 - `ros_bridge.py`
-  - ROS2 桥接层，负责订阅 `/map`、`/scan_filtered`、`/odom`、`/plan`、`/tf`，并处理网页控制命令。
+  - ROS2 桥接层，负责订阅 `/map`、`/scan`、`/odom`、`/plan`、`/tf`，并处理网页控制命令。
 - `process_manager.py`
   - 建图 / 导航运行时管理，负责启动 `map.launch.py`、`nav.launch.py`，读取日志，调用清理脚本。
 - `state_store.py`
@@ -43,7 +43,7 @@
 
 ### 1. 建图页
 
-- 左侧显示实时 `/map` 和 `/scan_filtered`。
+- 左侧显示实时 `/map` 和 `/scan`。
 - 右侧包含：
   - 建图启动 / 结束
   - 网页键控
@@ -102,7 +102,7 @@
 - 订阅 `/map`
   - 更新 `scene.map`
   - 递增 `map_version`
-- 订阅 `/scan_filtered`
+- 订阅 `/scan`
   - 把激光点投影到 `map` 坐标系
   - 更新 `scene.scan`
 - 订阅 `/odom`

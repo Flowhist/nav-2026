@@ -19,35 +19,38 @@ endif()
 find_package(ament_cmake REQUIRED) # 用于ROS 2的ament_cmake
 find_package(Boost REQUIRED COMPONENTS thread) # Boost库
 find_package(rclcpp REQUIRED) # ROS 2的C++客户端库
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(lifecycle_msgs REQUIRED)
 find_package(std_msgs REQUIRED) # 标准消息类型
 find_package(sensor_msgs REQUIRED) # 传感器消息类型
 find_package(geometry_msgs REQUIRED) # 几何消息类型
 
 set(dependencies
   rclcpp
+  rclcpp_lifecycle
+  lifecycle_msgs
   std_msgs
   sensor_msgs
   geometry_msgs
   )
-  
-  # Declare a C++ executable for r2000_node
-add_executable(r2000_node 
-  r2000/src/r2000_node.cpp
-  r2000/src/r2000_driver.cpp
-  r2000/src/http_command_interface.cpp
-  r2000/src/scan_data_receiver.cpp
+
+# Declare a C++ executable for free_lidar_node
+add_executable(free_lidar_node
+  FREE_CH_02.3.01.001_ROS2/FREE_CH_02.3.01.001/src/rosnode/free_lidar_node.cpp
+  FREE_CH_02.3.01.001_ROS2/FREE_CH_02.3.01.001/src/driver/free_eth_driver.cpp
+  FREE_CH_02.3.01.001_ROS2/FREE_CH_02.3.01.001/src/driver/trailing_filter.cpp
 )
 
-ament_target_dependencies(r2000_node ${dependencies})
+ament_target_dependencies(free_lidar_node ${dependencies})
 
-target_include_directories(r2000_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/r2000/include>
-  $<INSTALL_INTERFACE:include>)
+target_include_directories(free_lidar_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/FREE_CH_02.3.01.001_ROS2/FREE_CH_02.3.01.001/include>
+  $<INSTALL_INTERFACE:include>
+)
 
-target_link_libraries(r2000_node
-  #r2000_driver
+target_link_libraries(free_lidar_node
   ${Boost_LIBRARIES}
- )
+)
 
 # Declare a C++ executable for serial_bridge_node
 # add_executable(serial_bridge_node 
@@ -87,7 +90,6 @@ install(PROGRAMS
   scripts/control/base_control.py
   scripts/control/js_kb_router.py
   scripts/control/joystick_control.py
-  scripts/lidar/scan_angle_filter.py
   scripts/imu/dm_imu_publisher.py
   scripts/tool/TF.sh
   scripts/tool/save_map.sh
@@ -110,7 +112,7 @@ install(DIRECTORY
   FILES_MATCHING PATTERN "*.py"
 )
 
-install(TARGETS r2000_node # serial_bridge_node
+install(TARGETS free_lidar_node # serial_bridge_node
   EXPORT export_${PROJECT_NAME}
   DESTINATION lib/${PROJECT_NAME})
 

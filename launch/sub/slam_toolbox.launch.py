@@ -66,7 +66,7 @@ def generate_launch_description():
         description="Use simulation time",
     )
 
-    # 激光话题参数（可接入角度过滤后的 /scan_filtered）
+    # 激光话题参数（实机链路直接使用 /scan）
     scan_topic_arg = DeclareLaunchArgument(
         "scan_topic",
         default_value="/scan",

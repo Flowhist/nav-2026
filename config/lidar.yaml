@@ -1,5 +1,28 @@
 # finav 统一雷达配置（建图/导航共用）
+# 新雷达支持直接输出扇形扫描，因此不再经过额外的角度过滤节点。
 
-lidar_ip: 10.86.81.200
-scan_filter_center_deg: 45.0
-scan_filter_fov_deg: 270.0
+lidar_ip: 192.168.1.111
+frame_id: laser_frame
+topic_name: /scan
+
+is_ethernet: true
+port_name: /dev/ttyUSB0
+baud: 921600
+
+scan_frequency: 15
+scan_resolution: 1000
+
+# 旧车体通过 /scan_filtered 保留了 270 度、中心 45 度的扇区。
+# 新驱动直接在设备侧裁剪为等效扇区，减少中间处理。
+start_angle: -90
+stop_angle: 180
+offset_angle: 0
+
+range_min: 0.05
+range_max: 25.0
+
+filter_switch: 0
+cluster_num: 10
+broad_filter_num: 20
+nor_switch: 1
+is_reverse_postion: false

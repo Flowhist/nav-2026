@@ -19,30 +19,6 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-
-
-def _load_lidar_config(config_path: str):
-    defaults = {
-        "scan_filter_center_deg": 0.0,
-        "scan_filter_fov_deg": 180.0,
-    }
-    try:
-        import yaml  # type: ignore
-
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        if isinstance(data, dict):
-            defaults["scan_filter_center_deg"] = float(
-                data.get("scan_filter_center_deg", defaults["scan_filter_center_deg"])
-            )
-            defaults["scan_filter_fov_deg"] = float(
-                data.get("scan_filter_fov_deg", defaults["scan_filter_fov_deg"])
-            )
-    except Exception:
-        pass
-    return defaults
-
-
 def _resolve_sim_backend():
     try:
         return {
@@ -76,7 +52,6 @@ def generate_launch_description():
     gz_model_file = os.path.join(
         pkg_share, "sim", "gazebo", "models", "whillcar", "model.sdf"
     )
-    lidar_cfg = _load_lidar_config(os.path.join(pkg_share, "config", "lidar.yaml"))
     default_world_name = os.path.splitext(os.path.basename(default_world))[0]
 
     world_arg = DeclareLaunchArgument(
@@ -98,17 +73,6 @@ def generate_launch_description():
     y_arg = DeclareLaunchArgument("y", default_value="-5.65")
     z_arg = DeclareLaunchArgument("z", default_value="0.0")
     yaw_arg = DeclareLaunchArgument("yaw", default_value="1.5707963")
-    scan_filter_center_deg_arg = DeclareLaunchArgument(
-        "scan_filter_center_deg",
-        default_value=str(lidar_cfg["scan_filter_center_deg"]),
-        description="Laser kept sector center angle in degree",
-    )
-    scan_filter_fov_deg_arg = DeclareLaunchArgument(
-        "scan_filter_fov_deg",
-        default_value=str(lidar_cfg["scan_filter_fov_deg"]),
-        description="Laser kept sector FOV in degree",
-    )
-
     world = LaunchConfiguration("world")
     world_name = LaunchConfiguration("world_name")
     use_rviz = LaunchConfiguration("use_rviz")
@@ -116,8 +80,6 @@ def generate_launch_description():
     y = LaunchConfiguration("y")
     z = LaunchConfiguration("z")
     yaw = LaunchConfiguration("yaw")
-    scan_filter_center_deg = LaunchConfiguration("scan_filter_center_deg")
-    scan_filter_fov_deg = LaunchConfiguration("scan_filter_fov_deg")
     gz_scan_topic = "/scan"
     ros_scan_bridge_topic = "/scan_gz"
     gz_clock_topic = ["/world/", world_name, "/clock"]
@@ -274,21 +236,6 @@ def generate_launch_description():
         ],
     )
 
-    scan_filter = Node(
-        package="finav",
-        executable="scan_angle_filter.py",
-        name="scan_angle_filter",
-        output="screen",
-        parameters=[
-            {
-                "input_topic": "/scan",
-                "output_topic": "/scan_filtered",
-                "center_angle_deg": scan_filter_center_deg,
-                "fov_deg": scan_filter_fov_deg,
-            }
-        ],
-    )
-
     slam_toolbox_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_share, "launch", "sub", "slam_toolbox.launch.py")
@@ -296,7 +243,7 @@ def generate_launch_description():
         launch_arguments={
             "mode": "mapping",
             "use_sim_time": "true",
-            "scan_topic": "/scan_filtered",
+            "scan_topic": "/scan",
         }.items(),
     )
 
@@ -318,8 +265,6 @@ def generate_launch_description():
             y_arg,
             z_arg,
             yaw_arg,
-            scan_filter_center_deg_arg,
-            scan_filter_fov_deg_arg,
             *([gz_resource_env, gz_sim_resource_env] if sim_backend["backend"] == "ros_gz_sim" else []),
             gazebo,
             robot_state_publisher,
@@ -328,7 +273,6 @@ def generate_launch_description():
             *([gz_topic_adapter] if gz_topic_adapter is not None else []),
             *([sim_drive] if sim_drive is not None else []),
             *([TimerAction(period=1.0, actions=[unpause_world])] if unpause_world is not None else []),
-            TimerAction(period=1.0, actions=[scan_filter]),
             TimerAction(period=2.0, actions=[slam_toolbox_launch]),
             rviz,
         ]

@@ -2,18 +2,16 @@
 <package format="3">
   <name>finav</name>
   <version>0.2.0</version>
-  <description>Professional navigation system with SLAM Toolbox, Nav2, and DM-IMU support</description>
+  <description>Professional navigation system with SLAM Toolbox, DM-IMU, and FREE lidar support</description>
   <maintainer email="denis.dillenberger@gmail.com">Denis Dillenberger</maintainer>
   <author email="denis.dillenberger@gmail.com">Denis Dillenberger</author>
   <license>BSD</license>
-  <url type="website">http://wiki.ros.org/pepperl_fuchs_r2000</url>
-  <url type="repository">https://github.com/dillenberger/pepperl_fuchs</url>
-  <url type="bugtracker">https://github.com/dillenberger/pepperl_fuchs/issues</url>
-
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
   <depend>rclpy</depend>
+  <depend>lifecycle_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>

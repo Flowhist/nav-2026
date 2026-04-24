@@ -106,7 +106,13 @@ class _BridgeNode:
     ) -> None:
         from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
         from nav_msgs.msg import OccupancyGrid, Odometry, Path
-        from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+        from rclpy.qos import (
+            QoSDurabilityPolicy,
+            QoSHistoryPolicy,
+            QoSProfile,
+            QoSReliabilityPolicy,
+            SensorDataQoS,
+        )
         from sensor_msgs.msg import LaserScan
         from std_msgs.msg import Bool, Empty
         from tf2_msgs.msg import TFMessage
@@ -139,7 +145,12 @@ class _BridgeNode:
         self.create_subscription(OccupancyGrid, "/map", lambda m: _BridgeNode._on_map(self, m), map_qos)
         self.create_subscription(Odometry, "/odom", lambda m: _BridgeNode._on_odom(self, m), 20)
         self.create_subscription(Path, "/plan", lambda m: _BridgeNode._on_plan(self, m), 10)
-        self.create_subscription(LaserScan, "/scan_filtered", lambda m: _BridgeNode._on_scan(self, m), 10)
+        self.create_subscription(
+            LaserScan,
+            "/scan",
+            lambda m: _BridgeNode._on_scan(self, m),
+            SensorDataQoS(),
+        )
         self.create_subscription(Bool, "/js_state", lambda m: _BridgeNode._on_js_state(self, m), 10)
         self.create_subscription(TFMessage, "/tf", lambda m: _BridgeNode._on_tf(self, m), 50)
 
@@ -265,7 +276,7 @@ class _BridgeNode:
     @staticmethod
     def _on_scan(self: Any, msg: Any) -> None:
         self._counts["scan"] += 1
-        _BridgeNode._touch(self, "scan_filtered")
+        _BridgeNode._touch(self, "scan")
 
         pose_in_map = _BridgeNode._lookup_pose_in_map(self, msg.header.frame_id or "base_link")
         points: List[List[float]] = []

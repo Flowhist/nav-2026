@@ -26,7 +26,7 @@ slam_toolbox:
     odom_frame: odom
     map_frame: map
     base_frame: base_link
-    scan_topic: /scan_filtered
+    scan_topic: /scan
     
     # 启用里程计辅助 - 提供初始位姿估计，加速扫描匹配收敛
     # sync版本通过TF树自动使用里程计，不需要use_odom参数
@@ -52,10 +52,10 @@ slam_toolbox:
     tf_buffer_duration: 60.0  
     throttle_scans: 1    # 跳帧扫描
     
-    # 激光雷达范围（根据R2000规格调整）
-    minimum_range: 0.1          # R2000最小测量距离为0.1米
-    min_laser_range: 0.1        # 兼容不同版本参数名
-    max_laser_range: 45.0
+    # 激光雷达范围（根据新雷达规格调整）
+    minimum_range: 0.05
+    min_laser_range: 0.05
+    max_laser_range: 25.0
     minimum_angle: -3.14159
     maximum_angle: 3.14159
 

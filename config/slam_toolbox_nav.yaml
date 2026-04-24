@@ -49,10 +49,10 @@ slam_toolbox:
     tf_buffer_duration: 60.0  
     throttle_scans: 2  # 每2帧取1帧，减负
     
-    # 激光雷达范围（根据R2000规格调整）
-    minimum_range: 0.1          # R2000最小测量距离为0.1米
-    min_laser_range: 0.1        # 兼容不同版本参数名
-    max_laser_range: 45.0
+    # 激光雷达范围（根据新雷达规格调整）
+    minimum_range: 0.05
+    min_laser_range: 0.05
+    max_laser_range: 25.0
     minimum_angle: -3.14159
     maximum_angle: 3.14159
 
