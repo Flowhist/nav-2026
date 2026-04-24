@@ -17,6 +17,8 @@ import math
 import time
 import threading
 from typing import Optional, Tuple
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+
 
 # omnilibs 安装路径
 sys.path.insert(0, "/home/embotic/DCCS/src/site-packages")
@@ -61,6 +63,12 @@ class WhillBaseDriver(Node):
         self.max_linear_speed = float(self.get_parameter("max_linear_speed").value)
         self.max_angular_speed = float(self.get_parameter("max_angular_speed").value)
         self.acceleration = int(self.get_parameter("acceleration").value)
+        # Keep cmd_vel reception independent from blocking CAN I/O callbacks.
+        self.cmd_sub_group = ReentrantCallbackGroup()
+        self.odom_timer_group = MutuallyExclusiveCallbackGroup()
+        self.cmd_timer_group = MutuallyExclusiveCallbackGroup()
+        self._last_cmd_log_mono = 0.0
+        self._last_send_state_log_mono = 0.0
 
         qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
@@ -95,12 +103,26 @@ class WhillBaseDriver(Node):
 
         cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
         self.create_subscription(
-            Twist, cmd_vel_topic, self._on_cmd_vel, 10
+            Twist,
+            cmd_vel_topic,
+            self._on_cmd_vel,
+            10,
+            callback_group=self.cmd_sub_group,
         )
 
+
         self._start_connect_thread()
-        self.odom_timer = self.create_timer(1.0 / self.update_rate, self._update_odom)
-        self.cmd_timer = self.create_timer(1.0 / self.cmd_send_rate, self._send_cmd)
+        self.odom_timer = self.create_timer(
+            1.0 / self.update_rate,
+            self._update_odom,
+            callback_group=self.odom_timer_group,
+        )
+        self.cmd_timer = self.create_timer(
+            1.0 / self.cmd_send_rate,
+            self._send_cmd,
+            callback_group=self.cmd_timer_group,
+        )
+
 
         self.get_logger().info(
             f"WHILL 底盘驱动已启动 | odom={self.update_rate:.1f}Hz | cmd_send={self.cmd_send_rate:.1f}Hz | cmd_timeout={self.cmd_timeout:.2f}s"
@@ -155,6 +177,14 @@ class WhillBaseDriver(Node):
             self._latest_cmd_mono = time.monotonic()
         self.last_cmd_time = self.get_clock().now()
 
+        now_mono = time.monotonic()
+        if (now_mono - self._last_cmd_log_mono) >= 0.5:
+            self.get_logger().info(
+                f"收到 /cmd_vel | linear={self._latest_cmd_linear:.3f} m/s | angular={self._latest_cmd_angular:.3f} rad/s"
+            )
+            self._last_cmd_log_mono = now_mono
+
+
     def _apply_twist(self, linear_cmd: float, angular_cmd: float):
         """将线速度/角速度转换为轮速并下发电机"""
         linear = self._clamp(
@@ -179,15 +209,33 @@ class WhillBaseDriver(Node):
             angular = self._latest_cmd_angular
             stamp = self._latest_cmd_mono
 
+        now_mono = time.monotonic()
+
         if stamp is None:
+            if (now_mono - self._last_send_state_log_mono) >= 1.0:
+                self.get_logger().info("未收到任何 /cmd_vel，发送 0 速保护")
+                self._last_send_state_log_mono = now_mono
             self._apply_twist(0.0, 0.0)
             return
 
-        if (time.monotonic() - stamp) > self.cmd_timeout:
+        cmd_age = now_mono - stamp
+        if cmd_age > self.cmd_timeout:
+            if (now_mono - self._last_send_state_log_mono) >= 1.0:
+                self.get_logger().info(
+                    f"/cmd_vel 超时 {cmd_age:.3f}s > {self.cmd_timeout:.3f}s，发送 0 速保护"
+                )
+                self._last_send_state_log_mono = now_mono
             self._apply_twist(0.0, 0.0)
             return
+
+        if (now_mono - self._last_send_state_log_mono) >= 0.5:
+            self.get_logger().info(
+                f"下发速度 | linear={linear:.3f} m/s | angular={angular:.3f} rad/s | cmd_age={cmd_age:.3f}s"
+            )
+            self._last_send_state_log_mono = now_mono
 
         self._apply_twist(linear, angular)
+
 
     def _send_wheel_velocity(self, left_degps: float, right_degps: float):
         """下发轮速到电机，参数单位为 deg/s（与 omnilibs move_velocity 接口一致）"""
