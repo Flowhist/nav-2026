@@ -17,7 +17,7 @@ gazebo sim/gazebo/worlds/office_corridor_sketch.world
 ## Notes
 
 - Layout is an engineering approximation based on the sketch.
-- Vehicle reference block uses your URDF footprint: `0.95m x 0.62m`.
+- Vehicle reference block uses your URDF footprint: `1.09m x 0.90m`.
 - Blue obstacle and red start marker are included as static models.
 - Recommended robot spawn near start marker:
   - Position: `x=-0.15, y=-5.65`

@@ -40,8 +40,8 @@ class WhillBaseDriver(Node):
 
         # ==================== ROS2参数声明 ====================
         # 硬件参数
-        self.declare_parameter("wheel_radius", 0.1)
-        self.declare_parameter("wheel_separation", 0.5)
+        self.declare_parameter("wheel_radius", 0.127)
+        self.declare_parameter("wheel_separation", 0.6)
         self.declare_parameter("update_rate", 10.0)
         self.declare_parameter("cmd_send_rate", 50.0)
         self.declare_parameter("cmd_timeout", 0.35)

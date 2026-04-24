@@ -25,10 +25,10 @@ class SimPlanVisualizer(Node):
         self.declare_parameter("footprint_topic", "/plan_footprints")
         self.declare_parameter("footprint_stride_m", 0.35)
         self.declare_parameter("footprint_max_markers", 60)
-        self.declare_parameter("vehicle_front_m", 0.70)
+        self.declare_parameter("vehicle_front_m", 0.84)
         self.declare_parameter("vehicle_rear_m", 0.25)
-        self.declare_parameter("vehicle_left_m", 0.31)
-        self.declare_parameter("vehicle_right_m", 0.31)
+        self.declare_parameter("vehicle_left_m", 0.45)
+        self.declare_parameter("vehicle_right_m", 0.45)
 
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.path_topic = str(self.get_parameter("path_topic").value)

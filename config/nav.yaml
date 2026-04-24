@@ -32,7 +32,7 @@ nav_control:
 
     angular_sign:               1.0   # 转向反向时改为 -1.0
 
-    wheel_separation:           0.5   # 轮距 (m)
+    wheel_separation:           0.6   # 轮距 (m)
 
     # ==================== Pure Pursuit ====================
     # 预瞄距离越大越平滑，但弯道响应越滞后；建议 0.6~1.0

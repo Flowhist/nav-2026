@@ -3,8 +3,8 @@ base_control:
   ros__parameters:
 
     # ==================== 车轮参数 ====================
-    wheel_radius:     0.145    # 轮半径（m）= 直径 29cm / 2（已调整）
-    wheel_separation: 0.50      # 轮距（m）= 50cm
+    wheel_radius:     0.127    # 轮半径（m）= 直径 25.4cm / 2
+    wheel_separation: 0.60      # 轮距（m）= 60cm
 
     # ==================== 发布频率 ====================
     update_rate: 10.0          # 里程计刷新频率（Hz）

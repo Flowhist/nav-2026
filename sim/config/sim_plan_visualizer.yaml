@@ -6,7 +6,7 @@ sim_plan_visualizer:
     footprint_stride_m: 0.35
     footprint_max_markers: 60
 
-    vehicle_front_m: 0.70
+    vehicle_front_m: 0.84
     vehicle_rear_m: 0.25
-    vehicle_left_m: 0.31
-    vehicle_right_m: 0.31
+    vehicle_left_m: 0.45
+    vehicle_right_m: 0.45

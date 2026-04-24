@@ -34,13 +34,13 @@ path_plan:
 
     # ===== 车体几何（与 URDF 对齐）=====
     # base_link 到车头最前端
-    vehicle_front_m: 0.70
+    vehicle_front_m: 0.84
     # base_link 到车尾最后端
     vehicle_rear_m: 0.25
     # base_link 到车体左侧边缘
-    vehicle_left_m: 0.31
+    vehicle_left_m: 0.45
     # base_link 到车体右侧边缘
-    vehicle_right_m: 0.31
+    vehicle_right_m: 0.45
     # 在矩形车体外再加的安全边距
     vehicle_margin_m: 0.03
     # 足迹采样间距：适度放宽，换取更快的碰撞检测

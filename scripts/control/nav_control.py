@@ -68,7 +68,7 @@ class ChassisControlNav(Node):
         self.declare_parameter("rotate_exit_deg", 20.0)
 
         # 机械 & 频率
-        self.declare_parameter("wheel_separation", 0.5)
+        self.declare_parameter("wheel_separation", 0.6)
         self.declare_parameter("control_rate_hz", 10.0)
 
         # 读取参数

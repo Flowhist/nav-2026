@@ -60,10 +60,10 @@ class PathPlanner(Node):
         self.declare_parameter("heuristic_weight", 1.35)
         self.declare_parameter("heuristic_heading_weight", 0.10)
 
-        self.declare_parameter("vehicle_front_m", 0.70)
+        self.declare_parameter("vehicle_front_m", 0.84)
         self.declare_parameter("vehicle_rear_m", 0.25)
-        self.declare_parameter("vehicle_left_m", 0.31)
-        self.declare_parameter("vehicle_right_m", 0.31)
+        self.declare_parameter("vehicle_left_m", 0.45)
+        self.declare_parameter("vehicle_right_m", 0.45)
         self.declare_parameter("vehicle_margin_m", 0.05)
         self.declare_parameter("footprint_sample_step_m", 0.08)
 
