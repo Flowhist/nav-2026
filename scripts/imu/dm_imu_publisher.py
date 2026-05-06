@@ -17,13 +17,19 @@ from geometry_msgs.msg import Vector3Stamped
 import sys
 import os
 
-# 添加modules目录到Python路径(适配安装后的目录结构)
-imu_modules_path = os.path.join(os.path.dirname(__file__), "dm_imu_modules")
-if os.path.exists(imu_modules_path):
-    sys.path.insert(0, imu_modules_path)
-else:
-    # 开发环境路径
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "dm_imu_modules"))
+script_dir = os.path.dirname(__file__)
+imu_module_candidates = [
+    # Installed layout: install/finav/lib/finav/dm_imu_modules
+    os.path.join(script_dir, "dm_imu_modules"),
+    # Source-tree layout: scripts/imu -> repo root -> third_party/dm_imu
+    os.path.abspath(
+        os.path.join(script_dir, "..", "..", "third_party", "dm_imu", "dm_imu_modules")
+    ),
+]
+for imu_modules_path in imu_module_candidates:
+    if os.path.exists(imu_modules_path):
+        sys.path.insert(0, imu_modules_path)
+        break
 from modules.dm_serial import DM_Serial
 
 

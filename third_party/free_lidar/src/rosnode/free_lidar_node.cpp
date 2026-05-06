@@ -21,6 +21,7 @@ FreeLidarNode::FreeLidarNode():Node("free_lidar_node")
     this->declare_parameter<int32_t>("stop_angle", 225);
     this->declare_parameter<float>("range_min", 0.05);
     this->declare_parameter<float>("range_max", 25.0);
+    this->declare_parameter<int>("offset_angle", 0);
     this->declare_parameter<int>("filter_switch", 0);
     this->declare_parameter<int>("cluster_num", 10);
     this->declare_parameter<int>("broad_filter_num", 20);
@@ -29,6 +30,7 @@ FreeLidarNode::FreeLidarNode():Node("free_lidar_node")
     this->declare_parameter<int>("NOR_switch", 1);
     this->declare_parameter<std::string>("topic_name", "/scan");
     this->declare_parameter<bool>("is_reverse_postion", false);
+    this->declare_parameter<bool>("use_recv_time_stamp", false);
     
     
     this->get_parameter<std::string>("frame_id", frame_id_);
@@ -45,9 +47,11 @@ FreeLidarNode::FreeLidarNode():Node("free_lidar_node")
     this->get_parameter<int>("cluster_num", cluster_num_);
     this->get_parameter<int>("broad_filter_num", broad_filter_num_);
     this->get_parameter<bool>("is_ethernet", is_ethernet_);
+    this->get_parameter<int>("offset_angle", offset_angle_);
     this->get_parameter<int>("NOR_switch", NOR_switch_);
     this->get_parameter<std::string>("topic_name", topic_name_);
     this->get_parameter<bool>("is_reverse_postion", is_reverse_postion_);
+    this->get_parameter<bool>("use_recv_time_stamp", use_recv_time_stamp_);
     
     auto qos = rclcpp::QoS(rclcpp::KeepLast(1))   // 队列深度可自定
             .best_effort();                     // ← 关键：不等待 ACK
@@ -72,22 +76,19 @@ FreeLidarNode::FreeLidarNode():Node("free_lidar_node")
 
 FreeLidarNode::~FreeLidarNode()
 {
+    delete driver_;
+    delete filter_;
     if (driver_) {
         driver_->stop_socket_thread_ = true;
-        driver_->disconnect();
         if (driver_->socket_thread_.joinable()) driver_->socket_thread_.join();
         if (driver_->parse_thread_.joinable())  driver_->parse_thread_.join();
     }
-    delete filter_;
-    filter_ = nullptr;
-    delete driver_;
-    driver_ = nullptr;
+    
 }
 
 // 连接成功后
 bool FreeLidarNode::startSocketThread()
 {
-    if (!driver_) return false;
     if (!driver_->isConnected()) return false;
     driver_->stop_socket_thread_ = false;
 
@@ -132,18 +133,10 @@ bool FreeLidarNode::connect()
 {
     delete driver_;
     delete filter_;
-    driver_ = nullptr;
-    filter_ = nullptr;
 
-    if (!is_ethernet_) {
-        RCLCPP_WARN(
-            this->get_logger(),
-            "Serial mode is not built in finav; using ethernet driver with scanner_ip='%s'.",
-            scanner_ip_.c_str()
-        );
-    }
-
-    driver_ = new FREEEthDriver();
+       if(is_ethernet_)//网口
+    {
+        driver_ = new FREEEthDriver();
     std::cout << "Connecting to scanner at " << scanner_ip_ << " ... ";
     if (driver_->connect(scanner_ip_, 2111)) {
         std::cout << "OK" << std::endl;
@@ -153,6 +146,24 @@ bool FreeLidarNode::connect()
         std::cerr << "Connection to scanner at " << scanner_ip_ << " failed!" << std::endl;
         return false;
     }
+    }else{
+#if FREE_LIDAR_ENABLE_SERIAL
+        driver_ = new C2UartDriver();
+        std::cout << "Connecting to scanner at " << port_name_ << " ... ";
+        if (driver_->connect(port_name_,baud_)) {
+            std::cout << "OK" << std::endl;
+        }
+        else {
+            std::cout << "FAILED!" << std::endl;
+            std::cerr << "Connection to scanner at " << port_name_ << " failed!" << std::endl;
+            return false;
+        }
+#else
+        std::cerr << "Serial lidar support is disabled in this build. Set is_ethernet:=true for network lidar." << std::endl;
+        return false;
+#endif
+    }
+   
 
     driver_->ClearBuf();
     uint8_t log_state = 0;
@@ -263,13 +274,15 @@ bool FreeLidarNode::getScanData()
       
         
         scanmsg.header.frame_id = frame_id_;
-        // 使用ROS时钟，保证与TF缓存处于同一时间基准
         rclcpp::Time topic_time = this->get_clock()->now();
+        if (use_recv_time_stamp_) {
+            topic_time = rclcpp::Time(scandata.recv_first_sec, scandata.recv_first_nsec);
+        }
         scanmsg.header.stamp = topic_time;
        // scanmsg.header.seq=(uint32_t)scandata.frame_seq;
 
-        scanmsg.angle_min = (float)start_angle_*M_PI/180;
-        scanmsg.angle_max = (float)stop_angle_*M_PI/180;
+        scanmsg.angle_min = (float)start_angle_*M_PI/180 + (float)offset_angle_ * M_PI / 180;
+        scanmsg.angle_max = (float)stop_angle_*M_PI/180 + (float)offset_angle_ * M_PI / 180;
         scanmsg.angle_increment = 2*M_PI*scan_resolution_/(360.0f*10000);
         scanmsg.time_increment = 1*scan_resolution_/(float)scan_frequency_/(360.0f*10000);
         scanmsg.scan_time = 1/(float)scan_frequency_;

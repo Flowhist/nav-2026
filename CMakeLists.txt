@@ -36,15 +36,16 @@ set(dependencies
 
 # Declare a C++ executable for free_lidar_node
 add_executable(free_lidar_node
-  FREE_CH_02.3.01.001_ROS2/FREE_CH_02.3.01.001/src/rosnode/free_lidar_node.cpp
-  FREE_CH_02.3.01.001_ROS2/FREE_CH_02.3.01.001/src/driver/free_eth_driver.cpp
-  FREE_CH_02.3.01.001_ROS2/FREE_CH_02.3.01.001/src/driver/trailing_filter.cpp
+  third_party/free_lidar/src/rosnode/free_lidar_node.cpp
+  third_party/free_lidar/src/driver/free_eth_driver.cpp
+  third_party/free_lidar/src/driver/trailing_filter.cpp
 )
 
 ament_target_dependencies(free_lidar_node ${dependencies})
+target_compile_definitions(free_lidar_node PRIVATE FREE_LIDAR_ENABLE_SERIAL=0)
 
 target_include_directories(free_lidar_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/FREE_CH_02.3.01.001_ROS2/FREE_CH_02.3.01.001/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/free_lidar/include>
   $<INSTALL_INTERFACE:include>
 )
 
@@ -114,7 +115,7 @@ install(PROGRAMS
 
 # Install IMU Python modules (dm_serial, dm_crc, etc.)
 install(DIRECTORY
-  scripts/imu/dm_imu_modules/
+  third_party/dm_imu/dm_imu_modules/
   DESTINATION lib/${PROJECT_NAME}/dm_imu_modules
   FILES_MATCHING PATTERN "*.py"
 )

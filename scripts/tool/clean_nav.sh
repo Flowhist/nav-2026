@@ -10,7 +10,6 @@ patterns=(
   "free_lidar_node"
   "r2000_node"
   "dm_imu_publisher.py"
-  "dm_imu_node.py"
   "ekf_node"
   "path_plan.py"
   "nav_control.py"

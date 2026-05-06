@@ -23,7 +23,7 @@ def generate_launch_description():
             parameters=[
                 {"frame_id": "scan",
                 "is_ethernet": True,                 # True为网口，False为串口
-                 "scanner_ip": "192.168.7.122",      # 确保这是雷达的IP地址
+                 "scanner_ip": "192.168.1.111",      # 确保这是雷达的IP地址
                  "port_name": "/dev/ttyUSB0",        # 串口端口名
                  "baud": 921600,                     # 串口波特率
                  "scan_frequency": 30,
@@ -35,7 +35,7 @@ def generate_launch_description():
                  "cluster_num": 10,                  # 滤波聚类点数
                  "broad_filter_num": 20,             # 展宽过滤点数
                  "NOR_switch": 1,
-                 "is_reverse_postion": False,        # False为正装，True为反装
+                 "is_reverse_postion": True,         # False为正装，True为反装
                  "topic_name": "/scan"
                 }
             ]

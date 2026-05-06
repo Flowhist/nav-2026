@@ -3,6 +3,9 @@
 
 #include <free_lidar/lidar_driver.h>
 #include <free_lidar/free_eth_driver.h>
+#if FREE_LIDAR_ENABLE_SERIAL
+#include <free_lidar/c2_uart_driver.h>
+#endif
 #include <free_lidar/trailing_filter.h>
 #include "rclcpp/time.hpp"
 #include <stdint.h>
@@ -80,6 +83,7 @@ private:
     
     int filter_switch_;
     bool is_ethernet_;
+    int offset_angle_;
     int NOR_switch_;
     int cluster_num_;
     int broad_filter_num_;
@@ -89,6 +93,7 @@ private:
     TrailingFilter *filter_;
     bool is_connected_;
     bool is_reverse_postion_;
+    bool use_recv_time_stamp_;
     int flag=1;
 };
 

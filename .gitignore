@@ -19,3 +19,5 @@ __pycache__/
 
 # ROS specific
 .ros/
+server/runtime/*.log
+server/runtime/*.pid
