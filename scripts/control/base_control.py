@@ -48,6 +48,7 @@ class WhillBaseDriver(Node):
         # 电机驱动参数
         self.declare_parameter("can_channel", "PCAN_USBBUS1")
         self.declare_parameter("can_baud_rate", 500000)
+        self.declare_parameter("wheel_velocity_sign", -1.0)
         # 速度控制参数
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         self.declare_parameter("max_linear_speed", 0.6)  # m/s
@@ -63,6 +64,8 @@ class WhillBaseDriver(Node):
         self.max_linear_speed = float(self.get_parameter("max_linear_speed").value)
         self.max_angular_speed = float(self.get_parameter("max_angular_speed").value)
         self.acceleration = int(self.get_parameter("acceleration").value)
+        sign = float(self.get_parameter("wheel_velocity_sign").value)
+        self.wheel_velocity_sign = 1.0 if sign >= 0.0 else -1.0
         # Keep cmd_vel reception independent from blocking CAN I/O callbacks.
         self.cmd_sub_group = ReentrantCallbackGroup()
         self.odom_timer_group = MutuallyExclusiveCallbackGroup()
@@ -197,9 +200,9 @@ class WhillBaseDriver(Node):
         v_left = linear - angular * self.wheel_separation * 0.5
         v_right = linear + angular * self.wheel_separation * 0.5
 
-        # move_velocity 目标单位为 deg/s：由轮线速度(m/s)换算
-        left_degps = (v_left / self.wheel_radius) * (180.0 / math.pi)
-        right_degps = (v_right / self.wheel_radius) * (180.0 / math.pi)
+        # move_velocity 使用电机自身正方向；wheel_velocity_sign 把 ROS 车体正方向映射到电机正方向。
+        left_degps = self.wheel_velocity_sign * (v_left / self.wheel_radius) * (180.0 / math.pi)
+        right_degps = self.wheel_velocity_sign * (v_right / self.wheel_radius) * (180.0 / math.pi)
 
         self._send_wheel_velocity(left_degps, right_degps)
 
@@ -300,8 +303,8 @@ class WhillBaseDriver(Node):
                 self._start_connect_thread()
                 return
 
-        v_left = math.radians(vel[0]) * self.wheel_radius
-        v_right = math.radians(vel[1]) * self.wheel_radius
+        v_left = self.wheel_velocity_sign * math.radians(vel[0]) * self.wheel_radius
+        v_right = self.wheel_velocity_sign * math.radians(vel[1]) * self.wheel_radius
 
         v_forward = (v_left + v_right) / 2.0
         omega = (v_right - v_left) / self.wheel_separation

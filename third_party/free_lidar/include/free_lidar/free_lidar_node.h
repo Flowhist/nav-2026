@@ -94,6 +94,7 @@ private:
     bool is_connected_;
     bool is_reverse_postion_;
     bool use_recv_time_stamp_;
+    bool single_filter_enable_;
     int flag=1;
 };
 

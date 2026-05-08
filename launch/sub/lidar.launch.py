@@ -29,6 +29,7 @@ def _load_lidar_config():
         "nor_switch": 1,
         "is_reverse_postion": False,
         "use_recv_time_stamp": False,
+        "single_filter_enable": False,
     }
 
     config_path = os.path.join(get_package_share_directory("finav"), "config", "lidar.yaml")
@@ -63,6 +64,9 @@ def _load_lidar_config():
             )
             defaults["use_recv_time_stamp"] = bool(
                 data.get("use_recv_time_stamp", defaults["use_recv_time_stamp"])
+            )
+            defaults["single_filter_enable"] = bool(
+                data.get("single_filter_enable", defaults["single_filter_enable"])
             )
     except Exception:
         pass
@@ -115,6 +119,7 @@ def generate_launch_description():
                         "NOR_switch": int(cfg["nor_switch"]),
                         "is_reverse_postion": bool(cfg["is_reverse_postion"]),
                         "use_recv_time_stamp": bool(cfg["use_recv_time_stamp"]),
+                        "single_filter_enable": bool(cfg["single_filter_enable"]),
                         "topic_name": str(cfg["topic_name"]),
                     }
                 ],

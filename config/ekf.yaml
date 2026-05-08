@@ -34,12 +34,12 @@ ekf_filter_node:
     odom0_queue_size: 10
     
     # 输入源2: IMU (/imu/data)
-    # 使用yaw姿态和角速度提供准确的旋转信息
+    # 只使用 z 轴角速度辅助转向；不融合 6 轴 IMU 的绝对 yaw，避免初始航向被固定偏置带反。
     imu0: /imu/data
     imu0_config: [false, false, false,   # x, y, z (位置)
-                  false, false, true,    # roll, pitch, yaw (姿态) - 使用yaw绝对方向
+                  false, false, false,   # roll, pitch, yaw (姿态) - 不使用绝对 yaw
                   false, false, false,   # vx, vy, vz (线速度)
-                  false, false, false,   # vroll, vpitch, vyaw (角速度)
+                  false, false, true,    # vroll, vpitch, vyaw (角速度) - 使用 z 轴角速度
                   false, false, false]   # ax, ay, az (线加速度)
     imu0_differential: false
     imu0_relative: false

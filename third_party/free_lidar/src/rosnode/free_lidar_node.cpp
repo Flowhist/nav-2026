@@ -31,6 +31,7 @@ FreeLidarNode::FreeLidarNode():Node("free_lidar_node")
     this->declare_parameter<std::string>("topic_name", "/scan");
     this->declare_parameter<bool>("is_reverse_postion", false);
     this->declare_parameter<bool>("use_recv_time_stamp", false);
+    this->declare_parameter<bool>("single_filter_enable", false);
     
     
     this->get_parameter<std::string>("frame_id", frame_id_);
@@ -52,6 +53,7 @@ FreeLidarNode::FreeLidarNode():Node("free_lidar_node")
     this->get_parameter<std::string>("topic_name", topic_name_);
     this->get_parameter<bool>("is_reverse_postion", is_reverse_postion_);
     this->get_parameter<bool>("use_recv_time_stamp", use_recv_time_stamp_);
+    this->get_parameter<bool>("single_filter_enable", single_filter_enable_);
     
     auto qos = rclcpp::QoS(rclcpp::KeepLast(1))   // 队列深度可自定
             .best_effort();                     // ← 关键：不等待 ACK
@@ -330,7 +332,7 @@ bool FreeLidarNode::getScanData()
 
 
         rclcpp::Time before_sfilter_time=this->now();
-        if(scanmsg.ranges.size() > 0){
+        if(single_filter_enable_ && scanmsg.ranges.size() > 0){
             scanmsg.ranges = filter_->singleFilter(scanmsg.ranges,scanmsg.ranges.size(), scan_resolution_);
         }
         rclcpp::Time after_sfilter_time=this->now();

@@ -123,7 +123,7 @@
 
     <link name="imu_link">
       <gravity>false</gravity>
-      <pose>0.59 0 0.35 0 0 0</pose>
+      <pose>0.59 0 0.35 0 0 3.1415926</pose>
       <visual name="imu_visual">
         <geometry>
           <box>
@@ -150,7 +150,7 @@
 
     <link name="laser_frame">
       <gravity>false</gravity>
-      <pose>0.66 0 0.42 0 0 0</pose>
+      <pose>0.66 0 0.44 0 0 -1.5707963</pose>
       <inertial>
         <mass>0.6</mass>
         <inertia>
@@ -193,8 +193,8 @@
             <horizontal>
               <samples>2700</samples>
               <resolution>1</resolution>
-              <min_angle>-1.5707963</min_angle>
-              <max_angle>3.1415926</max_angle>
+              <min_angle>-0.7853982</min_angle>
+              <max_angle>3.9269908</max_angle>
             </horizontal>
           </scan>
           <range>

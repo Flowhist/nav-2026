@@ -38,7 +38,7 @@
 
   <xacro:property name="laser_x" value="0.66"/>
   <xacro:property name="laser_y" value="0.0"/>
-  <xacro:property name="laser_z" value="0.42"/>
+  <xacro:property name="laser_z" value="0.44"/>
   <xacro:property name="laser_size" value="0.10"/>
   <xacro:property name="laser_mass" value="0.6"/>
 
@@ -157,7 +157,7 @@
   <joint name="imu_joint" type="fixed">
     <parent link="base_link"/>
     <child link="imu_link"/>
-    <origin xyz="${imu_x} ${imu_y} ${imu_z}" rpy="0 0 0"/>
+    <origin xyz="${imu_x} ${imu_y} ${imu_z}" rpy="0 0 ${pi}"/>
   </joint>
 
   <link name="imu_link">
@@ -174,7 +174,7 @@
   <joint name="laser_joint" type="fixed">
     <parent link="base_link"/>
     <child link="laser_frame"/>
-    <origin xyz="${laser_x} ${laser_y} ${laser_z}" rpy="0 0 0"/>
+    <origin xyz="${laser_x} ${laser_y} ${laser_z}" rpy="0 0 ${-pi/2}"/>
   </joint>
 
   <link name="laser_frame">

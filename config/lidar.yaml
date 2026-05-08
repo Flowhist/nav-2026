@@ -12,16 +12,18 @@ baud: 921600
 scan_frequency: 15
 scan_resolution: 1000
 
-# 新雷达使用自身原生角度定义：
-# 0° 在 +x，90° 在 +y，扫描范围直接为 -45° ~ 225°。
-start_angle: -45
-stop_angle: 225
+# 新雷达物理支持约 270°（-45° ~ 225°），实车因车身硬件遮挡裁剪为 20° ~ 160°。
+# 发布给 ROS 的 laser_frame 保持右手系且 +Z 朝上；物理倒装导致的角度递增方向
+# 通过 is_reverse_postion 反序修正。修正后雷达接收角 +90°（中线方向）对应车体 +X。
+start_angle: 20
+stop_angle: 160
 offset_angle: 0
 
 range_min: 0.05
 range_max: 25.0
 
 filter_switch: 0
+single_filter_enable: false  # false: 保留原始scan；true: 启用厂商单点孤立滤波
 cluster_num: 10
 broad_filter_num: 20
 nor_switch: 1
