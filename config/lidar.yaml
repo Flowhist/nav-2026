@@ -9,7 +9,7 @@ is_ethernet: true
 port_name: /dev/ttyUSB0
 baud: 921600
 
-scan_frequency: 15
+scan_frequency: 30
 scan_resolution: 1000
 
 # 新雷达物理支持约 270°（-45° ~ 225°），实车因车身硬件遮挡裁剪为 20° ~ 160°。
