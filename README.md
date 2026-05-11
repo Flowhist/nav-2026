@@ -1,3 +1,57 @@
+# Finav
+
+Finav 是一个基于 ROS 2 Humble 的实机导航项目，当前包含 WHILL 底盘控制、FREE 激光雷达、DM-IMU、EKF 融合、SLAM Toolbox 建图/定位、自研路径规划与路径跟踪、Web 调试后台和 Gazebo/RViz 仿真环境。
+
+新开发者请先阅读项目 Wiki：
+
+- [Doc/项目Wiki.md](Doc/项目Wiki.md)
+
+Wiki 中按模块说明了系统由哪些部分组成、每部分的大致原理、关键话题/坐标系、对应源码和配置文件位置，以及常见排查入口。后续参与开发时，建议先根据自己的任务领域阅读 Wiki 中的对应章节，再进入具体代码。
+
+## 快速入口
+
+构建：
+
+```bash
+source /opt/ros/humble/setup.bash
+colcon build --packages-select finav
+source install/setup.bash
+```
+
+如果工作区中存在另一个同名 `finav` 包，使用：
+
+```bash
+colcon build --base-paths src/finav --packages-select finav
+source install/setup.bash
+```
+
+实机常用入口：
+
+```bash
+# 启动底盘、摇杆、Web 后台和键盘路由
+bash start_finav.sh
+
+# 单独启动建图链路
+ros2 launch finav map.launch.py
+
+# 单独启动导航链路
+ros2 launch finav nav.launch.py
+```
+
+常用目录：
+
+- `launch/`：实机建图、导航和子模块启动文件。
+- `config/`：雷达、IMU、EKF、SLAM、底盘、规划和控制参数。
+- `scripts/control/`：底盘驱动、摇杆/键盘、路径规划、路径跟踪。
+- `scripts/imu/`：DM-IMU ROS 2 发布节点。
+- `third_party/`：FREE 雷达和 DM-IMU 厂商代码整理区。
+- `server/`：Web 调试后台。
+- `sim/`：仿真 launch、脚本、Gazebo 模型和世界。
+- `maps/`：已保存地图。
+- `Doc/`：项目级文档。
+
+---
+
 # Finav Web Server
 
 `server/` 是 Finav 建图 / 导航项目的轻量网页调试后台。

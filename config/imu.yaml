@@ -17,6 +17,10 @@ dm_imu:
     # 固定航向偏置（度）
     yaw_offset_deg: 180.0
 
+    # Yaw线性漂移补偿：发布端按 yaw - rate * elapsed 修正
+    yaw_drift_compensation_enable: true
+    yaw_drift_rate_deg_s: -0.01626810
+
     # QoS配置
     qos_reliable: true         # 使用RELIABLE传输
     

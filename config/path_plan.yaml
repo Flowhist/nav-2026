@@ -23,6 +23,10 @@ path_plan:
     inflation_radius_m: 0.1
     # 搜索扩展上限：越大越不易失败，但最坏耗时更长
     max_search_expansions: 200000
+    # 单次规划最大耗时，防止坏目标长期占住单线程节点
+    max_planning_time_s: 1.5
+    # 目标点落在障碍/未知/膨胀区时直接拒绝，不尝试吸附到附近空地
+    reject_occupied_goal: true
     # 到目标判定容差(米)：越小越精确
     goal_tolerance_m: 0.12
     # false: 终点姿态保持沿路径切线，避免仿真到点时瞬间跳成 goal 朝向
@@ -53,8 +57,14 @@ path_plan:
     primitive_step_m: 0.24
     # 单步允许的航向变化（离散 bin 数）
     primitive_turn_bins: 1
+    # 允许原地旋转，调头/急拐角时避免用大量小弧线绕方向
+    enable_turn_in_place: true
+    # 原地旋转一步的基础代价，过小会偏爱原地摆头，过大则调头收益降低
+    turn_in_place_cost: 0.18
     # 转弯代价倍率
     turn_cost_weight: 0.20
+    # 规划耗时统计日志节流间隔，0 表示关闭
+    timing_log_interval_s: 1.0
 
     # ===== 重规划与平滑 =====
     # 地图更新时是否触发重规划

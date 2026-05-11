@@ -59,6 +59,8 @@ class DmImuNode(Node):
         self.declare_parameter("verbose", False)
         self.declare_parameter("qos_reliable", True)
         self.declare_parameter("yaw_offset_deg", 0.0)
+        self.declare_parameter("yaw_drift_compensation_enable", False)
+        self.declare_parameter("yaw_drift_rate_deg_s", 0.0)
         self.declare_parameter("publish_imu_data", True)
         self.declare_parameter("publish_rpy", True)
 
@@ -82,6 +84,11 @@ class DmImuNode(Node):
         self.publish_rpy_in_degree = bool(_p("publish_rpy_in_degree", False))
         self.verbose = bool(_p("verbose", False))
         self.yaw_offset_deg = float(_p("yaw_offset_deg", 0.0))
+        self.yaw_drift_compensation_enable = bool(
+            _p("yaw_drift_compensation_enable", False)
+        )
+        self.yaw_drift_rate_deg_s = float(_p("yaw_drift_rate_deg_s", 0.0))
+        self.yaw_compensation_start = self.get_clock().now()
         qos_reliable = bool(_p("qos_reliable", True))
         self.publish_imu_data = bool(_p("publish_imu_data", True))
         self.publish_rpy = bool(_p("publish_rpy", True))
@@ -102,6 +109,10 @@ class DmImuNode(Node):
             self.get_logger().info(f"陀螺仪零偏校准: {self.gyro_bias}")
         if any(abs(b) > 0.001 for b in self.accel_bias):
             self.get_logger().info(f"加速度零偏校准: {self.accel_bias}")
+        if self.yaw_drift_compensation_enable:
+            self.get_logger().info(
+                f"Yaw漂移补偿已启用: drift_rate={self.yaw_drift_rate_deg_s:.8f} deg/s"
+            )
 
         baud = _p("baudrate", 921600)
         try:
@@ -158,6 +169,13 @@ class DmImuNode(Node):
 
         self.get_logger().info('DM-IMU 节点已启动 (模式: USB)')
 
+    def corrected_yaw_deg(self, raw_yaw_deg: float, now_time) -> float:
+        yaw_deg = raw_yaw_deg + self.yaw_offset_deg
+        if self.yaw_drift_compensation_enable:
+            elapsed = (now_time - self.yaw_compensation_start).nanoseconds / 1e9
+            yaw_deg -= self.yaw_drift_rate_deg_s * elapsed
+        return yaw_deg
+
     def timer_callback(self):
         """定时发布IMU数据"""
         data = self.dm.get_latest()
@@ -176,7 +194,8 @@ class DmImuNode(Node):
         if not (gyro_tuple or accel_tuple):
             return
 
-        now = self.get_clock().now().to_msg()
+        now_time = self.get_clock().now()
+        now = now_time.to_msg()
 
         # 发布完整IMU数据
         if self.pub_imu:
@@ -188,7 +207,7 @@ class DmImuNode(Node):
             # 注意：6轴IMU的Yaw会漂移，但短时间内可用于辅助SLAM
             if euler_tuple and all(math.isfinite(v) for v in euler_tuple):
                 try:
-                    yaw_deg = euler_tuple[2] + self.yaw_offset_deg
+                    yaw_deg = self.corrected_yaw_deg(euler_tuple[2], now_time)
                     yaw_rad = math.radians(yaw_deg)
                     qx, qy, qz, qw = euler_rpy_to_quat(
                         math.radians(euler_tuple[0]),  # roll
@@ -234,7 +253,7 @@ class DmImuNode(Node):
             rpy_msg.header.stamp = now
             rpy_msg.header.frame_id = self.frame_id
 
-            yaw_deg = euler_tuple[2] + self.yaw_offset_deg
+            yaw_deg = self.corrected_yaw_deg(euler_tuple[2], now_time)
             if self.publish_rpy_in_degree:
                 rpy_msg.vector.x = euler_tuple[0]
                 rpy_msg.vector.y = euler_tuple[1]

@@ -10,6 +10,7 @@
 
 import heapq
 import math
+import time
 from typing import Dict, List, Optional, Tuple
 
 import rclpy
@@ -49,6 +50,8 @@ class PathPlanner(Node):
         self.declare_parameter("treat_unknown_as_occupied", True)
         self.declare_parameter("inflation_radius_m", 0.08)
         self.declare_parameter("max_search_expansions", 200000)
+        self.declare_parameter("max_planning_time_s", 1.5)
+        self.declare_parameter("reject_occupied_goal", True)
         self.declare_parameter("goal_tolerance_m", 0.12)
         self.declare_parameter("align_final_pose_yaw_to_goal", False)
         self.declare_parameter("stop_on_new_goal_clear_path", True)
@@ -70,7 +73,10 @@ class PathPlanner(Node):
         self.declare_parameter("heading_bins", 24)
         self.declare_parameter("primitive_step_m", 0.18)
         self.declare_parameter("primitive_turn_bins", 1)
+        self.declare_parameter("enable_turn_in_place", True)
+        self.declare_parameter("turn_in_place_cost", 0.18)
         self.declare_parameter("turn_cost_weight", 0.20)
+        self.declare_parameter("timing_log_interval_s", 1.0)
 
         self.map_topic = str(self.get_parameter("map_topic").value)
         self.goal_topic = str(self.get_parameter("goal_topic").value)
@@ -86,6 +92,12 @@ class PathPlanner(Node):
         self.inflation_radius_m = float(self.get_parameter("inflation_radius_m").value)
         self.max_search_expansions = int(
             self.get_parameter("max_search_expansions").value
+        )
+        self.max_planning_time_s = max(
+            0.1, float(self.get_parameter("max_planning_time_s").value)
+        )
+        self.reject_occupied_goal = bool(
+            self.get_parameter("reject_occupied_goal").value
         )
         self.goal_tolerance_m = float(self.get_parameter("goal_tolerance_m").value)
         self.align_final_pose_yaw_to_goal = bool(
@@ -130,8 +142,17 @@ class PathPlanner(Node):
         self.primitive_turn_bins = max(
             0, int(self.get_parameter("primitive_turn_bins").value)
         )
+        self.enable_turn_in_place = bool(
+            self.get_parameter("enable_turn_in_place").value
+        )
+        self.turn_in_place_cost = max(
+            0.01, float(self.get_parameter("turn_in_place_cost").value)
+        )
         self.turn_cost_weight = max(
             0.0, float(self.get_parameter("turn_cost_weight").value)
+        )
+        self.timing_log_interval_s = max(
+            0.0, float(self.get_parameter("timing_log_interval_s").value)
         )
 
         self.tf_buffer = Buffer()
@@ -150,6 +171,7 @@ class PathPlanner(Node):
 
         self.goal_pose_world: Optional[WorldPose] = None
         self.goal_dirty = False
+        self.plan_failed_for_current_goal = False
 
         self.last_plan_poses: List[WorldPose] = []
 
@@ -157,6 +179,9 @@ class PathPlanner(Node):
         self.turn_options = sorted(set((-self.primitive_turn_bins, 0, self.primitive_turn_bins)))
         self.footprint_samples: List[WorldPoint] = []
         self._build_footprint_samples()
+        self.pose_free_cache: Dict[State3D, bool] = {}
+        self._last_timing_log_mono = 0.0
+        self._reset_plan_stats()
 
         self.path_pub = self.create_publisher(Path, self.path_topic, 10)
         map_qos = QoSProfile(
@@ -183,6 +208,47 @@ class PathPlanner(Node):
                 self.vehicle_left_m,
                 self.vehicle_right_m,
                 self.vehicle_margin_m,
+            )
+        )
+
+    def _reset_plan_stats(self) -> None:
+        """重置单次规划统计，用于低频耗时日志。"""
+        self.plan_stats = {
+            "expansions": 0,
+            "neighbors": 0,
+            "pose_checks": 0,
+            "state_cache_hits": 0,
+            "state_cache_misses": 0,
+            "motion_checks": 0,
+            "motion_samples": 0,
+            "astar_s": 0.0,
+            "shortcut_s": 0.0,
+            "densify_s": 0.0,
+        }
+
+    def _maybe_log_plan_stats(self, success: bool, path_len: int) -> None:
+        """按固定间隔打印规划性能统计，避免刷屏。"""
+        if self.timing_log_interval_s <= 0.0:
+            return
+        now = time.monotonic()
+        if now - self._last_timing_log_mono < self.timing_log_interval_s:
+            return
+        self._last_timing_log_mono = now
+        self.get_logger().info(
+            "plan timing | ok=%s poses=%d expansions=%d neighbors=%d pose_checks=%d cache=%d/%d motion=%d samples=%d astar=%.3fs shortcut=%.3fs densify=%.3fs"
+            % (
+                str(success),
+                path_len,
+                int(self.plan_stats["expansions"]),
+                int(self.plan_stats["neighbors"]),
+                int(self.plan_stats["pose_checks"]),
+                int(self.plan_stats["state_cache_hits"]),
+                int(self.plan_stats["state_cache_misses"]),
+                int(self.plan_stats["motion_checks"]),
+                int(self.plan_stats["motion_samples"]),
+                float(self.plan_stats["astar_s"]),
+                float(self.plan_stats["shortcut_s"]),
+                float(self.plan_stats["densify_s"]),
             )
         )
 
@@ -231,6 +297,7 @@ class PathPlanner(Node):
         self._rebuild_processed_map()
         if self.replan_on_map_update:
             self.map_dirty = True
+        self.pose_free_cache.clear()
 
     def _on_goal(self, msg: PoseStamped) -> None:
         """接收目标位姿并触发下一次重规划。"""
@@ -246,6 +313,7 @@ class PathPlanner(Node):
             yaw,
         )
         self.goal_dirty = True
+        self.plan_failed_for_current_goal = False
         if self.stop_on_new_goal_clear_path and self.last_plan_poses:
             self.last_plan_poses = []
             self._publish_path([], None)
@@ -262,6 +330,7 @@ class PathPlanner(Node):
         """清空当前导航目标与路径状态。"""
         self.goal_pose_world = None
         self.goal_dirty = False
+        self.plan_failed_for_current_goal = False
         self.last_plan_poses = []
         self._publish_path([], None)
         self.get_logger().info("navigation goal cleared")
@@ -273,8 +342,16 @@ class PathPlanner(Node):
         self.last_plan_poses = []
         self.goal_dirty = False
         self.map_dirty = False
+        self.plan_failed_for_current_goal = True
         self._publish_path([], None)
         self.get_logger().warn(reason)
+
+    def _goal_point_is_acceptable(self, pose: WorldPose) -> bool:
+        """快速拒绝明显落在障碍、未知或膨胀区的目标点。"""
+        idx = self._world_to_grid((pose[0], pose[1]))
+        if idx is None:
+            return False
+        return self._is_grid_free(idx)
 
     def _plan_loop(self) -> None:
         """周期执行规划：判定是否需要重规划并发布路径。"""
@@ -298,7 +375,9 @@ class PathPlanner(Node):
             return
 
         need_replan = False
-        if self.goal_dirty or self.map_dirty or not self.last_plan_poses:
+        if self.goal_dirty or self.map_dirty:
+            need_replan = True
+        elif not self.last_plan_poses and not self.plan_failed_for_current_goal:
             need_replan = True
         elif (
             self._distance_to_path((current_pose[0], current_pose[1]), self.last_plan_poses)
@@ -312,6 +391,16 @@ class PathPlanner(Node):
             self.last_plan_poses = []
             self._publish_path([], None)
             self.get_logger().info("replan requested: hold position and wait for fresh path")
+            return
+
+        if self.reject_occupied_goal and not self._goal_point_is_acceptable(
+            self.goal_pose_world
+        ):
+            self._reset_plan_stats()
+            self._maybe_log_plan_stats(False, 0)
+            self._handle_plan_failure(
+                "planning failed: goal point is occupied, unknown, inflated, or outside map"
+            )
             return
 
         goal_direction = math.atan2(
@@ -354,23 +443,33 @@ class PathPlanner(Node):
             self._handle_plan_failure("planning failed: no collision-free start/goal pose found")
             return
 
+        self._reset_plan_stats()
+        astar_start = time.monotonic()
         pose_path = self._astar(start_pose, goal_pose)
+        self.plan_stats["astar_s"] = time.monotonic() - astar_start
         if not pose_path:
+            self._maybe_log_plan_stats(False, 0)
             self._handle_plan_failure("planning failed: no path")
             return
 
         # 先用 A* 找到一条安全路径，再做一次直线 shortcut 去掉冗余折点。
+        shortcut_start = time.monotonic()
         pose_path = self._shortcut_path(pose_path)
+        self.plan_stats["shortcut_s"] = time.monotonic() - shortcut_start
         transition_path = self._build_transition_path(current_pose, start_pose)
         if transition_path:
             pose_path = transition_path + pose_path[1:]
+        densify_start = time.monotonic()
         pose_path = self._densify_path(pose_path)
+        self.plan_stats["densify_s"] = time.monotonic() - densify_start
 
         self.last_plan_poses = pose_path
         self.goal_dirty = False
         self.map_dirty = False
+        self.plan_failed_for_current_goal = False
 
         self._publish_path(pose_path, goal_pose)
+        self._maybe_log_plan_stats(True, len(pose_path))
         self.get_logger().info(
             "path published: %d poses, len=%.2fm"
             % (len(pose_path), self._path_length(pose_path))
@@ -469,6 +568,7 @@ class PathPlanner(Node):
     def _pose_is_free(self, pose: WorldPose) -> bool:
         """判断给定位姿下整车足迹是否完全无碰撞。"""
         # 用采样后的矩形足迹判断整车是否可放置，不只检查 base_link 一个点。
+        self.plan_stats["pose_checks"] += 1
         px, py, yaw = pose
         cy = math.cos(yaw)
         sy = math.sin(yaw)
@@ -479,6 +579,17 @@ class PathPlanner(Node):
             if idx is None or not self._is_grid_free(idx):
                 return False
         return True
+
+    def _state_is_free(self, state: State3D) -> bool:
+        """带缓存地判断离散 A* 状态是否可放置。"""
+        cached = self.pose_free_cache.get(state)
+        if cached is not None:
+            self.plan_stats["state_cache_hits"] += 1
+            return cached
+        self.plan_stats["state_cache_misses"] += 1
+        free = self._pose_is_free(self._state_to_pose(state))
+        self.pose_free_cache[state] = free
+        return free
 
     def _ordered_heading_bins(
         self, center_yaw: float, limit: Optional[int] = None
@@ -532,11 +643,10 @@ class PathPlanner(Node):
                     gy = base_idx[1] + dy
                     if not self._is_grid_free((gx, gy)):
                         continue
-                    wx, wy = self._grid_to_world((gx, gy))
                     for h in heading_candidates:
-                        pose = (wx, wy, self._bin_to_yaw(h))
-                        if self._pose_is_free(pose):
-                            return pose
+                        state = (gx, gy, h)
+                        if self._state_is_free(state):
+                            return self._state_to_pose(state)
         return None
 
     def _nearest_reachable_pose(
@@ -561,11 +671,11 @@ class PathPlanner(Node):
                     gy = base_idx[1] + dy
                     if not self._is_grid_free((gx, gy)):
                         continue
-                    wx, wy = self._grid_to_world((gx, gy))
                     for h in heading_candidates:
-                        pose = (wx, wy, self._bin_to_yaw(h))
-                        if not self._pose_is_free(pose):
+                        state = (gx, gy, h)
+                        if not self._state_is_free(state):
                             continue
+                        pose = self._state_to_pose(state)
                         if not self._motion_segment_is_free(src_pose, pose):
                             continue
                         return pose
@@ -586,12 +696,14 @@ class PathPlanner(Node):
     def _motion_segment_is_free(self, a: WorldPose, b: WorldPose) -> bool:
         """对线段+航向插值过程做离散采样碰撞检查。"""
         # 对一段运动过程做离散采样，避免“端点不撞但转弯中擦碰”的情况。
+        self.plan_stats["motion_checks"] += 1
         dist = math.hypot(b[0] - a[0], b[1] - a[1])
         yaw_delta = abs(self._norm_angle(b[2] - a[2]))
         yaw_arc = max(self.vehicle_front_m + self.vehicle_rear_m, 0.2) * yaw_delta
         span = max(dist, yaw_arc)
         step = max(self.resolution * 0.5, self.footprint_sample_step_m * 0.75, 0.04)
         count = max(2, int(math.ceil(span / step)))
+        self.plan_stats["motion_samples"] += count + 1
         for i in range(count + 1):
             t = i / count
             x = a[0] + (b[0] - a[0]) * t
@@ -624,6 +736,16 @@ class PathPlanner(Node):
         """按运动原语展开邻居状态并计算转移代价。"""
         pose = self._state_to_pose(state)
         out: List[Tuple[State3D, float]] = []
+        if self.enable_turn_in_place and self.primitive_turn_bins > 0:
+            for turn_bins in (-self.primitive_turn_bins, self.primitive_turn_bins):
+                new_heading_bin = (state[2] + turn_bins) % self.heading_bins
+                nb_state = (state[0], state[1], new_heading_bin)
+                if self._state_is_free(nb_state) and self._motion_segment_is_free(
+                    pose, self._state_to_pose(nb_state)
+                ):
+                    turn_cost = self.turn_cost_weight * abs(turn_bins)
+                    out.append((nb_state, self.turn_in_place_cost + turn_cost))
+
         for turn_bins in self.turn_options:
             new_heading_bin = (state[2] + turn_bins) % self.heading_bins
             new_yaw = self._bin_to_yaw(new_heading_bin)
@@ -635,11 +757,14 @@ class PathPlanner(Node):
                 continue
             wx, wy = self._grid_to_world(nb_idx)
             nb_pose = (wx, wy, new_yaw)
+            nb_state = (nb_idx[0], nb_idx[1], new_heading_bin)
+            if not self._state_is_free(nb_state):
+                continue
             if not self._motion_segment_is_free(pose, nb_pose):
                 continue
-            nb_state = (nb_idx[0], nb_idx[1], new_heading_bin)
             turn_cost = self.turn_cost_weight * abs(turn_bins)
             out.append((nb_state, self.primitive_step_m + turn_cost))
+        self.plan_stats["neighbors"] += len(out)
         return out
 
     def _astar(self, start_pose: WorldPose, goal_pose: WorldPose) -> List[WorldPose]:
@@ -661,13 +786,17 @@ class PathPlanner(Node):
             1, int(math.ceil(self.goal_tolerance_m / max(self.resolution, 1e-6)))
         )
         reached: Optional[State3D] = None
+        deadline = time.monotonic() + self.max_planning_time_s
 
         while open_heap:
+            if time.monotonic() > deadline:
+                return []
             _, g, current = heapq.heappop(open_heap)
             if current in closed:
                 continue
             closed.add(current)
             expansions += 1
+            self.plan_stats["expansions"] = expansions
             if expansions > self.max_search_expansions:
                 return []
 

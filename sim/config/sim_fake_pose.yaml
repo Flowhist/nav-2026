@@ -9,7 +9,7 @@ sim_chassis_sensor_pub:
     use_cmd_vel: false
     follow_plan: true
     replan_pause_s: 0.20
-    demo_linear_speed_mps: 0.5
+    demo_linear_speed_mps: 1.5
     demo_angular_speed_rps: 0.65
     demo_waypoint_tolerance_m: 0.10
     demo_heading_slowdown_deg: 40.0

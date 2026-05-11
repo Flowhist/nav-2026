@@ -117,6 +117,7 @@ def generate_launch_description():
     )
     nav_cfg = os.path.join(pkg_share, "config", "nav.yaml")
     path_plan_cfg = os.path.join(pkg_share, "config", "path_plan.yaml")
+    auto_localize_cfg = os.path.join(pkg_share, "config", "auto_localize.yaml")
     plan_visualizer_cfg = os.path.join(
         pkg_share, "sim", "config", "sim_plan_visualizer.yaml"
     )
@@ -144,15 +145,21 @@ def generate_launch_description():
     )
     maps_dir_arg = DeclareLaunchArgument("maps_dir", default_value=default_maps_dir)
     use_rviz_arg = DeclareLaunchArgument("use_rviz", default_value="true")
+    auto_localize_arg = DeclareLaunchArgument(
+        "auto_localize",
+        default_value="false",
+        description="Run one-shot scan-to-map global localization before navigation",
+    )
     x_arg = DeclareLaunchArgument("x", default_value="-0.15")
     y_arg = DeclareLaunchArgument("y", default_value="-5.65")
     z_arg = DeclareLaunchArgument("z", default_value="0.0")
-    yaw_arg = DeclareLaunchArgument("yaw", default_value="1.5707963")
+    yaw_arg = DeclareLaunchArgument("yaw", default_value="1.5701963")
     world = LaunchConfiguration("world")
     world_name = LaunchConfiguration("world_name")
     map_file = LaunchConfiguration("map_file")
     maps_dir = LaunchConfiguration("maps_dir")
     use_rviz = LaunchConfiguration("use_rviz")
+    auto_localize = LaunchConfiguration("auto_localize")
     x = LaunchConfiguration("x")
     y = LaunchConfiguration("y")
     z = LaunchConfiguration("z")
@@ -232,6 +239,7 @@ def generate_launch_description():
                     "world_name": world_name,
                     "model_name": "finav_vehicle",
                     "cmd_vel_topic": "/cmd_vel",
+                    "initialpose_topic": "/sim_initialpose",
                     "odom_topic": "/odom",
                     "odom_frame": "odom",
                     "base_frame": "base_link",
@@ -321,6 +329,24 @@ def generate_launch_description():
         }.items(),
     )
 
+    auto_localize_node = Node(
+        package="finav",
+        executable="auto_localize.py",
+        name="auto_localize",
+        output="screen",
+        condition=IfCondition(auto_localize),
+        parameters=[
+            auto_localize_cfg,
+            {
+                "use_sim_time": True,
+                "maps_dir": maps_dir,
+                "map_file": map_file,
+                "scan_topic": "/scan",
+                "initialpose_topic": "/initialpose",
+            },
+        ],
+    )
+
     path_plan_node = Node(
         package="finav",
         executable="path_plan.py",
@@ -361,6 +387,7 @@ def generate_launch_description():
             map_file_arg,
             maps_dir_arg,
             use_rviz_arg,
+            auto_localize_arg,
             x_arg,
             y_arg,
             z_arg,
@@ -374,6 +401,7 @@ def generate_launch_description():
             *([sim_drive] if sim_drive is not None else []),
             *([TimerAction(period=1.0, actions=[unpause_world])] if unpause_world is not None else []),
             TimerAction(period=2.0, actions=[slam_toolbox_nav_launch]),
+            TimerAction(period=3.0, actions=[auto_localize_node]),
             TimerAction(
                 period=2.5, actions=[path_plan_node, nav_control_node, plan_visualizer]
             ),

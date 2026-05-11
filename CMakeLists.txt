@@ -98,12 +98,14 @@ install(PROGRAMS
   scripts/control/base_control.py
   scripts/control/js_kb_router.py
   scripts/control/joystick_control.py
+  scripts/localization/auto_localize.py
   scripts/imu/dm_imu_publisher.py
   scripts/tool/TF.sh
   scripts/tool/save_map.sh
   scripts/tool/clean_nav.sh
   scripts/tool/clean_map.sh
   scripts/tool/manual_save_map.py
+  scripts/tool/auto_localize_sim.sh
   sim/scripts/sim_chassis_sensor_pub.py
   sim/scripts/sim_gazebo_drive.py
   sim/scripts/sim_plan_visualizer.py
