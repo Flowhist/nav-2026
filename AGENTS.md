@@ -1,45 +1,68 @@
-# Repository Guidelines
+# Project Guide for Codex
 
-## Project Structure & Module Organization
-`finav` is a ROS 2 Humble `ament_cmake` package for real-robot navigation and simulation. Key directories:
+## Project Overview
+- Finav is a ROS 2 Humble navigation project for a WHILL-based robot.
+- It includes chassis control, FREE lidar, DM-IMU, EKF fusion, SLAM Toolbox mapping/localization, custom planning/control, a web debug backend, and Gazebo/RViz simulation.
+- Read `Doc/项目Wiki.md` before deep subsystem work.
 
-- `launch/` and `launch/sub/`: real-robot mapping, navigation, and component launch files.
-- `config/`: lidar, IMU, EKF, SLAM Toolbox, chassis, planner, and controller YAMLs.
-- `scripts/control/`: Python ROS nodes for chassis control, teleop routing, planning, and path following.
-- `scripts/imu/`: DM-IMU ROS wrapper and local configuration helper.
-- `third_party/free_lidar/` and `third_party/dm_imu/`: vendored device/protocol code.
-- `server/`: Python HTTP backend plus `server/web/` static JS/CSS UI.
-- `sim/`: Gazebo/RViz simulation launch files, scripts, worlds, and configs.
-- `urdf/`, `rviz/`, `maps/`, and `Doc/`: robot model, visualization configs, saved maps, and project documentation.
+## Tech Stack
+- ROS 2 Humble with `ament_cmake`
+- Python ROS nodes via `rclpy`
+- C++14 ROS node for FREE lidar via `rclcpp`
+- SLAM Toolbox, robot_localization, Nav2 map server components
+- Gazebo / ros_gz_bridge simulation and RViz visualization
+- Python HTTP backend with static HTML/CSS/JS frontend
+- NumPy and OpenCV for lightweight localization utilities
 
-## Build, Test, and Development Commands
-Run from the workspace root unless noted.
+## Common Commands
+- Install: Not confirmed.
+- Run:
+  - `bash start_finav.sh`
+  - `ros2 launch finav map.launch.py`
+  - `ros2 launch finav nav.launch.py`
+  - `python3 server/run_server.py --host 0.0.0.0 --port 8010`
+- Test:
+  - `colcon test --base-paths src/finav --packages-select finav`
+- Lint: Not confirmed.
+- Build:
+  - `source /opt/ros/humble/setup.bash`
+  - `colcon build --base-paths src/finav --packages-select finav --cmake-clean-cache`
+  - `source install/setup.bash`
 
-```bash
-source /opt/ros/humble/setup.bash
-colcon build --base-paths src/finav --packages-select finav --cmake-clean-cache
-source install/setup.bash
-```
+## Project Structure
+- `launch/`: real-robot mapping/navigation and component launch files.
+- `config/`: lidar, IMU, EKF, SLAM, chassis, planner, controller, and localization parameters.
+- `scripts/control/`: chassis control, teleop routing, path planning, and path following.
+- `scripts/imu/`: DM-IMU ROS publisher and configuration helper.
+- `scripts/localization/`: lightweight localization helpers.
+- `scripts/tool/`: map save, cleanup, TF, and operational scripts.
+- `server/`: web debug backend; `server/web/` contains frontend assets.
+- `sim/`: Gazebo/RViz simulation launch files, scripts, models, and worlds.
+- `third_party/`: vendored FREE lidar and DM-IMU protocol code.
+- `urdf/`, `rviz/`, `maps/`, `Doc/`: robot model, visualization configs, saved maps, and documentation.
 
-Use the scoped build when another `finav` package exists in the workspace. For checks:
+## Working Rules
+- Before large changes, inspect relevant files and present a short plan.
+- Prefer minimal, localized edits.
+- Preserve existing architecture and naming conventions.
+- After edits, run the smallest relevant verification command.
+- Do not delete files or rewrite large modules unless explicitly requested.
+- Do not read `.env`, credential, token, private key, or secret files.
+- Prefer scoped builds because this workspace may contain duplicate `finav` packages.
 
-```bash
-colcon test --base-paths src/finav --packages-select finav
-ros2 launch finav map.launch.py
-ros2 launch finav nav.launch.py
-bash src/finav/start_finav.sh
-```
+## Context7 Rule
+- When working with third-party libraries, frameworks, APIs, SDKs, configuration formats, or version-specific behavior, use Context7 to fetch current documentation before implementing or explaining.
 
-If ROS logging is blocked by permissions, set `ROS_LOG_DIR=/tmp/ros_log`.
+## Serena Rule
+- For codebase exploration, refactoring, finding definitions/references, or understanding call chains, prefer Serena's symbolic tools before broad text search.
+- Use Serena to locate relevant functions/classes/modules before editing.
 
-## Coding Style & Naming Conventions
-Follow existing names and module boundaries. Python files use 4-space indentation, `snake_case` functions/variables, and executable node scripts under `scripts/`. C++ uses C++14 and compiles with `-Wall -Wextra -Wpedantic`; keep vendor-facing lidar code under `third_party/free_lidar/`. Launch files use `*.launch.py`; YAML config names should match the subsystem they tune.
+## Git Rules
+- Do not run `git push`.
+- Do not create commits unless explicitly requested.
+- When asked for a commit message, inspect the current diff first.
 
-## Testing Guidelines
-There is no dedicated `tests/` directory yet. `BUILD_TESTING` enables `ament_lint_auto`, so run `colcon test` after build-impacting changes. For runtime changes, verify the smallest affected launch path and inspect relevant ROS topics, for example `/scan`, `/cmd_vel`, `/odom`, `/tf`, or `/plan`.
-
-## Commit & Pull Request Guidelines
-Recent commits use short, focused Chinese summaries such as `雷达频率恒定30hz（否则畸变）` or `更新硬件参数`. Keep commits concise and scoped to one behavior. PRs should include the affected subsystem, commands run, hardware/simulation context, and screenshots or logs for UI, RViz, or robot-behavior changes.
-
-## Agent-Specific Instructions
-Prefer minimal localized edits. Preserve the external `/scan` lidar contract unless a task explicitly changes downstream interfaces. Do not read secret files. Do not delete maps, logs, or generated artifacts without explicit approval.
+## Notes for Future Sessions
+- Keep the external lidar contract as a single `/scan` topic unless explicitly asked to change downstream interfaces.
+- Real-robot navigation uses SLAM Toolbox localization, custom `path_plan.py`, and `nav_control.py`.
+- For ROS launch checks blocked by log permissions, set `ROS_LOG_DIR=/tmp/ros_log`.

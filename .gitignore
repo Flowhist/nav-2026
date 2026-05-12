@@ -17,6 +17,13 @@ __pycache__/
 *.swo
 *~
 
+# agent files
+.serena/
+.agents/
+CLAUDE.md
+AGENTS.md
+.codex
+
 # ROS specific
 .ros/
 server/runtime/*.log
