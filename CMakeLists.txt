@@ -107,6 +107,7 @@ install(PROGRAMS
   scripts/tool/clean_map.sh
   scripts/tool/manual_save_map.py
   scripts/tool/auto_localize_sim.sh
+  scripts/tool/config_lidar_ip.py
   scripts/tool/location_visualizer.py
   scripts/tool/register_location.py
   scripts/tool/nav_to_location.py

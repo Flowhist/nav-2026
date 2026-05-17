@@ -1,7 +1,7 @@
 # finav 统一雷达配置（建图/导航共用）
 # 新雷达支持直接输出扇形扫描，因此不再经过额外的角度过滤节点。
 
-lidar_ip: 192.168.1.111
+lidar_ip: 192.168.1.112
 frame_id: laser_frame
 topic_name: /scan
 
