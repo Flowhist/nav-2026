@@ -157,12 +157,38 @@ def update_lidar_yaml(config_path, old_ip, new_ip):
     replaced = False
     for idx, line in enumerate(lines):
         stripped = line.strip()
-        if stripped.startswith("lidar_ip:"):
+        if stripped.startswith("scanner_ip:") and old_ip in stripped:
             newline = "\n" if line.endswith("\n") else ""
-            lines[idx] = f"lidar_ip: {new_ip}{newline}"
+            indent = line[: len(line) - len(line.lstrip())]
+            lines[idx] = f"{indent}scanner_ip: {new_ip}{newline}"
             replaced = True
             break
+
     if not replaced:
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("lidar_ip:"):
+                newline = "\n" if line.endswith("\n") else ""
+                lines[idx] = f"lidar_ip: {new_ip}{newline}"
+                replaced = True
+                break
+
+    if not replaced:
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("scanner_ip:"):
+                newline = "\n" if line.endswith("\n") else ""
+                indent = line[: len(line) - len(line.lstrip())]
+                lines[idx] = f"{indent}scanner_ip: {new_ip}{newline}"
+                replaced = True
+                break
+
+    if not replaced:
+        has_dual_config = any(line.strip() in ("left:", "right:") for line in lines)
+        if has_dual_config:
+            raise LidarProtocolError(
+                f"could not find scanner_ip matching {old_ip} in dual lidar config"
+            )
         lines.append(f"\nlidar_ip: {new_ip}\n")
     config_path.write_text("".join(lines), encoding="utf-8")
     print(f"[OK] updated {config_path} ({old_ip} -> {new_ip})")

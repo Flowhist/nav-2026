@@ -11,8 +11,8 @@ WHILL 底盘反馈 -> /odom_encoder \
                                -> robot_localization EKF -> /odom + odom->base_link
 DM-IMU --------> /imu/data     /
 
-FREE 雷达 -----> /scan
-URDF ----------> base_link -> laser_frame / imu_link 等静态 TF
+FREE 左/右雷达 -> /scan_left, /scan_right -> scan_fusion_node -> /scan
+URDF ----------> base_link -> laser_left_frame / laser_right_frame / imu_link 等静态 TF
 
 /scan + /odom + TF -> slam_toolbox
   建图模式: 输出 /map 和 map->odom
@@ -30,12 +30,14 @@ server/ros_bridge.py 订阅 ROS 状态并提供 Web 页面调试、建图、导�
 - `map`：全局地图坐标系，由 SLAM Toolbox 发布到 `odom` 的变换。
 - `odom`：连续里程计坐标系，由 EKF 发布到 `base_link` 的变换。
 - `base_link`：车体基座坐标系。
-- `laser_frame`：雷达坐标系，来自 URDF 静态 TF。
+- `laser_left_frame` / `laser_right_frame`：实机双雷达坐标系，来自 URDF 静态 TF。
+- `laser_frame`：保留给旧配置或仿真兼容使用。
 - `imu_link`：IMU 坐标系，来自 URDF 静态 TF。
 
 核心话题：
 
-- `/scan`：FREE 雷达 `sensor_msgs/LaserScan`。
+- `/scan_left` / `/scan_right`：左右 FREE 雷达原始 `sensor_msgs/LaserScan`。
+- `/scan`：双雷达融合后的导航/建图输入，仍是下游统一接口。
 - `/imu/data`：DM-IMU `sensor_msgs/Imu`。
 - `/odom_encoder`：底盘编码器里程计。
 - `/odom`：EKF 融合里程计。
@@ -170,6 +172,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - `third_party/free_lidar/src/driver/free_eth_driver.cpp`
 - `third_party/free_lidar/src/driver/trailing_filter.cpp`
 - `third_party/free_lidar/include/free_lidar/*.h`
+- `src/rosnode/scan_fusion_node.cpp`
 - `launch/sub/lidar.launch.py`
 - `config/lidar.yaml`
 - `third_party/free_lidar/README.upstream.md`
@@ -177,28 +180,35 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 原理：
 
-- 当前构建的是以太网雷达驱动，CMake 中定义了 `FREE_LIDAR_ENABLE_SERIAL=0`。
+- 当前实机链路使用两台以太网 FREE 雷达，CMake 中定义了 `FREE_LIDAR_ENABLE_SERIAL=0`。
 - `free_eth_driver.cpp` 负责 TCP 连接雷达、登录设备、配置扫描角度/频率/分辨率、解析扫描分包。
-- `free_lidar_node.cpp` 将厂商扫描数据封装为 ROS 2 `sensor_msgs/LaserScan` 并发布到 `/scan`。
-- `config/lidar.yaml` 统一配置雷达 IP、扫描频率、扫描角度、距离范围、是否反序、时间戳策略和厂商滤波开关。
+- `free_lidar_node.cpp` 分别发布 `/scan_left` 和 `/scan_right`。
+- `scan_fusion_node.cpp` 将左右 LaserScan 变换到 `base_link`，按角度栅格取最近距离，发布融合后的 `/scan`。
+- 下游 SLAM、Web、RViz 和导航仍只依赖 `/scan`，不要随意改动外部话题契约。
+- 当前雷达已正装朝上，`is_reverse_postion` 默认应保持 `false`。
 - 雷达 QoS 使用 Best Effort，RViz 的 LaserScan Display 也必须设置为 Best Effort，否则会出现 Reliability QoS 不兼容。
 
 关键配置：
 
-- `lidar_ip`：雷达 IP，例如 `192.168.1.111`。
-- `frame_id`：通常为 `laser_frame`。
+- `left.scanner_ip` / `right.scanner_ip`：左右雷达 IP，当前常用 `192.168.1.111` 和 `192.168.1.112`。
+- `left.frame_id` / `right.frame_id`：通常为 `laser_left_frame`、`laser_right_frame`。
+- `left.topic_name` / `right.topic_name`：原始话题，默认 `/scan_left`、`/scan_right`。
 - `scan_frequency`：扫描频率。
-- `start_angle` / `stop_angle` / `offset_angle`：发布角度范围和偏置。
-- `is_reverse_postion`：物理反装或点序相反时反序 ranges。
+- `start_angle` / `stop_angle` / `offset_angle`：每个雷达的发布角度范围和偏置，可用于减少重合、扩大覆盖。
+- `is_reverse_postion`：物理反装或点序相反时反序 ranges；当前正装时保持 `false`。
+- `fusion.output_topic` / `fusion.output_frame`：融合输出话题和坐标系，默认 `/scan`、`base_link`。
+- `fusion.angle_*`、`fusion.range_*`、`sync_queue_size`、`tf_timeout_sec`：融合角度分辨率、距离范围、同步队列和 TF 等待时间。
 - `filter_switch`、`single_filter_enable`：厂商滤波控制。排查原始点云时应关闭。
 - `use_recv_time_stamp`：是否使用首包接收时间作为 `LaserScan.header.stamp`，用于排查运动畸变。
 
 常见排查：
 
-- 连接失败先查网络：上位机网卡应与雷达在同一网段。
-- `ros2 topic echo /scan --qos-reliability best_effort --once` 确认有数据。
+- 连接失败先查网络：上位机网卡应与两台雷达在同一网段，分别 `ping 192.168.1.111`、`ping 192.168.1.112`。
+- 分别执行 `ros2 topic hz /scan_left --qos-reliability best_effort`、`/scan_right`、`/scan` 确认原始和融合数据。
+- `ros2 topic info /scan -v` 确认 `/scan` 发布者是 `scan_fusion_node`，QoS 为 Best Effort。
+- `ros2 run tf2_ros tf2_echo base_link laser_left_frame` 和 `laser_right_frame` 确认 TF 存在。
 - RViz 看不到点时确认 LaserScan 的 Reliability Policy 是 Best Effort。
-- 排查雷达本体时只启动雷达，RViz Fixed Frame 设为 `laser_frame`。
+- 排查完整链路时 RViz Fixed Frame 优先设为 `base_link` 或 `map`；只看单个原始雷达时用对应 `laser_left_frame` / `laser_right_frame`。
 
 ### 3.3 DM-IMU 模块
 
@@ -255,7 +265,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 原理：
 
 - `robot_state_publisher` 从 URDF 发布静态/动态 TF。
-- 当前关键固定关系包括 `base_link -> laser_frame`、`base_link -> imu_link`。
+- 当前关键固定关系包括 `base_link -> laser_left_frame`、`base_link -> laser_right_frame`、`base_link -> imu_link`。`laser_frame` 仅保留给旧配置或仿真兼容。
 - RViz 中任何 Fixed Frame 不等于消息自身 frame 时，都需要 TF 树中存在对应变换。
 
 开发入口：
@@ -392,7 +402,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 ## 4. 配置文件索引
 
 - `config/base_control.yaml`：底盘、摇杆、键盘控制参数。
-- `config/lidar.yaml`：FREE 雷达 IP、角度、频率、滤波、时间戳策略。
+- `config/lidar.yaml`：左右 FREE 雷达 IP、角度、频率、滤波、时间戳策略和融合参数。
 - `config/imu.yaml`：DM-IMU 串口、零偏、发布参数。
 - `config/ekf.yaml`：robot_localization EKF 融合参数。
 - `config/slam_toolbox_map.yaml`：建图模式 SLAM 参数。
@@ -431,7 +441,7 @@ CMake 安装内容：
 2. 阅读 `README.md`，了解 Web 后台接口和页面工作流。
 3. 根据职责选择模块：
    - 底盘：`scripts/control/base_control.py`、`config/base_control.yaml`。
-   - 雷达：`third_party/free_lidar/`、`config/lidar.yaml`。
+   - 雷达：`third_party/free_lidar/`、`src/rosnode/scan_fusion_node.cpp`、`config/lidar.yaml`。
    - IMU/EKF：`scripts/imu/dm_imu_publisher.py`、`config/imu.yaml`、`config/ekf.yaml`。
    - 建图定位：`launch/sub/slam_toolbox.launch.py`、`config/slam_toolbox_*.yaml`。
    - 路径规划：`scripts/control/path_plan.py`、`config/path_plan.yaml`。
@@ -453,7 +463,7 @@ ip -br addr
 ip route
 ```
 
-上位机与雷达必须在同一网段。雷达直连网口不要配置默认网关，避免影响远程连接。
+上位机与两台雷达必须在同一网段。雷达直连网口不要配置默认网关，避免影响远程连接。
 
 ### 7.2 RViz 看不到 `/scan`
 
@@ -462,30 +472,33 @@ ip route
 ```bash
 ros2 topic hz /scan --qos-reliability best_effort
 ros2 topic echo /scan --once --qos-reliability best_effort
+ros2 topic hz /scan_left --qos-reliability best_effort
+ros2 topic hz /scan_right --qos-reliability best_effort
 ```
 
 RViz 的 LaserScan Display 需要：
 
 - `Topic = /scan`
 - `Reliability Policy = Best Effort`
-- Fixed Frame 与 TF 树匹配。只看原始雷达时可设为 `laser_frame`。
+- Fixed Frame 与 TF 树匹配。完整链路优先用 `base_link` 或 `map`；只看原始雷达时用 `laser_left_frame` 或 `laser_right_frame`。
 
-### 7.3 RViz 报 `Frame [laser_frame] does not exist`
+### 7.3 RViz 报雷达 Frame 不存在
 
-`/scan.header.frame_id = laser_frame` 不等于 TF 树里已经存在 `laser_frame`。需要：
+`/scan_left`、`/scan_right` 或 `/scan` 的 `header.frame_id` 不等于 TF 树里已经存在对应坐标系。需要：
 
 - 启动 `launch/sub/robot_model.launch.py` 发布 URDF TF；或
-- RViz Fixed Frame 手动设为 `laser_frame`；或
+- RViz Fixed Frame 手动设为对应雷达 frame；或
 - 临时用 `static_transform_publisher` 发布测试 TF。
 
 ### 7.4 墙面在雷达点云中呈分段斜线
 
 按顺序排查：
 
-1. 只启动雷达，车静止，RViz Fixed Frame 设为 `laser_frame`。
-2. 若静止仍分段，检查点序、角度范围、`is_reverse_postion`、厂商滤波和雷达硬件。
-3. 若静止正常、运动后分段，优先考虑运动畸变、时间戳、TF 延迟和里程计质量。
-4. 排查原始点云时关闭滤波：`filter_switch: 0`、`single_filter_enable: false`。
+1. 只启动雷达，车静止，分别看 `/scan_left`、`/scan_right` 和融合 `/scan`。
+2. 若原始数据静止仍分段，检查点序、角度范围、`is_reverse_postion`、厂商滤波和雷达硬件。
+3. 若原始正常、融合异常，检查 `laser_left_frame` / `laser_right_frame` 的安装角和 `scan_fusion_node` 参数。
+4. 若静止正常、运动后分段，优先考虑运动畸变、时间戳、TF 延迟和里程计质量。
+5. 排查原始点云时关闭滤波：`filter_switch: 0`、`single_filter_enable: false`。
 
 ### 7.5 SLAM 丢弃 scan
 
@@ -497,7 +510,7 @@ Message Filter dropping message ... timestamp ... earlier than all the data in t
 
 检查：
 
-- `/scan.header.stamp` 是否过早。
+- `/scan.header.stamp` 是否过早。当前融合节点会用发布时刻作为 `/scan` 时间戳，若仍报错应继续查原始 scan 时间、TF 发布延迟和是否同时启动了多个雷达 launch。
 - `use_recv_time_stamp` 是否开启。
 - `robot_state_publisher`、EKF、SLAM 启动顺序。
 - `slam_toolbox` 的 `transform_timeout` 和 TF 缓存。
@@ -528,7 +541,7 @@ ros2 run tf2_ros tf2_echo map base_link
 | 一键启动 | `start_finav.sh`, `base_drive.sh` |
 | 建图 launch | `launch/map.launch.py`, `launch/sub/slam_toolbox.launch.py` |
 | 导航 launch | `launch/nav.launch.py` |
-| 雷达 | `third_party/free_lidar/`, `launch/sub/lidar.launch.py`, `config/lidar.yaml` |
+| 雷达 | `third_party/free_lidar/`, `src/rosnode/scan_fusion_node.cpp`, `launch/sub/lidar.launch.py`, `config/lidar.yaml` |
 | IMU | `scripts/imu/dm_imu_publisher.py`, `third_party/dm_imu/`, `config/imu.yaml` |
 | EKF | `launch/sub/ekf.launch.py`, `config/ekf.yaml` |
 | 机器人模型 | `urdf/whillcar.urdf`, `launch/sub/robot_model.launch.py` |
@@ -540,4 +553,3 @@ ros2 run tf2_ros tf2_echo map base_link
 | 地图 | `maps/`, `scripts/tool/save_map.sh`, `scripts/tool/manual_save_map.py` |
 | RViz | `rviz/mapping.rviz`, `rviz/navigation.rviz` |
 | 仿真 | `sim/` |
-

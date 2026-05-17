@@ -39,6 +39,10 @@
   <xacro:property name="laser_x" value="0.66"/>
   <xacro:property name="laser_y" value="0.0"/>
   <xacro:property name="laser_z" value="0.44"/>
+  <xacro:property name="laser_dual_x" value="0.56"/>
+  <xacro:property name="laser_dual_y" value="0.27"/>
+  <xacro:property name="laser_left_yaw" value="${-pi/4}"/>
+  <xacro:property name="laser_right_yaw" value="${-3*pi/4}"/>
   <xacro:property name="laser_size" value="0.10"/>
   <xacro:property name="laser_mass" value="0.6"/>
 
@@ -178,6 +182,71 @@
   </joint>
 
   <link name="laser_frame">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${laser_size/2}" length="${laser_size}"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${laser_size/2}" length="${laser_size}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${laser_mass}"/>
+      <inertia
+        ixx="${laser_mass*(3*(laser_size/2)*(laser_size/2) + laser_size*laser_size)/12.0}"
+        ixy="0.0" ixz="0.0"
+        iyy="${laser_mass*(3*(laser_size/2)*(laser_size/2) + laser_size*laser_size)/12.0}"
+        iyz="0.0"
+        izz="${laser_mass*(laser_size/2)*(laser_size/2)/2.0}"/>
+    </inertial>
+  </link>
+
+  <!-- ==================== 实车双雷达 ==================== -->
+  <joint name="laser_left_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="laser_left_frame"/>
+    <origin xyz="${laser_dual_x} ${laser_dual_y} ${laser_z}" rpy="0 0 ${laser_left_yaw}"/>
+  </joint>
+
+  <link name="laser_left_frame">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${laser_size/2}" length="${laser_size}"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${laser_size/2}" length="${laser_size}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${laser_mass}"/>
+      <inertia
+        ixx="${laser_mass*(3*(laser_size/2)*(laser_size/2) + laser_size*laser_size)/12.0}"
+        ixy="0.0" ixz="0.0"
+        iyy="${laser_mass*(3*(laser_size/2)*(laser_size/2) + laser_size*laser_size)/12.0}"
+        iyz="0.0"
+        izz="${laser_mass*(laser_size/2)*(laser_size/2)/2.0}"/>
+    </inertial>
+  </link>
+
+  <joint name="laser_right_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="laser_right_frame"/>
+    <origin xyz="${laser_dual_x} ${-laser_dual_y} ${laser_z}" rpy="0 0 ${laser_right_yaw}"/>
+  </joint>
+
+  <link name="laser_right_frame">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>

@@ -24,6 +24,11 @@ find_package(lifecycle_msgs REQUIRED)
 find_package(std_msgs REQUIRED) # 标准消息类型
 find_package(sensor_msgs REQUIRED) # 传感器消息类型
 find_package(geometry_msgs REQUIRED) # 几何消息类型
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_sensor_msgs REQUIRED)
+find_package(message_filters REQUIRED)
+find_package(laser_geometry REQUIRED)
 
 set(dependencies
   rclcpp
@@ -32,6 +37,11 @@ set(dependencies
   std_msgs
   sensor_msgs
   geometry_msgs
+  tf2
+  tf2_ros
+  tf2_sensor_msgs
+  message_filters
+  laser_geometry
   )
 
 # Declare a C++ executable for free_lidar_node
@@ -50,6 +60,16 @@ target_include_directories(free_lidar_node PUBLIC
 )
 
 target_link_libraries(free_lidar_node
+  ${Boost_LIBRARIES}
+)
+
+add_executable(scan_fusion_node
+  src/rosnode/scan_fusion_node.cpp
+)
+
+ament_target_dependencies(scan_fusion_node ${dependencies})
+
+target_link_libraries(scan_fusion_node
   ${Boost_LIBRARIES}
 )
 
@@ -127,7 +147,7 @@ install(DIRECTORY
   FILES_MATCHING PATTERN "*.py"
 )
 
-install(TARGETS free_lidar_node # serial_bridge_node
+install(TARGETS free_lidar_node scan_fusion_node # serial_bridge_node
   EXPORT export_${PROJECT_NAME}
   DESTINATION lib/${PROJECT_NAME})
 

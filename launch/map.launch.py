@@ -31,7 +31,8 @@ def _resolve_repo_dir(pkg_share: str) -> str:
 
 def _load_lidar_config(config_path: str):
     defaults = {
-        "lidar_ip": "10.86.81.200",
+        "left_lidar_ip": "192.168.1.111",
+        "right_lidar_ip": "192.168.1.112",
     }
 
     try:
@@ -41,7 +42,16 @@ def _load_lidar_config(config_path: str):
             data = yaml.safe_load(f) or {}
 
         if isinstance(data, dict):
-            defaults["lidar_ip"] = str(data.get("lidar_ip", defaults["lidar_ip"]))
+            left = data.get("left", {})
+            right = data.get("right", {})
+            if isinstance(left, dict):
+                defaults["left_lidar_ip"] = str(
+                    left.get("scanner_ip", defaults["left_lidar_ip"])
+                )
+            if isinstance(right, dict):
+                defaults["right_lidar_ip"] = str(
+                    right.get("scanner_ip", defaults["right_lidar_ip"])
+                )
     except Exception:
         pass
 
@@ -57,19 +67,28 @@ def generate_launch_description():
     lidar_cfg = _load_lidar_config(os.path.join(pkg_share, "config", "lidar.yaml"))
 
     # 雷达IP参数（默认从 config/lidar.yaml 读取）
-    lidar_ip_arg = DeclareLaunchArgument(
-        "lidar_ip",
-        default_value=str(lidar_cfg["lidar_ip"]),
-        description="雷达IP地址（有线直连）",
+    left_lidar_ip_arg = DeclareLaunchArgument(
+        "left_lidar_ip",
+        default_value=str(lidar_cfg["left_lidar_ip"]),
+        description="左侧雷达IP地址",
     )
-    lidar_ip = LaunchConfiguration("lidar_ip")
+    right_lidar_ip_arg = DeclareLaunchArgument(
+        "right_lidar_ip",
+        default_value=str(lidar_cfg["right_lidar_ip"]),
+        description="右侧雷达IP地址",
+    )
+    left_lidar_ip = LaunchConfiguration("left_lidar_ip")
+    right_lidar_ip = LaunchConfiguration("right_lidar_ip")
 
     # 1. 雷达驱动
     lidar_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_share, "launch", "sub", "lidar.launch.py")
         ),
-        launch_arguments={"scanner_ip": lidar_ip}.items(),
+        launch_arguments={
+            "left_scanner_ip": left_lidar_ip,
+            "right_scanner_ip": right_lidar_ip,
+        }.items(),
     )
 
     # 2. SLAM Toolbox 建图模式
@@ -107,7 +126,8 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            lidar_ip_arg,
+            left_lidar_ip_arg,
+            right_lidar_ip_arg,
             lidar_launch,
             dm_imu_launch,
             ekf_launch,

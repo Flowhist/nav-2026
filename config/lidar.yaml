@@ -1,33 +1,59 @@
-# finav 统一雷达配置（建图/导航共用）
-# 新雷达支持直接输出扇形扫描，因此不再经过额外的角度过滤节点。
+# finav 双 FREE 雷达配置（建图/导航共用）
+# 两台雷达内部发布 /scan_left 和 /scan_right，最终由 scan_fusion_node 融合为 /scan。
+# 下游 SLAM、Web、导航仍只使用 /scan。
 
-lidar_ip: 192.168.1.112
-frame_id: laser_frame
-topic_name: /scan
+left:
+  scanner_ip: 192.168.1.111
+  frame_id: laser_left_frame
+  topic_name: /scan_left
+  is_ethernet: true
+  port_name: /dev/ttyUSB0
+  baud: 921600
+  scan_frequency: 30
+  scan_resolution: 1000
+  start_angle: 0
+  stop_angle: 225
+  offset_angle: 0
+  range_min: 0.05
+  range_max: 25.0
+  filter_switch: 0
+  single_filter_enable: false
+  cluster_num: 10
+  broad_filter_num: 20
+  nor_switch: 1
+  is_reverse_postion: false
+  use_recv_time_stamp: false
 
-is_ethernet: true
-port_name: /dev/ttyUSB0
-baud: 921600
+right:
+  scanner_ip: 192.168.1.112
+  frame_id: laser_right_frame
+  topic_name: /scan_right
+  is_ethernet: true
+  port_name: /dev/ttyUSB0
+  baud: 921600
+  scan_frequency: 30
+  scan_resolution: 1000
+  start_angle: -45
+  stop_angle: 180
+  offset_angle: 0
+  range_min: 0.05
+  range_max: 25.0
+  filter_switch: 0
+  single_filter_enable: false
+  cluster_num: 10
+  broad_filter_num: 20
+  nor_switch: 1
+  is_reverse_postion: false
+  use_recv_time_stamp: false
 
-scan_frequency: 30
-scan_resolution: 1000
-
-# 新雷达物理支持约 270°（-45° ~ 225°），实车因车身硬件遮挡裁剪为 20° ~ 160°。
-# 发布给 ROS 的 laser_frame 保持右手系且 +Z 朝上；物理倒装导致的角度递增方向
-# 通过 is_reverse_postion 反序修正。修正后雷达接收角 +90°（中线方向）对应车体 +X。
-start_angle: 20
-stop_angle: 160
-offset_angle: 0
-
-range_min: 0.05
-range_max: 25.0
-
-filter_switch: 0
-single_filter_enable: false  # false: 保留原始scan；true: 启用厂商单点孤立滤波
-cluster_num: 10
-broad_filter_num: 20
-nor_switch: 1
-is_reverse_postion: true
-
-# false: 使用发布时刻，兼容性最好；true: 使用一圈扫描首包接收时刻，便于排查运动畸变。
-use_recv_time_stamp: false
+fusion:
+  output_topic: /scan
+  output_frame: base_link
+  angle_min: -3.141592653589793
+  angle_max: 3.141592653589793
+  angle_increment: 0.0017453292519943296
+  range_min: 0.05
+  range_max: 25.0
+  sync_queue_size: 10
+  input_timeout_sec: 1.0
+  tf_timeout_sec: 0.1
