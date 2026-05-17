@@ -17,6 +17,7 @@ from launch.actions import (
     DeclareLaunchArgument,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -135,7 +136,20 @@ def generate_launch_description():
     )
 
     lidar_ip = LaunchConfiguration("lidar_ip")
+    show_locations_arg = DeclareLaunchArgument(
+        "show_locations",
+        default_value="true",
+        description="Visualize .locations.yaml markers in RViz",
+    )
+    use_nav_bridge_arg = DeclareLaunchArgument(
+        "use_nav_bridge",
+        default_value="false",
+        description="Enable location-based voice navigation bridge (nav_bridge)",
+    )
+
     map_file = LaunchConfiguration("map_file")
+    show_locations = LaunchConfiguration("show_locations")
+    use_nav_bridge = LaunchConfiguration("use_nav_bridge")
 
     # 1. 雷达驱动
     lidar_launch = IncludeLaunchDescription(
@@ -172,7 +186,30 @@ def generate_launch_description():
         ),
     )
 
-    # 6. 三状态导航控制器：订阅 /plan 路径，按航向误差切换 STRAIGHT/ARC/ROTATE 状态并发布 /cmd_vel
+    # 6. 地点可视化：发布 MarkerArray 到 RViz
+    location_viz_node = Node(
+        package="finav",
+        executable="location_visualizer.py",
+        name="location_visualizer",
+        output="screen",
+        condition=IfCondition(show_locations),
+        parameters=[{"map_file": map_file}],
+    )
+
+    # 7. 地点导航桥接：订阅语音指令，查表发布 /goal_pose
+    nav_bridge_node = Node(
+        package="finav",
+        executable="nav_bridge.py",
+        name="nav_bridge",
+        output="screen",
+        condition=IfCondition(use_nav_bridge),
+        parameters=[
+            os.path.join(pkg_share, "config", "nav_bridge.yaml"),
+            {"map_file": map_file},
+        ],
+    )
+
+    # 9. 三状态导航控制器：订阅 /plan 路径，按航向误差切换 STRAIGHT/ARC/ROTATE 状态并发布 /cmd_vel
     cmd_vel_relay_node = Node(
         package="finav",
         executable="nav_control.py",
@@ -181,7 +218,7 @@ def generate_launch_description():
         parameters=[os.path.join(pkg_share, "config", "nav.yaml")],
     )
 
-    # 7. 轻量路径规划：/map + TF + /goal_pose -> /plan
+    # 10. 轻量路径规划：/map + TF + /goal_pose -> /plan
     path_plan_node = Node(
         package="finav",
         executable="path_plan.py",
@@ -190,7 +227,7 @@ def generate_launch_description():
         parameters=[os.path.join(pkg_share, "config", "path_plan.yaml")],
     )
 
-    # 8. 机器人模型发布
+    # 11. 机器人模型发布
     robot_model_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_share, "launch", "sub", "robot_model.launch.py")
@@ -201,10 +238,14 @@ def generate_launch_description():
         [
             lidar_ip_arg,
             map_file_arg,
+            show_locations_arg,
+            use_nav_bridge_arg,
             lidar_launch,
             dm_imu_launch,
             ekf_launch,
             slam_toolbox_nav_launch,
+            location_viz_node,
+            nav_bridge_node,
             path_plan_node,
             cmd_vel_relay_node,
             robot_model_launch,

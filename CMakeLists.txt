@@ -93,6 +93,7 @@ install(
 
 # Install Python scripts
 install(PROGRAMS
+  scripts/control/nav_bridge.py
   scripts/control/path_plan.py
   scripts/control/nav_control.py
   scripts/control/base_control.py
@@ -106,6 +107,9 @@ install(PROGRAMS
   scripts/tool/clean_map.sh
   scripts/tool/manual_save_map.py
   scripts/tool/auto_localize_sim.sh
+  scripts/tool/location_visualizer.py
+  scripts/tool/register_location.py
+  scripts/tool/nav_to_location.py
   sim/scripts/sim_chassis_sensor_pub.py
   sim/scripts/sim_gazebo_drive.py
   sim/scripts/sim_plan_visualizer.py

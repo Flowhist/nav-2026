@@ -118,6 +118,7 @@ def generate_launch_description():
     nav_cfg = os.path.join(pkg_share, "config", "nav.yaml")
     path_plan_cfg = os.path.join(pkg_share, "config", "path_plan.yaml")
     auto_localize_cfg = os.path.join(pkg_share, "config", "auto_localize.yaml")
+    nav_bridge_cfg = os.path.join(pkg_share, "config", "nav_bridge.yaml")
     plan_visualizer_cfg = os.path.join(
         pkg_share, "sim", "config", "sim_plan_visualizer.yaml"
     )
@@ -150,6 +151,16 @@ def generate_launch_description():
         default_value="false",
         description="Run one-shot scan-to-map global localization before navigation",
     )
+    show_locations_arg = DeclareLaunchArgument(
+        "show_locations",
+        default_value="true",
+        description="Visualize .locations.yaml markers in RViz",
+    )
+    use_nav_bridge_arg = DeclareLaunchArgument(
+        "use_nav_bridge",
+        default_value="false",
+        description="Enable location-based voice navigation bridge (nav_bridge)",
+    )
     x_arg = DeclareLaunchArgument("x", default_value="-0.15")
     y_arg = DeclareLaunchArgument("y", default_value="-5.65")
     z_arg = DeclareLaunchArgument("z", default_value="0.0")
@@ -160,6 +171,8 @@ def generate_launch_description():
     maps_dir = LaunchConfiguration("maps_dir")
     use_rviz = LaunchConfiguration("use_rviz")
     auto_localize = LaunchConfiguration("auto_localize")
+    show_locations = LaunchConfiguration("show_locations")
+    use_nav_bridge = LaunchConfiguration("use_nav_bridge")
     x = LaunchConfiguration("x")
     y = LaunchConfiguration("y")
     z = LaunchConfiguration("z")
@@ -347,6 +360,37 @@ def generate_launch_description():
         ],
     )
 
+    location_viz_node = Node(
+        package="finav",
+        executable="location_visualizer.py",
+        name="location_visualizer",
+        output="screen",
+        condition=IfCondition(show_locations),
+        parameters=[
+            {
+                "use_sim_time": True,
+                "maps_dir": maps_dir,
+                "map_file": map_file,
+            },
+        ],
+    )
+
+    nav_bridge_node = Node(
+        package="finav",
+        executable="nav_bridge.py",
+        name="nav_bridge",
+        output="screen",
+        condition=IfCondition(use_nav_bridge),
+        parameters=[
+            nav_bridge_cfg,
+            {
+                "use_sim_time": True,
+                "maps_dir": maps_dir,
+                "map_file": map_file,
+            },
+        ],
+    )
+
     path_plan_node = Node(
         package="finav",
         executable="path_plan.py",
@@ -388,6 +432,8 @@ def generate_launch_description():
             maps_dir_arg,
             use_rviz_arg,
             auto_localize_arg,
+            show_locations_arg,
+            use_nav_bridge_arg,
             x_arg,
             y_arg,
             z_arg,
@@ -403,7 +449,7 @@ def generate_launch_description():
             TimerAction(period=2.0, actions=[slam_toolbox_nav_launch]),
             TimerAction(period=3.0, actions=[auto_localize_node]),
             TimerAction(
-                period=2.5, actions=[path_plan_node, nav_control_node, plan_visualizer]
+                period=2.5, actions=[path_plan_node, nav_control_node, plan_visualizer, nav_bridge_node, location_viz_node]
             ),
             rviz,
         ]

@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WS_DIR="$(cd "${REPO_DIR}/../.." && pwd)"
 
-MAP_FILE="${1:-map4}"
+MAP_FILE="${1:-simap}"
 MAPS_DIR="${FINAV_MAPS_DIR:-${REPO_DIR}/maps}"
 
 source /opt/ros/humble/setup.bash
