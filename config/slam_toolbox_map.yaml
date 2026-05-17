@@ -48,7 +48,7 @@ slam_toolbox:
     check_min_dist_and_heading_precisely: false  # or, 满足任意条件就更新
 
     # 激光雷达过滤
-    transform_timeout: 0.15  # 只影响rviz的显示
+    transform_timeout: 0.2  # TF等待超时，双雷达融合+网络延迟需要更大窗口
     tf_buffer_duration: 60.0  
     throttle_scans: 1    # 跳帧扫描
     

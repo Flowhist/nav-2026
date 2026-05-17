@@ -155,8 +155,8 @@ def generate_launch_description():
             scan_topic_arg,
             mapping_info,
             localization_info,
-            # 延迟3秒启动SLAM Toolbox，等待TF树和传感器数据稳定
-            TimerAction(period=1.0, actions=[slam_toolbox_node]),
-            TimerAction(period=1.0, actions=[localization_slam_toolbox_node]),
+            # 延迟启动SLAM，等EKF发布odom->base_link TF（双雷达+无IMU需更长时间）
+            TimerAction(period=2.0, actions=[slam_toolbox_node]),
+            TimerAction(period=2.0, actions=[localization_slam_toolbox_node]),
         ]
     )

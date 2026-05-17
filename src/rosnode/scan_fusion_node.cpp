@@ -162,7 +162,12 @@ private:
     }
 
     LaserScan out;
-    out.header.stamp = this->get_clock()->now();
+    // Use the later sensor timestamp so SLAM can properly match against
+    // historical EKF odom->base_link transforms, avoiding "timestamp earlier
+    // than all data in the transform cache" drops.
+    out.header.stamp = std::max(
+        rclcpp::Time(left->header.stamp),
+        rclcpp::Time(right->header.stamp));
     out.header.frame_id = output_frame_;
     out.angle_min = static_cast<float>(angle_min_);
     out.angle_max = static_cast<float>(angle_max_);
