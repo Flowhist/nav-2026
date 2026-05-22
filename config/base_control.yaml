@@ -24,19 +24,13 @@ base_control:
     max_angular_speed: 0.5               # 角速硬限（rad/s）
     acceleration: 750                    # 加速度（deg/s²）
 
-# 摇杆参数配置
-joystick_control:
+# 摇杆速度档位配置
+joy_control:
   ros__parameters:
-    publish_rate : 25     # 信号频率
-
     js_vel_low: 0.2       # 摇杆控制直行速度 低档（m/s）
     js_vel_high: 0.4      # 摇杆控制直行速度 高档（m/s）
     js_rot_low: 10        # 摇杆控制旋转速度 低档（deg/s）
     js_rot_high: 25       # 摇杆控制旋转速度 高档（deg/s）
-
-    # 摇杆从初始位置到推满：0 - 128
-    dead_zone : 20        # 摇杆死区阈值
-    sat_zone : 110        # 摇杆饱和区阈值
 
 # 键盘控制
 js_kb_router:

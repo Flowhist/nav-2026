@@ -12,7 +12,7 @@ left:
   scan_frequency: 30
   scan_resolution: 1000
   start_angle: 0
-  stop_angle: 225
+  stop_angle: 215
   offset_angle: 0
   range_min: 0.05
   range_max: 25.0

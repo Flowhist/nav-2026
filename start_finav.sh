@@ -4,7 +4,7 @@
 #
 # 用法：
 #   bash start_finav.sh
-#   bash start_finav.sh --joy-port /dev/ttyUSB1 --host 0.0.0.0 --port 8010
+#   bash start_finav.sh --joy-dev /dev/input/js0 --host 0.0.0.0 --port 8010
 
 set -euo pipefail
 
@@ -12,14 +12,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$SCRIPT_DIR"
 WORKSPACE_DIR="$(cd "$REPO_DIR/../.." && pwd)"
 
-JOY_PORT="/dev/ttyUSB0"
+JOY_DEV="/dev/input/js0"
 SERVER_HOST="0.0.0.0"
 SERVER_PORT="8010"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --joy-port)
-            JOY_PORT="$2"
+        --joy-dev)
+            JOY_DEV="$2"
             shift 2
             ;;
         --host)
@@ -57,7 +57,7 @@ wait_all_stable() {
     local i
     for ((i = 0; i < START_CHECKS; ++i)); do
         kill -0 "$DRIVER_PID" 2>/dev/null || fail "base_control 启动失败"
-        kill -0 "$JOY_PID" 2>/dev/null || fail "joystick_control 启动失败"
+        kill -0 "$JOY_PID" 2>/dev/null || fail "joy.launch.py 启动失败"
         kill -0 "$SERVER_PID" 2>/dev/null || fail "web server 启动失败"
         sleep "$START_INTERVAL"
     done
@@ -139,7 +139,8 @@ export FINAV_MAPS_DIR="$REPO_DIR/maps"
 
 printf '清理旧进程...\n'
 pkill -9 -f "base_control.py" 2>/dev/null || true
-pkill -9 -f "joystick_control.py" 2>/dev/null || true
+pkill -9 -f "joy_control.py" 2>/dev/null || true
+pkill -9 -f "joy_node" 2>/dev/null || true
 pkill -9 -f "js_kb_router.py" 2>/dev/null || true
 pkill -9 -f "server/run_server.py" 2>/dev/null || true
 sleep 0.2
@@ -153,9 +154,8 @@ ros2 run finav base_control.py \
     > /dev/null 2>&1 &
 DRIVER_PID=$!
 
-printf '▶ 启动 joystick_control\n'
-ros2 run finav joystick_control.py \
-    --ros-args --params-file "$CONTROL_PARAMS" -p "joystick_port:=$JOY_PORT" \
+printf '▶ 启动 HID joystick\n'
+ros2 launch finav joy.launch.py "joy_dev:=$JOY_DEV" \
     > /dev/null 2>&1 &
 JOY_PID=$!
 
@@ -167,7 +167,7 @@ printf '等待关键进程稳定...\n'
 wait_all_stable
 
 printf '\033[32m✓ 底盘、摇杆与 Web 后台均已启动\033[0m\n'
-printf '  摇杆串口: %s\n' "$JOY_PORT"
+printf '  摇杆设备: %s\n' "$JOY_DEV"
 printf '  Web 地址: http://%s:%s\n' "$SERVER_HOST" "$SERVER_PORT"
 printf '  F=键盘开关  │  Ctrl-C 退出\n\n'
 

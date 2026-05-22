@@ -118,7 +118,6 @@ def generate_launch_description():
     nav_cfg = os.path.join(pkg_share, "config", "nav.yaml")
     path_plan_cfg = os.path.join(pkg_share, "config", "path_plan.yaml")
     auto_localize_cfg = os.path.join(pkg_share, "config", "auto_localize.yaml")
-    nav_bridge_cfg = os.path.join(pkg_share, "config", "nav_bridge.yaml")
     plan_visualizer_cfg = os.path.join(
         pkg_share, "sim", "config", "sim_plan_visualizer.yaml"
     )
@@ -382,7 +381,7 @@ def generate_launch_description():
         output="screen",
         condition=IfCondition(use_nav_bridge),
         parameters=[
-            nav_bridge_cfg,
+            nav_cfg,
             {
                 "use_sim_time": True,
                 "maps_dir": maps_dir,

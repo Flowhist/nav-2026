@@ -49,3 +49,16 @@ nav_control:
 
     # ==================== 控制频率 ====================
     control_rate_hz:  10.0
+
+nav_bridge:
+  ros__parameters:
+    # 语音指令输入话题
+    voice_topic: "/nav_bridge/voice_command"
+    # 导航目标输出话题
+    goal_topic: "/goal_pose"
+    # 状态反馈输出话题
+    status_topic: "/nav_bridge/status"
+    # 当前地图名称（由 launch 参数传入）
+    map_file: ""
+    # 地图目录路径（由 launch 参数传入或自动检测）
+    maps_dir: ""

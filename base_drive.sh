@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # base_control.sh
-# 同时启动 base_control + joystick_control + js_kb_router，并实时显示三行状态
+# 同时启动 base_control + HID joystick + js_kb_router
 # 键盘控制已集成：F 键开关，W/S 前后，A/D 旋转，J/K 换档，空格急停
 # 使用方式：bash base_control.sh
-#         bash base_control.sh --joy-port /dev/ttyUSB1
+#         bash base_control.sh --joy-dev /dev/input/js0
 
 set -euo pipefail
 
@@ -12,10 +12,10 @@ REPO_DIR="$SCRIPT_DIR"
 WORKSPACE_DIR="$(cd "$REPO_DIR/../.." && pwd)"
 
 # ── 参数解析 ──────────────────────────────────────────────────────────── #
-JOY_PORT="/dev/ttyUSB0"
+JOY_DEV="/dev/input/js0"
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --joy-port) JOY_PORT="$2"; shift 2 ;;
+        --joy-dev) JOY_DEV="$2"; shift 2 ;;
         *) echo "未知参数: $1"; exit 1 ;;
     esac
 done
@@ -67,7 +67,8 @@ export FASTRTPS_DEFAULT_PROFILES_FILE="$REPO_DIR/config/fastdds_profiles.xml"
 # ── 清理残留旧进程（防止 CAN 占用冲突）──────────────────────────────── #
 printf '清理旧进程...\n'
 pkill -9 -f "base_control.py" 2>/dev/null || true
-pkill -9 -f "joystick_control.py" 2>/dev/null || true
+pkill -9 -f "joy_control.py" 2>/dev/null || true
+pkill -9 -f "joy_node" 2>/dev/null || true
 sleep 1
 
 # ── 启动底盘驱动节点 ─────────────────────────────────────────────────── #
@@ -83,9 +84,8 @@ ros2 run finav base_control.py \
     > /dev/null 2>&1 &
 DRIVER_PID=$!
 
-printf '▶ 启动 joystick_control\n'
-ros2 run finav joystick_control.py \
-    --ros-args --params-file "$WHILL_PARAMS" -p "joystick_port:=$JOY_PORT" \
+printf '▶ 启动 HID joystick\n'
+ros2 launch finav joy.launch.py "joy_dev:=$JOY_DEV" \
     > /dev/null 2>&1 &
 JOY_PID=$!
 
@@ -98,12 +98,12 @@ if ! kill -0 "$DRIVER_PID" 2>/dev/null; then
     exit 1
 fi
 if ! kill -0 "$JOY_PID" 2>/dev/null; then
-    printf '\033[31m✗ joystick_control 启动失败'
+    printf '\033[31m✗ joy.launch.py 启动失败'
     exit 1
 fi
 
 printf '\033[32m✓ 两个节点均已启动\033[0m\n'
-printf '  摇杆串口: %s  │  F=键盘开关  │  Ctrl-C 退出\n\n' "$JOY_PORT"
+printf '  摇杆设备: %s  │  F=键盘开关  │  Ctrl-C 退出\n\n' "$JOY_DEV"
 printf '\033[?25l'   # 隐藏光标
 
 # ── 实时状态监视器 + 键盘控制 ────────────────────── #

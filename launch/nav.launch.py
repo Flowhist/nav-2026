@@ -205,6 +205,13 @@ def generate_launch_description():
         ),
     )
 
+    # 6. USB HID 摇杆
+    joy_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_share, "launch", "sub", "joy.launch.py")
+        )
+    )
+
     # 6. 地点可视化：发布 MarkerArray 到 RViz
     location_viz_node = Node(
         package="finav",
@@ -223,7 +230,7 @@ def generate_launch_description():
         output="screen",
         condition=IfCondition(use_nav_bridge),
         parameters=[
-            os.path.join(pkg_share, "config", "nav_bridge.yaml"),
+            os.path.join(pkg_share, "config", "nav.yaml"),
             {"map_file": map_file},
         ],
     )
@@ -263,6 +270,7 @@ def generate_launch_description():
             lidar_launch,
             dm_imu_launch,
             ekf_launch,
+            joy_launch,
             slam_toolbox_nav_launch,
             location_viz_node,
             nav_bridge_node,
