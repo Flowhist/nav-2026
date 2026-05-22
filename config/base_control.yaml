@@ -22,7 +22,7 @@ base_control:
     cmd_vel_topic: '/cmd_vel'
     max_linear_speed: 0.6                # 线速硬限（m/s）
     max_angular_speed: 0.5               # 角速硬限（rad/s）
-    acceleration: 260                    # 加速度（deg/s²）
+    acceleration: 750                    # 加速度（deg/s²）
 
 # 摇杆参数配置
 joystick_control:
