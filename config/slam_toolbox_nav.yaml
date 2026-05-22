@@ -39,7 +39,7 @@ slam_toolbox:
     scan_queue_size: 20
     minimum_time_interval: 0.25  # 定位模式降频，避免 /scan 消息积压
     minimum_travel_distance: 0.05   # 15cm，过滤EKF微小漂移触发的误校正
-    minimum_travel_heading: 0.15    # ~8.6度
+    minimum_travel_heading: 0.30    # ~17.2度，减少原地旋转阶段频繁触发误匹配
     scan_buffer_size: 30              # 定位模式使用滚动窗口
     scan_buffer_maximum_scan_distance: 15.0
     check_min_dist_and_heading_precisely: false
@@ -57,10 +57,10 @@ slam_toolbox:
     maximum_angle: 3.14159
 
     # 粗搜索
-    correlation_search_space_dimension: 0.5  # 适度搜索范围，兼顾纠偏能力
+    correlation_search_space_dimension: 0.2  # 收紧平移搜索范围，降低走廊退化误匹配
     correlation_search_space_resolution: 0.01  # 1cm分辨率，要能被地图分辨率整除，越小重影越少，效果越好
     correlation_search_space_smear_deviation: 0.1  # 标准偏差容忍
-    coarse_search_angle_offset: 0.7    # ±40度角度搜索
+    coarse_search_angle_offset: 0.35    # ±20度角度搜索，避免大角度错误解
     coarse_angle_resolution: 0.0349     # 2度分辨率
     minimum_angle_penalty: 0.2
     minimum_distance_penalty: 0.1
@@ -83,7 +83,7 @@ slam_toolbox:
   
     # 位姿图优化
     optimize_every_n_nodes: 30      # 降低优化频率，减少CPU占用
-    link_match_minimum_response_fine: 0.1  # 降低匹配阈值
+    link_match_minimum_response_fine: 0.35  # 提高匹配接受阈值，拒绝弱匹配
     link_scan_maximum_distance: 1.5         
     
     # 交互式模式（用于SLAM Toolbox Panel）
