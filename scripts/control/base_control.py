@@ -7,8 +7,9 @@ WHILL 底盘驱动节点（omnilibs CAN 驱动版）
   2) 订阅 /cmd_vel，下发左右轮速度到底盘
 
 说明：
-  - 采用“单节点独占 CAN”设计，避免资源冲突。
+  - 采用"单节点独占 CAN"设计，避免资源冲突。
   - TF (odom -> base_link) 由下游 EKF 节点负责发布。
+  - CAN 重连/看门狗/状态上报由 can_connection.CanConnectionManager 负责。
 """
 
 import os
@@ -16,9 +17,9 @@ import sys
 import math
 import time
 import threading
-from typing import Optional, Tuple
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from typing import Optional
 
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 
 # omnilibs 安装路径
 sys.path.insert(0, "/home/embotic/DCCS/src/site-packages")
@@ -30,6 +31,7 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 
+from can_connection import CanConnectionManager
 
 PROJECT_ROOT = "/home/embotic/nav_workspace/src/finav"
 
@@ -38,24 +40,21 @@ class WhillBaseDriver(Node):
     def __init__(self):
         super().__init__("base_control")
 
-        # ==================== ROS2参数声明 ====================
-        # 硬件参数
+        # ==================== ROS2 参数声明 ====================
         self.declare_parameter("wheel_radius", 0.127)
         self.declare_parameter("wheel_separation", 0.6)
         self.declare_parameter("update_rate", 10.0)
         self.declare_parameter("cmd_send_rate", 50.0)
         self.declare_parameter("cmd_timeout", 0.35)
-        # 电机驱动参数
         self.declare_parameter("can_channel", "PCAN_USBBUS1")
         self.declare_parameter("can_baud_rate", 500000)
         self.declare_parameter("wheel_velocity_sign", -1.0)
-        # 速度控制参数
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
-        self.declare_parameter("max_linear_speed", 0.6)  # m/s
-        self.declare_parameter("max_angular_speed", 1.2)  # rad/s
-        self.declare_parameter("acceleration", 100)  # 加速度（deg/s²）
+        self.declare_parameter("max_linear_speed", 0.6)
+        self.declare_parameter("max_angular_speed", 1.2)
+        self.declare_parameter("acceleration", 100)
 
-        # 参数读取
+        # ── 参数读取 ──
         self.wheel_radius = float(self.get_parameter("wheel_radius").value)
         self.wheel_separation = float(self.get_parameter("wheel_separation").value)
         self.update_rate = max(1.0, float(self.get_parameter("update_rate").value))
@@ -66,7 +65,8 @@ class WhillBaseDriver(Node):
         self.acceleration = int(self.get_parameter("acceleration").value)
         sign = float(self.get_parameter("wheel_velocity_sign").value)
         self.wheel_velocity_sign = 1.0 if sign >= 0.0 else -1.0
-        # Keep cmd_vel reception independent from blocking CAN I/O callbacks.
+
+        # ── 回调组 ──
         self.cmd_sub_group = ReentrantCallbackGroup()
         self.odom_timer_group = MutuallyExclusiveCallbackGroup()
         self.cmd_timer_group = MutuallyExclusiveCallbackGroup()
@@ -80,98 +80,112 @@ class WhillBaseDriver(Node):
         )
         self.odom_pub = self.create_publisher(Odometry, "/odom_encoder", qos)
 
-        # 里程计状态
+        # ── 里程计状态 ──
         self.x = 0.0
         self.y = 0.0
         self.theta = 0.0
         self.last_time = self.get_clock().now()
-        self.last_left_pos_rad = None
-        self.last_right_pos_rad = None
 
-        # 驱动状态
+        # ── 驱动状态 ──
         self.whill = None
-        self.connected = False
         self.running = True
         self._driver_lock = threading.Lock()
 
-        # 控制状态
+        # ── 控制状态 ──
         self.last_cmd_time = self.get_clock().now()
-        self.last_sent_left_degps = None
-        self.last_sent_right_degps = None
-        self.last_send_time = None
         self._cmd_lock = threading.Lock()
         self._latest_cmd_linear = 0.0
         self._latest_cmd_angular = 0.0
         self._latest_cmd_mono: Optional[float] = None
 
+        # ── CAN 连接管理（委托给 CanConnectionManager） ──
+        self.can_mgr = CanConnectionManager(
+            self,
+            connect_fn=self._create_and_load_driver,
+            on_connected=self._on_can_up,
+            on_disconnected=self._on_can_down,
+            connect_tag="WHILL",
+        )
+
+        # ── 订阅 ──
         cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
         self.create_subscription(
-            Twist,
-            cmd_vel_topic,
-            self._on_cmd_vel,
-            10,
+            Twist, cmd_vel_topic, self._on_cmd_vel, 10,
             callback_group=self.cmd_sub_group,
         )
 
-
-        self._start_connect_thread()
+        # ── 定时器 ──
+        self.can_mgr.start()
         self.odom_timer = self.create_timer(
-            1.0 / self.update_rate,
-            self._update_odom,
+            1.0 / self.update_rate, self._update_odom,
             callback_group=self.odom_timer_group,
         )
         self.cmd_timer = self.create_timer(
-            1.0 / self.cmd_send_rate,
-            self._send_cmd,
+            1.0 / self.cmd_send_rate, self._send_cmd,
             callback_group=self.cmd_timer_group,
         )
 
-
         self.get_logger().info(
-            f"WHILL 底盘驱动已启动 | odom={self.update_rate:.1f}Hz | cmd_send={self.cmd_send_rate:.1f}Hz | cmd_timeout={self.cmd_timeout:.2f}s"
+            f"WHILL 底盘驱动已启动 | odom={self.update_rate:.1f}Hz "
+            f"| cmd_send={self.cmd_send_rate:.1f}Hz | cmd_timeout={self.cmd_timeout:.2f}s"
         )
 
-    def _start_connect_thread(self):
-        t = threading.Thread(target=self._connect, daemon=True)
-        t.start()
+    # ── CAN 连接回调（供 CanConnectionManager 使用） ─────────────────
 
-    def _connect(self):
-        while self.running and not self.connected:
+    @property
+    def connected(self) -> bool:
+        return self.can_mgr.connected
+
+    def _create_and_load_driver(self):
+        """创建 Driver 并加载 CANopen 配置；失败返回 None。"""
+        whill = Driver()
+        prev = os.getcwd()
+        try:
+            os.chdir(PROJECT_ROOT)
+            whill.load(
+                "Whill",
+                mode=ONLINE,
+                parameters={
+                    CAN: {
+                        "channel_name": self.get_parameter("can_channel").value,
+                        "interface": "pcan",
+                        "baud_rate": self.get_parameter("can_baud_rate").value,
+                        "canopen": 1,
+                    }
+                },
+            )
+        finally:
+            os.chdir(prev)
+
+        # 恢复后立即发一次零速，清空电机残留状态
+        try:
+            whill.move_velocity([1, 2], 0.0, self.acceleration)
+        except Exception:
+            pass
+        return whill
+
+    def _on_can_up(self, driver):
+        """CAN 恢复：存储新 driver，清空残留指令，重置里程计基准。"""
+        with self._cmd_lock:
+            self._latest_cmd_linear = 0.0
+            self._latest_cmd_angular = 0.0
+            self._latest_cmd_mono = None
+        with self._driver_lock:
+            old = self.whill
+            self.whill = driver
+            self.last_time = self.get_clock().now()
+        if old is not None:
             try:
-                self.get_logger().info("正在连接 WHILL (CAN)...")
-                whill = Driver()
+                old.finalize()
+            except Exception:
+                pass
+        self.get_logger().warn("✓✓✓ CAN 已恢复，底盘重新上线")
 
-                prev = os.getcwd()
-                try:
-                    os.chdir(PROJECT_ROOT)
-                    whill.load(
-                        "Whill",
-                        mode=ONLINE,
-                        parameters={
-                            CAN: {
-                                "channel_name": self.get_parameter("can_channel").value,
-                                "interface": "pcan",
-                                "baud_rate": self.get_parameter("can_baud_rate").value,
-                                "canopen": 1,
-                            }
-                        },
-                    )
-                finally:
-                    os.chdir(prev)
+    def _on_can_down(self):
+        """CAN 断开回调。"""
+        pass  # _send_cmd / _send_wheel_velocity 会检查 connected 属性
 
-                with self._driver_lock:
-                    self.whill = whill
-                    self.last_time = self.get_clock().now()
-                    self.connected = True
-
-                self.get_logger().info("✓ WHILL 已连接，开始发布里程计/接收 cmd_vel")
-            except Exception as e:
-                self.get_logger().warn(f"连接失败: {e}，5 秒后重试...")
-                time.sleep(5)
-
-    @staticmethod
-    def _clamp(v, lo, hi):
-        return max(lo, min(hi, v))
+    # ── cmd_vel 接收 ───────────────────────────────────────────────
 
     def _on_cmd_vel(self, msg: Twist):
         with self._cmd_lock:
@@ -183,24 +197,24 @@ class WhillBaseDriver(Node):
         now_mono = time.monotonic()
         if (now_mono - self._last_cmd_log_mono) >= 0.5:
             self.get_logger().info(
-                f"收到 /cmd_vel | linear={self._latest_cmd_linear:.3f} m/s | angular={self._latest_cmd_angular:.3f} rad/s"
+                f"收到 /cmd_vel | linear={self._latest_cmd_linear:.3f} m/s "
+                f"| angular={self._latest_cmd_angular:.3f} rad/s"
             )
             self._last_cmd_log_mono = now_mono
 
+    # ── 速度下发 ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _clamp(v, lo, hi):
+        return max(lo, min(hi, v))
 
     def _apply_twist(self, linear_cmd: float, angular_cmd: float):
-        """将线速度/角速度转换为轮速并下发电机"""
-        linear = self._clamp(
-            float(linear_cmd), -self.max_linear_speed, self.max_linear_speed
-        )
-        angular = self._clamp(
-            float(angular_cmd), -self.max_angular_speed, self.max_angular_speed
-        )
+        linear = self._clamp(float(linear_cmd), -self.max_linear_speed, self.max_linear_speed)
+        angular = self._clamp(float(angular_cmd), -self.max_angular_speed, self.max_angular_speed)
 
         v_left = linear - angular * self.wheel_separation * 0.5
         v_right = linear + angular * self.wheel_separation * 0.5
 
-        # move_velocity 使用电机自身正方向；wheel_velocity_sign 把 ROS 车体正方向映射到电机正方向。
         left_degps = self.wheel_velocity_sign * (v_left / self.wheel_radius) * (180.0 / math.pi)
         right_degps = self.wheel_velocity_sign * (v_right / self.wheel_radius) * (180.0 / math.pi)
 
@@ -233,55 +247,29 @@ class WhillBaseDriver(Node):
 
         if (now_mono - self._last_send_state_log_mono) >= 0.5:
             self.get_logger().info(
-                f"下发速度 | linear={linear:.3f} m/s | angular={angular:.3f} rad/s | cmd_age={cmd_age:.3f}s"
+                f"下发速度 | linear={linear:.3f} m/s | angular={angular:.3f} rad/s "
+                f"| cmd_age={cmd_age:.3f}s"
             )
             self._last_send_state_log_mono = now_mono
 
         self._apply_twist(linear, angular)
 
-
     def _send_wheel_velocity(self, left_degps: float, right_degps: float):
-        """下发轮速到电机，参数单位为 deg/s（与 omnilibs move_velocity 接口一致）"""
         with self._driver_lock:
             if not self.connected or self.whill is None:
                 return
             try:
                 l = float(left_degps)
                 r = float(right_degps)
-                # 与 CAN 直控脚本保持一致：直行时双轮同发，转向时分别下发
                 if abs(l - r) < 1e-6:
-                    self.whill.move_velocity(
-                        [1, 2],
-                        l,
-                        self.acceleration,
-                    )
+                    self.whill.move_velocity([1, 2], l, self.acceleration)
                 else:
                     self.whill.move_velocity([1], l, self.acceleration)
                     self.whill.move_velocity([2], r, self.acceleration)
-
-                self.last_sent_left_degps = l
-                self.last_sent_right_degps = r
-                self.last_send_time = self.get_clock().now()
-            except Exception as e:
-                self.get_logger().warn(f"下发速度失败: {e}，尝试重连...")
-                self.connected = False
-                self._start_connect_thread()
-
-    def _stop_motion(self):
-        with self._driver_lock:
-            if not self.connected or self.whill is None:
-                return
-            try:
-                self.whill.move_velocity(
-                    [1, 2],
-                    0.0,
-                    self.acceleration,
-                )
-                self.last_sent_left_degps = 0.0
-                self.last_sent_right_degps = 0.0
-                self.last_send_time = self.get_clock().now()
             except Exception:
-                pass
+                self.can_mgr.mark_error()
+
+    # ── 里程计 ─────────────────────────────────────────────────────
 
     def _update_odom(self):
         if not self.connected or self.whill is None:
@@ -289,19 +277,19 @@ class WhillBaseDriver(Node):
 
         now = self.get_clock().now()
         dt = (now - self.last_time).nanoseconds / 1e9
-        self.last_time = now
-
         if dt <= 0.0 or dt > 1.0:
+            self.last_time = now
             return
+        self.last_time = now
 
         with self._driver_lock:
             try:
                 vel = self.whill.get_velocity([1, 2])
-            except Exception as e:
-                self.get_logger().warn(f"读取速度失败: {e}，尝试重连...")
-                self.connected = False
-                self._start_connect_thread()
+            except Exception:
+                self.can_mgr.mark_error()
                 return
+
+        self.can_mgr.on_success()
 
         v_left = self.wheel_velocity_sign * math.radians(vel[0]) * self.wheel_radius
         v_right = self.wheel_velocity_sign * math.radians(vel[1]) * self.wheel_radius
@@ -309,7 +297,6 @@ class WhillBaseDriver(Node):
         v_forward = (v_left + v_right) / 2.0
         omega = (v_right - v_left) / self.wheel_separation
 
-        # 坐标约定：base_link 前向为 +x
         theta_mid = self.theta + omega * dt * 0.5
         self.x += v_forward * math.cos(theta_mid) * dt
         self.y += v_forward * math.sin(theta_mid) * dt
@@ -326,7 +313,6 @@ class WhillBaseDriver(Node):
         odom.header.stamp = stamp.to_msg()
         odom.header.frame_id = "odom"
         odom.child_frame_id = "base_link"
-
         odom.pose.pose.position.x = self.x
         odom.pose.pose.position.y = self.y
         odom.pose.pose.orientation.z = qz
@@ -334,8 +320,6 @@ class WhillBaseDriver(Node):
         odom.pose.covariance[0] = 0.01
         odom.pose.covariance[7] = 0.01
         odom.pose.covariance[35] = 0.01
-
-        # 前向速度按 ROS 约定放入 linear.x
         odom.twist.twist.linear.x = v_forward
         odom.twist.twist.linear.y = 0.0
         odom.twist.twist.angular.z = vth
@@ -345,8 +329,11 @@ class WhillBaseDriver(Node):
 
         self.odom_pub.publish(odom)
 
+    # ── 清理 ───────────────────────────────────────────────────────
+
     def destroy_node(self):
         self.running = False
+        self.can_mgr.shutdown()
         self._stop_motion()
         with self._driver_lock:
             if self.whill:
@@ -355,6 +342,15 @@ class WhillBaseDriver(Node):
                 except Exception:
                     pass
         super().destroy_node()
+
+    def _stop_motion(self):
+        with self._driver_lock:
+            if not self.connected or self.whill is None:
+                return
+            try:
+                self.whill.move_velocity([1, 2], 0.0, self.acceleration)
+            except Exception:
+                pass
 
 
 def main(args=None):

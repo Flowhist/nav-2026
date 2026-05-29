@@ -143,6 +143,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 相关文件：
 
 - `scripts/control/base_control.py`
+- `scripts/control/can_connection.py`
 - `scripts/control/joy_control.py`
 - `scripts/control/js_kb_router.py`
 - `config/base_control.yaml`
@@ -163,6 +164,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 - 改底盘速度上限、轮距、CAN 通道：`config/base_control.yaml`。
 - 改底盘驱动和里程计逻辑：`scripts/control/base_control.py`。
+- 改 CAN 重连/急停检测/看门狗逻辑：`scripts/control/can_connection.py`。
 - 改 HID 摇杆轴向、死区和档位分界线：`config/joy.yaml`。
 - 改 HID 摇杆速度档位：`config/base_control.yaml`。
 - 改键盘/Web 仲裁：`scripts/control/js_kb_router.py`。
