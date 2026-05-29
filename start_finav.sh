@@ -141,7 +141,7 @@ printf '清理旧进程...\n'
 pkill -9 -f "base_control.py" 2>/dev/null || true
 pkill -9 -f "joy_control.py" 2>/dev/null || true
 pkill -9 -f "joy_node" 2>/dev/null || true
-pkill -9 -f "js_kb_router.py" 2>/dev/null || true
+pkill -9 -f "base_control_router.py" 2>/dev/null || true
 pkill -9 -f "server/run_server.py" 2>/dev/null || true
 sleep 0.2
 
@@ -171,7 +171,7 @@ printf '  摇杆设备: %s\n' "$JOY_DEV"
 printf '  Web 地址: http://%s:%s\n' "$SERVER_HOST" "$SERVER_PORT"
 printf '  F=键盘开关  │  Ctrl-C 退出\n\n'
 
-ros2 run finav js_kb_router.py \
+ros2 run finav base_control_router.py \
     --ros-args --params-file "$CONTROL_PARAMS" &
 ROUTER_PID=$!
 wait "$ROUTER_PID" || true

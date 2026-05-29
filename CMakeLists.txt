@@ -118,7 +118,7 @@ install(PROGRAMS
   scripts/control/nav_control.py
   scripts/control/base_control.py
   scripts/control/can_connection.py
-  scripts/control/js_kb_router.py
+  scripts/control/base_control_router.py
   scripts/control/joy_control.py
   scripts/localization/auto_localize.py
   scripts/imu/dm_imu_publisher.py

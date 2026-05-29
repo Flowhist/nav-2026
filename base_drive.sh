@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # base_control.sh
-# 同时启动 base_control + HID joystick + js_kb_router
+# 同时启动 base_control + HID joystick + base_control_router
 # 键盘控制已集成：F 键开关，W/S 前后，A/D 旋转，J/K 换档，空格急停
 # 使用方式：bash base_control.sh
 #         bash base_control.sh --joy-dev /dev/input/js0
@@ -69,6 +69,7 @@ printf '清理旧进程...\n'
 pkill -9 -f "base_control.py" 2>/dev/null || true
 pkill -9 -f "joy_control.py" 2>/dev/null || true
 pkill -9 -f "joy_node" 2>/dev/null || true
+pkill -9 -f "base_control_router.py" 2>/dev/null || true
 sleep 1
 
 # ── 启动底盘驱动节点 ─────────────────────────────────────────────────── #
@@ -107,4 +108,4 @@ printf '  摇杆设备: %s  │  F=键盘开关  │  Ctrl-C 退出\n\n' "$JOY_D
 printf '\033[?25l'   # 隐藏光标
 
 # ── 实时状态监视器 + 键盘控制 ────────────────────── #
-ros2 run finav js_kb_router.py 2>&1 | grep -v "XMLPARSER Error" || true
+ros2 run finav base_control_router.py --ros-args --params-file "$WHILL_PARAMS" 2>&1 | grep -v "XMLPARSER Error" || true

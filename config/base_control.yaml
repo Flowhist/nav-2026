@@ -29,13 +29,16 @@ joy_control:
   ros__parameters:
     js_vel_low: 0.2       # 摇杆控制直行速度 低档（m/s）
     js_vel_high: 0.4      # 摇杆控制直行速度 高档（m/s）
-    js_rot_low: 10        # 摇杆控制旋转速度 低档（deg/s）
-    js_rot_high: 25       # 摇杆控制旋转速度 高档（deg/s）
+    js_rot_low: 10.0      # 摇杆控制旋转速度 低档（deg/s）
+    js_rot_high: 25.0     # 摇杆控制旋转速度 高档（deg/s）
 
-# 键盘控制
-js_kb_router:
+# 控制仲裁（键盘 / 摇杆 / Web / 导航）
+base_control_router:
   ros__parameters:
     keyboard_angular_speed: 0.5                  # 键盘统一旋转速度（rad/s）
     keyboard_linear_speeds: [0.1, 0.2, 0.4, 0.6] # 键盘各档位线速度（m/s）
     router_rate: 50.0                            # 路由器轮询/仲裁发布频率（Hz）
     web_cmd_timeout: 0.4                         # 网页控制输入超时（s）
+    nav_cmd_timeout: 0.4                         # 导航控制输入超时（s）
+    nav_cmd_vel_topic: '/nav_cmd_vel'            # 导航控制器输出，先进入仲裁器
+    nav_clear_topic: '/nav_clear'                # 仲裁器抢停导航时发布清空信号

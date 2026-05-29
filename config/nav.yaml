@@ -4,7 +4,7 @@ nav_control:
   ros__parameters:
    
     # ==================== 话题 & 坐标系 ====================
-    output_cmd_vel_topic: '/cmd_vel'
+    output_cmd_vel_topic: '/nav_cmd_vel'
     path_topic:           '/plan'
     base_frame:           'base_link'
     map_frame:            'map'

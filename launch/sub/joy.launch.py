@@ -25,19 +25,14 @@ def _load_joy_config(config_path: str):
         with open(config_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
-        joy_node = data.get("joy_node", {}) if isinstance(data, dict) else {}
         joy_control = data.get("joy_control", {}) if isinstance(data, dict) else {}
-        joy_node_params = (
-            joy_node.get("ros__parameters", {}) if isinstance(joy_node, dict) else {}
-        )
         joy_control_params = (
             joy_control.get("ros__parameters", {})
             if isinstance(joy_control, dict)
             else {}
         )
-        if isinstance(joy_node_params, dict):
-            defaults["dev"] = str(joy_node_params.get("dev", defaults["dev"]))
         if isinstance(joy_control_params, dict):
+            defaults["dev"] = str(joy_control_params.get("dev", defaults["dev"]))
             enabled = bool(joy_control_params.get("enabled", True))
             defaults["enabled"] = "true" if enabled else "false"
     except Exception:
@@ -65,28 +60,19 @@ def generate_launch_description():
     use_joystick = LaunchConfiguration("use_joystick")
     joy_dev = LaunchConfiguration("joy_dev")
 
-    joy_node = Node(
-        package="joy",
-        executable="joy_node",
-        name="joy_node",
-        output="screen",
-        condition=IfCondition(use_joystick),
-        parameters=[joy_config_path, {"dev": joy_dev}],
-    )
     joy_control_node = Node(
         package="finav",
         executable="joy_control.py",
         name="joy_control",
         output="screen",
         condition=IfCondition(use_joystick),
-        parameters=[joy_config_path, base_control_config_path],
+        parameters=[joy_config_path, base_control_config_path, {"dev": joy_dev}],
     )
 
     return LaunchDescription(
         [
             use_joystick_arg,
             joy_dev_arg,
-            joy_node,
             joy_control_node,
         ]
     )

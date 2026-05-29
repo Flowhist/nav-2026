@@ -32,7 +32,7 @@ ros2 launch finav map_sim.launch.py
 同时另一个终端启动键盘控制：
 
 ```bash
-ros2 run finav js_kb_router.py
+ros2 run finav base_control_router.py
 ```
 
 建图完毕后保存地图，在一个新终端输入：

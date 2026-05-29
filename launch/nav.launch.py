@@ -205,13 +205,6 @@ def generate_launch_description():
         ),
     )
 
-    # 6. USB HID 摇杆
-    joy_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(pkg_share, "launch", "sub", "joy.launch.py")
-        )
-    )
-
     # 6. 地点可视化：发布 MarkerArray 到 RViz
     location_viz_node = Node(
         package="finav",
@@ -235,7 +228,7 @@ def generate_launch_description():
         ],
     )
 
-    # 9. 三状态导航控制器：订阅 /plan 路径，按航向误差切换 STRAIGHT/ARC/ROTATE 状态并发布 /cmd_vel
+    # 9. 三状态导航控制器：订阅 /plan 路径，按航向误差切换 STRAIGHT/ARC/ROTATE 状态并发布 /nav_cmd_vel，由 base_control_router 仲裁后输出 /cmd_vel
     cmd_vel_relay_node = Node(
         package="finav",
         executable="nav_control.py",
@@ -270,7 +263,6 @@ def generate_launch_description():
             lidar_launch,
             dm_imu_launch,
             ekf_launch,
-            joy_launch,
             slam_toolbox_nav_launch,
             location_viz_node,
             nav_bridge_node,

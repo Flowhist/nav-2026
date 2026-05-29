@@ -1,33 +1,29 @@
 # USB HID 摇杆配置。当前 SMC25/SMC30 Type-C 通过 /dev/input/js0 作为 HID 摇杆接入。
 
-joy_node:
-  ros__parameters:
-    dev: "/dev/input/js0"
-    autorepeat_rate: 25.0
-    coalesce_interval_ms: 1
-
 joy_control:
   ros__parameters:
     enabled: true
-    input_topic: "/joy"
+    dev: "/dev/input/js0"
+    joy_topic: "/joy"
     state_topic: "/js_state"
     cmd_vel_topic: "/js_cmd_vel"
     publish_rate: 25.0
-    cmd_timeout: 0.35
+    reconnect_interval: 1.0
 
-    # 当前安装实测：
-    # 前推 axes[0]: 0 -> -1，因此 linear_direction = -1
-    # 后推 axes[0]: 0 ->  1
-    # 左推 axes[1]: 0 ->  1，因此 angular_direction = 1
-    # 右推 axes[1]: 0 -> -1
-    linear_axis: 0
+    # 当前安装实测：前后轴为 axes[1]，左右轴为 axes[0]。
+    # 如果实测方向相反，只改对应 direction 的正负号。
+    linear_axis: 1
     linear_direction: 1.0
-    angular_axis: 1
-    angular_direction: -1.0
+    angular_axis: 0
+    angular_direction: 1.0
 
     # 输入轴归一化后的死区和饱和区，范围通常为 0.0 ~ 1.0。
     dead_zone: 0.05
     sat_zone: 1.0
+
+    # true: 四区离散控制，同一时间只输出前/后/左/右之一。
+    # false: 连续控制，斜推时 linear.x 和 angular.z 可以同时非零。
+    discrete_motion_enable: true
 
     # 两档速度分界线：归一化输出小于该值走慢速档，大于等于走快速档。
     speed_split: 0.65

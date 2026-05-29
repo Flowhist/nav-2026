@@ -124,13 +124,6 @@ def generate_launch_description():
         )
     )
 
-    # 7. USB HID 摇杆
-    joy_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(pkg_share, "launch", "sub", "joy.launch.py")
-        )
-    )
-
     return LaunchDescription(
         [
             left_lidar_ip_arg,
@@ -140,6 +133,5 @@ def generate_launch_description():
             ekf_launch,
             slam_toolbox_launch,
             robot_model_launch,
-            joy_launch,
         ]
     )

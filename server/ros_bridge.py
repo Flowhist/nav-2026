@@ -131,7 +131,6 @@ class _BridgeNode:
 
         self.pub_goal = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.pub_web_cmd = self.create_publisher(Twist, "/web_cmd_vel", 10)
-        self.pub_cmd = self.create_publisher(Twist, "/cmd_vel", 10)
         self.pub_initial = self.create_publisher(PoseWithCovarianceStamped, "/initialpose", 10)
         self.pub_nav_clear = self.create_publisher(Empty, "/nav_clear", 10)
 
@@ -325,16 +324,11 @@ class _BridgeNode:
     def _on_js_state(self: Any, msg: Any) -> None:
         self._joystick_active = bool(msg.data)
         _BridgeNode._touch(self, "js_state")
-        if self._joystick_active:
-            # Joystick takeover must clear any latched web teleop state,
-            # otherwise the last web command can resume after joystick release.
-            self.bridge.stop_teleop()
-            _BridgeNode._publish_web_stop(self)
         self.state_store.update_status(
             {
                 "teleop": {
-                    "joystick_active": self._joystick_active,
-                    "joystick_online": True,
+                    "joystick_active": False,
+                    "joystick_online": self._joystick_active,
                     "joystick_updated_at": time.time(),
                 }
             }
@@ -355,13 +349,6 @@ class _BridgeNode:
         msg.linear.x = 0.0
         msg.angular.z = 0.0
         self.pub_web_cmd.publish(msg)
-
-    @staticmethod
-    def _publish_direct_stop(self: Any) -> None:
-        msg = self.Twist()
-        msg.linear.x = 0.0
-        msg.angular.z = 0.0
-        self.pub_cmd.publish(msg)
 
     @staticmethod
     def _publish_web_teleop(self: Any) -> None:
@@ -445,7 +432,6 @@ class _BridgeNode:
         elif ctype == "cancel_nav":
             self.bridge.stop_teleop()
             _BridgeNode._publish_web_stop(self)
-            _BridgeNode._publish_direct_stop(self)
             self.pub_nav_clear.publish(self.Empty())
             self.state_store.update_status({"robot": {"goal_pose": None, "plan": {"points": 0, "length_m": 0.0, "updated_at": time.time()}}})
             self.state_store.update_scene({"goal_pose": None, "plan": {"points": 0, "length_m": 0.0, "points_xy": [], "updated_at": time.time()}})

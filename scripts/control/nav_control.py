@@ -43,7 +43,7 @@ class ChassisControlNav(Node):
         super().__init__("nav_control")
 
         # 参数声明
-        self.declare_parameter("output_cmd_vel_topic", "/cmd_vel")
+        self.declare_parameter("output_cmd_vel_topic", "/nav_cmd_vel")
         self.declare_parameter("path_topic", "/plan")
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("map_frame", "map")
@@ -125,7 +125,7 @@ class ChassisControlNav(Node):
         self._cmd_msg = Twist()
 
         # 订阅与发布
-        self.pub = self.create_publisher(Twist, self.output_topic, 10)  # 发布 /cmd_vel
+        self.pub = self.create_publisher(Twist, self.output_topic, 10)
         self.create_subscription(Path, self.path_topic, self._on_path, 10)  # 订阅 /path
         self.create_subscription(Empty, "/nav_clear", self._on_nav_clear, 10)
 
