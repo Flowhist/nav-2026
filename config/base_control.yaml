@@ -14,7 +14,9 @@ base_control:
     # ==================== CAN 总线 ====================
     can_channel:   'PCAN_USBBUS1'
     can_baud_rate: 500000
-    wheel_velocity_sign: -1.0   # 电机速度正方向与 ROS 车体前进方向相反时设为 -1
+    wheel_velocity_sign: 1.0   # 电机速度正方向与 ROS 车体前进方向相反时设为 -1
+    left_motor_id: 2           # 实车左轮对应的 WHILL/CAN 电机编号
+    right_motor_id: 1          # 实车右轮对应的 WHILL/CAN 电机编号
 
     # ==================== 速度控制(cmd_vel) ====================
     # 【驱动层硬限制】：这里的速度值是底盘驱动的安全上界，超出会被强制截断

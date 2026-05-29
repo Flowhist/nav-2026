@@ -49,6 +49,8 @@ class WhillBaseDriver(Node):
         self.declare_parameter("can_channel", "PCAN_USBBUS1")
         self.declare_parameter("can_baud_rate", 500000)
         self.declare_parameter("wheel_velocity_sign", -1.0)
+        self.declare_parameter("left_motor_id", 1)
+        self.declare_parameter("right_motor_id", 2)
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         self.declare_parameter("max_linear_speed", 0.6)
         self.declare_parameter("max_angular_speed", 1.2)
@@ -65,6 +67,8 @@ class WhillBaseDriver(Node):
         self.acceleration = int(self.get_parameter("acceleration").value)
         sign = float(self.get_parameter("wheel_velocity_sign").value)
         self.wheel_velocity_sign = 1.0 if sign >= 0.0 else -1.0
+        self.left_motor_id = int(self.get_parameter("left_motor_id").value)
+        self.right_motor_id = int(self.get_parameter("right_motor_id").value)
 
         # ── 回调组 ──
         self.cmd_sub_group = ReentrantCallbackGroup()
@@ -131,7 +135,9 @@ class WhillBaseDriver(Node):
 
         self.get_logger().info(
             f"WHILL 底盘驱动已启动 | odom={self.update_rate:.1f}Hz "
-            f"| cmd_send={self.cmd_send_rate:.1f}Hz | cmd_timeout={self.cmd_timeout:.2f}s"
+            f"| cmd_send={self.cmd_send_rate:.1f}Hz | cmd_timeout={self.cmd_timeout:.2f}s "
+            f"| motors L/R={self.left_motor_id}/{self.right_motor_id} "
+            f"| wheel_sign={self.wheel_velocity_sign:.0f}"
         )
 
     # ── CAN 连接回调（供 CanConnectionManager 使用） ─────────────────
@@ -297,10 +303,12 @@ class WhillBaseDriver(Node):
                 l = float(left_degps)
                 r = float(right_degps)
                 if abs(l - r) < 1e-6:
-                    self.whill.move_velocity([1, 2], l, self.acceleration)
+                    self.whill.move_velocity(
+                        [self.left_motor_id, self.right_motor_id], l, self.acceleration
+                    )
                 else:
-                    self.whill.move_velocity([1], l, self.acceleration)
-                    self.whill.move_velocity([2], r, self.acceleration)
+                    self.whill.move_velocity([self.left_motor_id], l, self.acceleration)
+                    self.whill.move_velocity([self.right_motor_id], r, self.acceleration)
             except Exception as exc:
                 error = exc
 
@@ -327,7 +335,7 @@ class WhillBaseDriver(Node):
         error = None
         with self._driver_lock:
             try:
-                vel = self.whill.get_velocity([1, 2])
+                vel = self.whill.get_velocity([self.left_motor_id, self.right_motor_id])
             except Exception as exc:
                 error = exc
 
