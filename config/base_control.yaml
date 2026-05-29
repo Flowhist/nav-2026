@@ -8,7 +8,7 @@ base_control:
 
     # ==================== 发布频率 ====================
     update_rate: 10.0          # 里程计刷新频率（Hz）
-    cmd_send_rate: 50.0        # 控制指令下发频率（Hz）
+    cmd_send_rate: 10.0        # 控制指令下发频率（Hz）
     cmd_timeout: 0.35          # 超过该时间未收到新 cmd_vel 则自动归零（s）
 
     # ==================== CAN 总线 ====================
@@ -22,7 +22,7 @@ base_control:
     cmd_vel_topic: '/cmd_vel'
     max_linear_speed: 0.6                # 线速硬限（m/s）
     max_angular_speed: 0.5               # 角速硬限（rad/s）
-    acceleration: 750                    # 加速度（deg/s²）
+    acceleration: 150                    # 加速度（deg/s²）
 
 # 摇杆速度档位配置
 joy_control:
@@ -35,8 +35,8 @@ joy_control:
 # 控制仲裁（键盘 / 摇杆 / Web / 导航）
 base_control_router:
   ros__parameters:
-    keyboard_angular_speed: 0.5                  # 键盘统一旋转速度（rad/s）
-    keyboard_linear_speeds: [0.1, 0.2, 0.4, 0.6] # 键盘各档位线速度（m/s）
+    keyboard_angular_speed: 0.3                  # 键盘统一旋转速度（rad/s）
+    keyboard_linear_speeds: [0.05, 0.1, 0.2, 0.3] # 键盘各档位线速度（m/s）
     router_rate: 50.0                            # 路由器轮询/仲裁发布频率（Hz）
     web_cmd_timeout: 0.4                         # 网页控制输入超时（s）
     nav_cmd_timeout: 0.4                         # 导航控制输入超时（s）

@@ -100,13 +100,13 @@ def _load_lidar_config():
     defaults = {
         "left": {
             **base,
-            "scanner_ip": "192.168.1.111",
+            "scanner_ip": "10.86.81.111",
             "frame_id": "laser_left_frame",
             "topic_name": "/scan_left",
         },
         "right": {
             **base,
-            "scanner_ip": "192.168.1.112",
+            "scanner_ip": "10.86.81.112",
             "frame_id": "laser_right_frame",
             "topic_name": "/scan_right",
         },

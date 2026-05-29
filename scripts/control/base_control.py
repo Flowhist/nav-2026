@@ -97,6 +97,10 @@ class WhillBaseDriver(Node):
         self._latest_cmd_linear = 0.0
         self._latest_cmd_angular = 0.0
         self._latest_cmd_mono: Optional[float] = None
+        self._last_sent_linear = 0.0
+        self._last_sent_angular = 0.0
+        self._last_zero_keepalive_mono = 0.0
+        self._last_send_failed = False
 
         # ── CAN 连接管理（委托给 CanConnectionManager） ──
         self.can_mgr = CanConnectionManager(
@@ -170,6 +174,10 @@ class WhillBaseDriver(Node):
             self._latest_cmd_linear = 0.0
             self._latest_cmd_angular = 0.0
             self._latest_cmd_mono = None
+            self._last_sent_linear = 0.0
+            self._last_sent_angular = 0.0
+            self._last_zero_keepalive_mono = 0.0
+            self._last_send_failed = False
         with self._driver_lock:
             old = self.whill
             self.whill = driver
@@ -182,8 +190,15 @@ class WhillBaseDriver(Node):
         self.get_logger().warn("✓✓✓ CAN 已恢复，底盘重新上线")
 
     def _on_can_down(self):
-        """CAN 断开回调。"""
-        pass  # _send_cmd / _send_wheel_velocity 会检查 connected 属性
+        """CAN 断开：释放旧 driver，避免 fault 状态对象继续参与控制。"""
+        with self._driver_lock:
+            old = self.whill
+            self.whill = None
+        if old is not None:
+            try:
+                old.finalize()
+            except Exception as exc:
+                self.get_logger().warn(f"CAN 断开时释放旧 driver 失败: {exc}")
 
     # ── cmd_vel 接收 ───────────────────────────────────────────────
 
@@ -208,7 +223,7 @@ class WhillBaseDriver(Node):
     def _clamp(v, lo, hi):
         return max(lo, min(hi, v))
 
-    def _apply_twist(self, linear_cmd: float, angular_cmd: float):
+    def _apply_twist(self, linear_cmd: float, angular_cmd: float) -> bool:
         linear = self._clamp(float(linear_cmd), -self.max_linear_speed, self.max_linear_speed)
         angular = self._clamp(float(angular_cmd), -self.max_angular_speed, self.max_angular_speed)
 
@@ -218,7 +233,17 @@ class WhillBaseDriver(Node):
         left_degps = self.wheel_velocity_sign * (v_left / self.wheel_radius) * (180.0 / math.pi)
         right_degps = self.wheel_velocity_sign * (v_right / self.wheel_radius) * (180.0 / math.pi)
 
-        self._send_wheel_velocity(left_degps, right_degps)
+        sent = self._send_wheel_velocity(left_degps, right_degps)
+        if sent:
+            self._last_sent_linear = linear
+            self._last_sent_angular = angular
+            self._last_send_failed = False
+        else:
+            # 失败后不要继续用同一个 fault driver 打零速；交给 CAN manager 重连恢复。
+            self._last_sent_linear = 0.0
+            self._last_sent_angular = 0.0
+            self._last_send_failed = False
+        return sent
 
     def _send_cmd(self):
         with self._cmd_lock:
@@ -230,19 +255,19 @@ class WhillBaseDriver(Node):
 
         if stamp is None:
             if (now_mono - self._last_send_state_log_mono) >= 1.0:
-                self.get_logger().info("未收到任何 /cmd_vel，发送 0 速保护")
+                self.get_logger().info("未收到任何 /cmd_vel，保持 0 速保护")
                 self._last_send_state_log_mono = now_mono
-            self._apply_twist(0.0, 0.0)
+            self._apply_stop_if_needed(now_mono)
             return
 
         cmd_age = now_mono - stamp
         if cmd_age > self.cmd_timeout:
             if (now_mono - self._last_send_state_log_mono) >= 1.0:
                 self.get_logger().info(
-                    f"/cmd_vel 超时 {cmd_age:.3f}s > {self.cmd_timeout:.3f}s，发送 0 速保护"
+                    f"/cmd_vel 超时 {cmd_age:.3f}s > {self.cmd_timeout:.3f}s，保持 0 速保护"
                 )
                 self._last_send_state_log_mono = now_mono
-            self._apply_twist(0.0, 0.0)
+            self._apply_stop_if_needed(now_mono)
             return
 
         if (now_mono - self._last_send_state_log_mono) >= 0.5:
@@ -254,10 +279,20 @@ class WhillBaseDriver(Node):
 
         self._apply_twist(linear, angular)
 
-    def _send_wheel_velocity(self, left_degps: float, right_degps: float):
+    def _apply_stop_if_needed(self, now_mono: float):
+        if not self.connected or self.whill is None:
+            return
+        moving = abs(self._last_sent_linear) > 1e-6 or abs(self._last_sent_angular) > 1e-6
+        keepalive_due = (now_mono - self._last_zero_keepalive_mono) >= 1.0
+        if moving or self._last_send_failed or keepalive_due:
+            if self._apply_twist(0.0, 0.0):
+                self._last_zero_keepalive_mono = now_mono
+
+    def _send_wheel_velocity(self, left_degps: float, right_degps: float) -> bool:
+        error = None
         with self._driver_lock:
             if not self.connected or self.whill is None:
-                return
+                return False
             try:
                 l = float(left_degps)
                 r = float(right_degps)
@@ -266,8 +301,15 @@ class WhillBaseDriver(Node):
                 else:
                     self.whill.move_velocity([1], l, self.acceleration)
                     self.whill.move_velocity([2], r, self.acceleration)
-            except Exception:
-                self.can_mgr.mark_error()
+            except Exception as exc:
+                error = exc
+
+        if error is not None:
+            self.get_logger().error(f"下发轮速失败: {error}")
+            return False
+
+        self.can_mgr.on_success()
+        return True
 
     # ── 里程计 ─────────────────────────────────────────────────────
 
@@ -282,12 +324,17 @@ class WhillBaseDriver(Node):
             return
         self.last_time = now
 
+        error = None
         with self._driver_lock:
             try:
                 vel = self.whill.get_velocity([1, 2])
-            except Exception:
-                self.can_mgr.mark_error()
-                return
+            except Exception as exc:
+                error = exc
+
+        if error is not None:
+            self.get_logger().error(f"读取轮速失败: {error}")
+            self.can_mgr.mark_error()
+            return
 
         self.can_mgr.on_success()
 

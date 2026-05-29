@@ -191,27 +191,27 @@ class CanConnectionManager:
                 self._reconnecting = False
 
     def _watchdog(self):
-        """1 Hz 看门狗：兜底触发重连 + 长时间断开告警。"""
-        if self._connected:
-            return
-        # 兜底：若意外未被 mark_error 触发，看门狗补一次重连
-        with self._reconnect_lock:
-            if not self._reconnecting:
-                self._reconnecting = True
-                need_reconnect = True
-            else:
-                need_reconnect = False
-        if need_reconnect:
-            t = threading.Thread(target=self._reconnect_loop, daemon=True)
-            t.start()
+        """1 Hz 看门狗：兜底触发重连 + 周期发布状态。"""
+        if not self._connected:
+            # 兜底：若意外未被 mark_error 触发，看门狗补一次重连
+            with self._reconnect_lock:
+                if not self._reconnecting:
+                    self._reconnecting = True
+                    need_reconnect = True
+                else:
+                    need_reconnect = False
+            if need_reconnect:
+                t = threading.Thread(target=self._reconnect_loop, daemon=True)
+                t.start()
 
-        if self._lost_at is not None:
-            elapsed = time.monotonic() - self._lost_at
-            if elapsed > self._lost_warn_sec:
-                self._logger.warn(
-                    f"⚠ {self._tag} 已断开 {elapsed:.0f}s，请检查急停按钮或线缆",
-                    throttle_duration_sec=3.0,
-                )
+            if self._lost_at is not None:
+                elapsed = time.monotonic() - self._lost_at
+                if elapsed > self._lost_warn_sec:
+                    self._logger.warn(
+                        f"⚠ {self._tag} 已断开 {elapsed:.0f}s，请检查急停按钮或线缆",
+                        throttle_duration_sec=3.0,
+                    )
+
         self._publish_status()
 
     def _publish_status(self):

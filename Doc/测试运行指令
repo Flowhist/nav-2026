@@ -1,0 +1,81 @@
+> 进入/home/embotic/nav_workspace路径
+>
+> 左侧雷达ip 192.168.1.111
+>
+> 右侧雷达ip 192.168.1.112
+
+# 移动
+
+### step 1. 启动底盘电机CAN通信，接收cmd_vel指令（建图/导航都需要）
+
+source install/setup.bash
+
+ros2 run finav base_control.py --ros-args --params-file src/finav/config/base_control.yaml
+
+### step 2. 启动键盘/摇杆输入控制，发送cmd_vel指令
+
+source install/setup.bash
+
+ros2 run finav base_control_router.py --ros-args --params-file src/finav/config/base_control.yaml
+
+
+
+# 建图
+
+### step 1. 启动slam-toolbox建图服务
+
+source install/setup.bash
+
+export FINAV_REPO_DIR=$PWD/src/finav
+
+export FINAV_MAPS_DIR=$PWD/src/finav/maps
+
+ros2 launch finav map.launch.py
+
+### step 2. 启动rviz查看效果
+
+> 远程桌面：sudo ./start_vnc.sh
+>
+
+source install/setup.bash
+
+rviz2 -d src/finav/rviz/mapping.rviz
+
+### step 3. 保存地图
+
+./src/finav/scripts/tool/save_map.sh
+
+### step 4. 注册导航点
+
+ros2 run finav register_location.py
+
+
+
+# 导航
+
+### step 1. 启动slam-toolbox导航服务
+
+source install/setup.bash
+
+export FINAV_REPO_DIR=$PWD/src/finav
+
+export FINAV_MAPS_DIR=$PWD/src/finav/maps
+
+ros2 launch finav nav.launch.py
+
+### step 2. 启动rviz查看效果
+
+> 远程桌面：sudo ./start_vnc.sh
+
+source install/setup.bash
+
+rviz2 -d src/finav/rviz/navigation.rviz
+
+### step 3. 手动重定位
+
+
+
+
+
+
+

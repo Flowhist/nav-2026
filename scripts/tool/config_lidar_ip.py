@@ -237,7 +237,7 @@ def configure_lidar_ip(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Set FREE lidar IP and save it on the device.")
-    parser.add_argument("--current-ip", default="192.168.1.111", help="current reachable lidar IP")
+    parser.add_argument("--current-ip", default="10.86.81.111", help="current reachable lidar IP")
     parser.add_argument("--new-ip", required=True, help="new full IP or last octet shortcut, e.g. 112")
     parser.add_argument("--port", type=int, default=2111, help="lidar TCP command port")
     parser.add_argument("--timeout", type=float, default=3.0, help="socket timeout in seconds")

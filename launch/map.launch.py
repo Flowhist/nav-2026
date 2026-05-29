@@ -31,8 +31,8 @@ def _resolve_repo_dir(pkg_share: str) -> str:
 
 def _load_lidar_config(config_path: str):
     defaults = {
-        "left_lidar_ip": "192.168.1.111",
-        "right_lidar_ip": "192.168.1.112",
+        "left_lidar_ip": "10.86.81.111",
+        "right_lidar_ip": "10.86.81.112",
     }
 
     try:

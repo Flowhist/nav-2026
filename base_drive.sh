@@ -82,7 +82,7 @@ WHILL_PARAMS="$REPO_DIR/config/base_control.yaml"
 printf '▶ 启动 base_control\n'
 ros2 run finav base_control.py \
     --ros-args --params-file "$WHILL_PARAMS" \
-    > /dev/null 2>&1 &
+    > /tmp/base_control.log 2>&1 &
 DRIVER_PID=$!
 
 printf '▶ 启动 HID joystick\n'
