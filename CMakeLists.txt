@@ -117,7 +117,6 @@ install(PROGRAMS
   scripts/control/path_plan.py
   scripts/control/nav_control.py
   scripts/control/base_control.py
-  scripts/control/can_connection.py
   scripts/control/base_control_router.py
   scripts/control/joy_control.py
   scripts/localization/auto_localize.py

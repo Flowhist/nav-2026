@@ -23,12 +23,14 @@ done
 # ── 清理函数（Ctrl-C / 退出时调用）──────────────────────────────────── #
 DRIVER_PID=""
 JOY_PID=""
+STATUS_TAIL_PID=""
 cleanup() {
     printf '\033[?25h'
     printf '\n\n\n正在停止节点...\n'
+    [[ -n "$STATUS_TAIL_PID" ]] && kill "$STATUS_TAIL_PID" 2>/dev/null || true
     [[ -n "$DRIVER_PID" ]] && kill "$DRIVER_PID" 2>/dev/null || true
     [[ -n "$JOY_PID"    ]] && kill "$JOY_PID"    2>/dev/null || true
-    wait "$DRIVER_PID" "$JOY_PID" 2>/dev/null || true
+    wait "$STATUS_TAIL_PID" "$DRIVER_PID" "$JOY_PID" 2>/dev/null || true
     printf '已停止。' 
 }
 trap cleanup EXIT INT TERM
@@ -80,10 +82,14 @@ WHILL_PARAMS="$REPO_DIR/config/base_control.yaml"
 }
 
 printf '▶ 启动 base_control\n'
+: > /tmp/base_control.log
 ros2 run finav base_control.py \
     --ros-args --params-file "$WHILL_PARAMS" \
     > /tmp/base_control.log 2>&1 &
 DRIVER_PID=$!
+tail -n 0 -F /tmp/base_control.log 2>/dev/null \
+    | grep --line-buffered -E "急停|STO|33555|控制指令已复位|底盘故障|非零 /cmd_vel|下发轮速失败" &
+STATUS_TAIL_PID=$!
 
 printf '▶ 启动 HID joystick\n'
 ros2 launch finav joy.launch.py "joy_dev:=$JOY_DEV" \

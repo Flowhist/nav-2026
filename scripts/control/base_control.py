@@ -9,7 +9,7 @@ WHILL 底盘驱动节点（omnilibs CAN 驱动版）
 说明：
   - 采用"单节点独占 CAN"设计，避免资源冲突。
   - TF (odom -> base_link) 由下游 EKF 节点负责发布。
-  - CAN 重连/看门狗/状态上报由 can_connection.CanConnectionManager 负责。
+  - 急停旋钮触发的是电机 STO/fault，不按 CAN 断线处理。
 """
 
 import os
@@ -30,8 +30,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-
-from can_connection import CanConnectionManager
+from std_msgs.msg import Bool
 
 PROJECT_ROOT = "/home/embotic/nav_workspace/src/finav"
 
@@ -55,6 +54,7 @@ class WhillBaseDriver(Node):
         self.declare_parameter("max_linear_speed", 0.6)
         self.declare_parameter("max_angular_speed", 1.2)
         self.declare_parameter("acceleration", 100)
+        self.declare_parameter("cmd_resend_interval", 0.5)
 
         # ── 参数读取 ──
         self.wheel_radius = float(self.get_parameter("wheel_radius").value)
@@ -65,6 +65,9 @@ class WhillBaseDriver(Node):
         self.max_linear_speed = float(self.get_parameter("max_linear_speed").value)
         self.max_angular_speed = float(self.get_parameter("max_angular_speed").value)
         self.acceleration = int(self.get_parameter("acceleration").value)
+        self.cmd_resend_interval = max(
+            0.1, float(self.get_parameter("cmd_resend_interval").value)
+        )
         sign = float(self.get_parameter("wheel_velocity_sign").value)
         self.wheel_velocity_sign = 1.0 if sign >= 0.0 else -1.0
         self.left_motor_id = int(self.get_parameter("left_motor_id").value)
@@ -74,6 +77,7 @@ class WhillBaseDriver(Node):
         self.cmd_sub_group = ReentrantCallbackGroup()
         self.odom_timer_group = MutuallyExclusiveCallbackGroup()
         self.cmd_timer_group = MutuallyExclusiveCallbackGroup()
+        self.fault_monitor_timer_group = MutuallyExclusiveCallbackGroup()
         self._last_cmd_log_mono = 0.0
         self._last_send_state_log_mono = 0.0
 
@@ -83,6 +87,7 @@ class WhillBaseDriver(Node):
             depth=10,
         )
         self.odom_pub = self.create_publisher(Odometry, "/odom_encoder", qos)
+        self.fault_pub = self.create_publisher(Bool, "/base_fault", 10)
 
         # ── 里程计状态 ──
         self.x = 0.0
@@ -103,17 +108,13 @@ class WhillBaseDriver(Node):
         self._latest_cmd_mono: Optional[float] = None
         self._last_sent_linear = 0.0
         self._last_sent_angular = 0.0
+        self._last_sent_mono = 0.0
         self._last_zero_keepalive_mono = 0.0
         self._last_send_failed = False
-
-        # ── CAN 连接管理（委托给 CanConnectionManager） ──
-        self.can_mgr = CanConnectionManager(
-            self,
-            connect_fn=self._create_and_load_driver,
-            on_connected=self._on_can_up,
-            on_disconnected=self._on_can_down,
-            connect_tag="WHILL",
-        )
+        self._require_cmd_reset = True
+        self._motion_fault_latched = False
+        self._last_fault_log_mono = 0.0
+        self._last_fault_stop_try_mono = 0.0
 
         # ── 订阅 ──
         cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
@@ -122,8 +123,11 @@ class WhillBaseDriver(Node):
             callback_group=self.cmd_sub_group,
         )
 
+        # ── 初始化底盘驱动 ──
+        self.whill = self._create_and_load_driver()
+        self.last_time = self.get_clock().now()
+
         # ── 定时器 ──
-        self.can_mgr.start()
         self.odom_timer = self.create_timer(
             1.0 / self.update_rate, self._update_odom,
             callback_group=self.odom_timer_group,
@@ -131,6 +135,10 @@ class WhillBaseDriver(Node):
         self.cmd_timer = self.create_timer(
             1.0 / self.cmd_send_rate, self._send_cmd,
             callback_group=self.cmd_timer_group,
+        )
+        self.fault_monitor_timer = self.create_timer(
+            0.2, self._monitor_fault,
+            callback_group=self.fault_monitor_timer_group,
         )
 
         self.get_logger().info(
@@ -140,11 +148,62 @@ class WhillBaseDriver(Node):
             f"| wheel_sign={self.wheel_velocity_sign:.0f}"
         )
 
-    # ── CAN 连接回调（供 CanConnectionManager 使用） ─────────────────
+    # ── 驱动状态 ───────────────────────────────────────────────
 
     @property
     def connected(self) -> bool:
-        return self.can_mgr.connected
+        return self.whill is not None
+
+    @staticmethod
+    def _cmd_nonzero(linear: float, angular: float) -> bool:
+        return abs(linear) > 1e-6 or abs(angular) > 1e-6
+
+    def _publish_fault(self, active: bool):
+        msg = Bool()
+        msg.data = bool(active)
+        self.fault_pub.publish(msg)
+
+    def _clear_cmd_cache(self, *, require_reset: bool):
+        with self._cmd_lock:
+            self._latest_cmd_linear = 0.0
+            self._latest_cmd_angular = 0.0
+            self._latest_cmd_mono = None
+            self._last_sent_linear = 0.0
+            self._last_sent_angular = 0.0
+            self._last_sent_mono = 0.0
+            self._last_zero_keepalive_mono = 0.0
+            self._last_send_failed = False
+            self._require_cmd_reset = bool(require_reset)
+
+    def _latch_motion_fault(self, error):
+        self._motion_fault_latched = True
+        self._clear_cmd_cache(require_reset=True)
+        self._publish_fault(True)
+
+        now = time.monotonic()
+        if now - self._last_fault_log_mono >= 1.0:
+            text = str(error)
+            if "STO" in text or "33555" in text:
+                self.get_logger().error("检测到急停/STO 故障，已清空控制指令；请释放急停并先发送 0 速复位")
+            else:
+                self.get_logger().error(f"检测到底盘控制故障，已清空控制指令: {error}")
+            self._last_fault_log_mono = now
+
+        self._try_stop_after_fault(now)
+
+    def _try_stop_after_fault(self, now_mono: float):
+        if now_mono - self._last_fault_stop_try_mono < 1.0:
+            return
+        self._last_fault_stop_try_mono = now_mono
+        with self._driver_lock:
+            if self.whill is None:
+                return
+            try:
+                self.whill.move_velocity(
+                    [self.left_motor_id, self.right_motor_id], 0.0, self.acceleration
+                )
+            except Exception:
+                pass
 
     def _create_and_load_driver(self):
         """创建 Driver 并加载 CANopen 配置；失败返回 None。"""
@@ -174,48 +233,35 @@ class WhillBaseDriver(Node):
             pass
         return whill
 
-    def _on_can_up(self, driver):
-        """CAN 恢复：存储新 driver，清空残留指令，重置里程计基准。"""
-        with self._cmd_lock:
-            self._latest_cmd_linear = 0.0
-            self._latest_cmd_angular = 0.0
-            self._latest_cmd_mono = None
-            self._last_sent_linear = 0.0
-            self._last_sent_angular = 0.0
-            self._last_zero_keepalive_mono = 0.0
-            self._last_send_failed = False
-        with self._driver_lock:
-            old = self.whill
-            self.whill = driver
-            self.last_time = self.get_clock().now()
-        if old is not None:
-            try:
-                old.finalize()
-            except Exception:
-                pass
-        self.get_logger().warn("✓✓✓ CAN 已恢复，底盘重新上线")
-
-    def _on_can_down(self):
-        """CAN 断开：释放旧 driver，避免 fault 状态对象继续参与控制。"""
-        with self._driver_lock:
-            old = self.whill
-            self.whill = None
-        if old is not None:
-            try:
-                old.finalize()
-            except Exception as exc:
-                self.get_logger().warn(f"CAN 断开时释放旧 driver 失败: {exc}")
-
     # ── cmd_vel 接收 ───────────────────────────────────────────────
 
     def _on_cmd_vel(self, msg: Twist):
+        linear = float(msg.linear.x)
+        angular = float(msg.angular.z)
+        now_mono = time.monotonic()
+
         with self._cmd_lock:
-            self._latest_cmd_linear = float(msg.linear.x)
-            self._latest_cmd_angular = float(msg.angular.z)
+            if self._require_cmd_reset:
+                if self._cmd_nonzero(linear, angular):
+                    if now_mono - self._last_fault_log_mono >= 1.0:
+                        self.get_logger().warn("底盘故障后仍收到非零 /cmd_vel，已忽略；请先发送 0 速复位")
+                        self._last_fault_log_mono = now_mono
+                    self._latest_cmd_linear = 0.0
+                    self._latest_cmd_angular = 0.0
+                    self._latest_cmd_mono = None
+                    return
+
+                self._require_cmd_reset = False
+                if self._motion_fault_latched:
+                    self._motion_fault_latched = False
+                    self._publish_fault(False)
+                self.get_logger().info("控制指令已复位，允许新的非零 /cmd_vel")
+
+            self._latest_cmd_linear = linear
+            self._latest_cmd_angular = angular
             self._latest_cmd_mono = time.monotonic()
         self.last_cmd_time = self.get_clock().now()
 
-        now_mono = time.monotonic()
         if (now_mono - self._last_cmd_log_mono) >= 0.5:
             self.get_logger().info(
                 f"收到 /cmd_vel | linear={self._latest_cmd_linear:.3f} m/s "
@@ -233,6 +279,18 @@ class WhillBaseDriver(Node):
         linear = self._clamp(float(linear_cmd), -self.max_linear_speed, self.max_linear_speed)
         angular = self._clamp(float(angular_cmd), -self.max_angular_speed, self.max_angular_speed)
 
+        now_mono = time.monotonic()
+        unchanged = (
+            abs(linear - self._last_sent_linear) < 1e-4
+            and abs(angular - self._last_sent_angular) < 1e-4
+        )
+        if (
+            unchanged
+            and not self._last_send_failed
+            and (now_mono - self._last_sent_mono) < self.cmd_resend_interval
+        ):
+            return True
+
         v_left = linear - angular * self.wheel_separation * 0.5
         v_right = linear + angular * self.wheel_separation * 0.5
 
@@ -243,9 +301,9 @@ class WhillBaseDriver(Node):
         if sent:
             self._last_sent_linear = linear
             self._last_sent_angular = angular
+            self._last_sent_mono = now_mono
             self._last_send_failed = False
         else:
-            # 失败后不要继续用同一个 fault driver 打零速；交给 CAN manager 重连恢复。
             self._last_sent_linear = 0.0
             self._last_sent_angular = 0.0
             self._last_send_failed = False
@@ -314,9 +372,9 @@ class WhillBaseDriver(Node):
 
         if error is not None:
             self.get_logger().error(f"下发轮速失败: {error}")
+            self._latch_motion_fault(error)
             return False
 
-        self.can_mgr.on_success()
         return True
 
     # ── 里程计 ─────────────────────────────────────────────────────
@@ -341,10 +399,8 @@ class WhillBaseDriver(Node):
 
         if error is not None:
             self.get_logger().error(f"读取轮速失败: {error}")
-            self.can_mgr.mark_error()
+            self._latch_motion_fault(error)
             return
-
-        self.can_mgr.on_success()
 
         v_left = self.wheel_velocity_sign * math.radians(vel[0]) * self.wheel_radius
         v_right = self.wheel_velocity_sign * math.radians(vel[1]) * self.wheel_radius
@@ -384,11 +440,29 @@ class WhillBaseDriver(Node):
 
         self.odom_pub.publish(odom)
 
+    # ── 故障主动监测 ─────────────────────────────────────────────
+
+    def _monitor_fault(self):
+        """5Hz 轻量轮询：通过 TPDO 缓存检测电机故障，避免阻塞在 move_velocity。"""
+        if not self.connected or self.whill is None or self._motion_fault_latched:
+            return
+        try:
+            statuses = self.whill.get_fault_status(
+                [self.left_motor_id, self.right_motor_id]
+            )
+        except Exception:
+            return
+        motor_ids = [self.left_motor_id, self.right_motor_id]
+        for motor_id, status in zip(motor_ids, statuses):
+            if status.get("fault", 0) != 0:
+                error_msg = status.get("msg") or f"Motor{motor_id} fault"
+                self._latch_motion_fault(RuntimeError(error_msg))
+                return
+
     # ── 清理 ───────────────────────────────────────────────────────
 
     def destroy_node(self):
         self.running = False
-        self.can_mgr.shutdown()
         self._stop_motion()
         with self._driver_lock:
             if self.whill:

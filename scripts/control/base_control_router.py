@@ -44,6 +44,7 @@ class BaseControlRouter(Node):
         self.declare_parameter("web_cmd_vel_topic", "/web_cmd_vel")
         self.declare_parameter("nav_cmd_vel_topic", "/nav_cmd_vel")
         self.declare_parameter("nav_clear_topic", "/nav_clear")
+        self.declare_parameter("base_fault_topic", "/base_fault")
 
         speeds = [float(v) for v in self.get_parameter("keyboard_linear_speeds").value]
         self._kb_speeds = [abs(v) for v in speeds if abs(v) > 1e-6] or [0.1, 0.2, 0.4, 0.6]
@@ -67,6 +68,7 @@ class BaseControlRouter(Node):
         self._last_cmd_time = 0.0
         self._last_lock_msg_time = 0.0
         self._last_nav_clear_time = 0.0
+        self._base_fault_active = False
 
         self._kb_enabled = True
         self._kb_linear = 0.0
@@ -89,6 +91,9 @@ class BaseControlRouter(Node):
         )
         self.create_subscription(
             Twist, str(self.get_parameter("nav_cmd_vel_topic").value), self._on_nav_cmd, 10
+        )
+        self.create_subscription(
+            Bool, str(self.get_parameter("base_fault_topic").value), self._on_base_fault, 10
         )
         self.create_timer(1.0 / self._router_rate, self._tick)
 
@@ -137,6 +142,34 @@ class BaseControlRouter(Node):
             self.get_logger().warn(f"请先复位摇杆～ ({reason})")
             self._last_lock_msg_time = now
 
+    def _clear_control_state(self, *, clear_nav: bool = True):
+        self._source = Source.NONE
+        self._joystick_stop_latched = False
+        self._kb_linear = 0.0
+        self._kb_angular = 0.0
+        self._web_cmd = Twist()
+        self._web_time = 0.0
+        self._nav_cmd = Twist()
+        self._nav_time = 0.0
+        self._js_cmd = Twist()
+        self._js_time = 0.0
+        if clear_nav:
+            self._clear_nav()
+        self._publish_stop()
+
+    def _on_base_fault(self, msg: Bool):
+        active = bool(msg.data)
+        if active == self._base_fault_active:
+            return
+
+        self._base_fault_active = active
+        if active:
+            self._clear_control_state(clear_nav=True)
+            self.get_logger().error("底盘急停/STO 或控制故障，已清空控制指令并保持停车")
+        else:
+            self._clear_control_state(clear_nav=True)
+            self.get_logger().info("底盘故障已复位，等待新的控制指令")
+
     def _enter_joystick_stop_lock(self, interrupted: Source):
         self._joystick_stop_latched = True
         self._source = Source.NONE
@@ -170,6 +203,10 @@ class BaseControlRouter(Node):
             self._warn_reset_required("nav ignored")
 
     def _handle_key(self, key: str):
+        if self._base_fault_active and key in ("w", "s", "a", "d", " "):
+            self._publish_stop()
+            self.get_logger().warn("底盘故障未复位，忽略键盘控制")
+            return
         if key == "f":
             self._kb_enabled = not self._kb_enabled
             self._kb_linear = 0.0
@@ -231,6 +268,10 @@ class BaseControlRouter(Node):
 
     def _tick(self):
         self._poll_keyboard()
+
+        if self._base_fault_active:
+            self._publish_stop()
+            return
 
         js_fresh = self._fresh(self._js_time, self._js_cmd_timeout)
         js_nonzero = js_fresh and self._nonzero(self._js_cmd)
