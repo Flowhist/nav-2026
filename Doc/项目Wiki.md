@@ -143,7 +143,6 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 相关文件：
 
 - `scripts/control/base_control.py`
-- `scripts/control/can_connection.py`
 - `scripts/control/joy_control.py`
 - `scripts/control/base_control_router.py`
 - `config/base_control.yaml`
@@ -153,18 +152,42 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 原理：
 
-- `base_control.py` 通过 omnilibs CAN 驱动连接 WHILL 底盘。
+- `base_control.py` 通过 omnilibs CAN 驱动连接 WHILL 底盘，CAN 连接管理已整合为节点内的内联逻辑。
 - 订阅 `/cmd_vel`，将线速度和角速度换算为左右轮角速度，下发到底盘。
 - 读取左右轮反馈，积分发布 `/odom_encoder`。
 - 不直接发布 `odom -> base_link` TF，TF 由 EKF 输出，避免多个节点重复发布同一变换。
 - `joy_control.py` 订阅 `joy_node` 发布的 `/joy`，按 `config/joy.yaml` 的轴向、死区、饱和区和两档分界线，以及 `config/base_control.yaml` 中的摇杆速度档位，转换为 `/js_cmd_vel`，并发布 `/js_state`。
 - `base_control_router.py` 负责摇杆/键盘/Web 控制仲裁，最终发布 `/cmd_vel`。
 
+#### 故障检测与急停处理
+
+急停旋钮按下后电机进入 STO/fault，`base_control.py` 通过两层机制快速响应：
+
+**主动监测（5Hz `_monitor_fault`）**
+- 每 200ms 调用 `driver.get_fault_status()`，利用 TPDO 缓存读取电机错误寄存器（非阻塞，无 CAN 总线等待）。
+- 检测到故障码非零后立即调用 `_latch_motion_fault()`，清空内部控制指令缓存并设置 `_require_cmd_reset=True`。
+- 同时发布 `Bool` 消息到 `/base_fault`，供下游节点感知故障状态。
+- 响应延迟 < 200ms，远快于等待 `move_velocity` SDO 超时（2-3s）。
+
+**被动防护（`_send_wheel_velocity` 异常捕获）**
+- 如果主动监测漏过（如 TPDO 未及时更新），`move_velocity` 内部抛出异常时同样会触发 `_latch_motion_fault`。
+
+**故障锁存与复位**
+- 故障后，`_require_cmd_reset=True` 会拦截所有非零 `/cmd_vel`，日志提示请先发送 0 速复位。
+- 操作者释放急停后，由上游（router/web/joystick）先发送一次零速 `/cmd_vel` 来清除锁存。
+- 清除锁存时，`_monitor_fault` 进入 2 秒冷却期，避免电机未完全恢复时被重复锁存。
+
+**故障后尝试刹停**
+- `_try_stop_after_fault` 以 1 秒间隔尝试发送零速到电机（限频避免反复阻塞在 CANopen 状态机超时上）。
+
+**话题**：
+- `/base_fault`（`std_msgs/Bool`）：True = 底盘检测到电机故障，False = 故障已清除。
+
 开发入口：
 
 - 改底盘速度上限、轮距、CAN 通道：`config/base_control.yaml`。
 - 改底盘驱动和里程计逻辑：`scripts/control/base_control.py`。
-- 改 CAN 重连/急停检测/看门狗逻辑：`scripts/control/can_connection.py`。
+- 改故障检测频率或冷却期：`scripts/control/base_control.py` 中 `_monitor_fault` 定时器周期和 `_fault_monitor_cooldown_until`。
 - 改 HID 摇杆轴向、死区和档位分界线：`config/joy.yaml`。
 - 改 HID 摇杆速度档位：`config/base_control.yaml`。
 - 改键盘/Web 仲裁：`scripts/control/base_control_router.py`。
@@ -551,7 +574,7 @@ ros2 run tf2_ros tf2_echo map base_link
 | IMU | `scripts/imu/dm_imu_publisher.py`, `third_party/dm_imu/`, `config/imu.yaml` |
 | EKF | `launch/sub/ekf.launch.py`, `config/ekf.yaml` |
 | 机器人模型 | `urdf/whillcar.urdf`, `launch/sub/robot_model.launch.py` |
-| 底盘控制 | `scripts/control/base_control.py`, `config/base_control.yaml` |
+| 底盘控制 | `scripts/control/base_control.py`, `config/base_control.yaml` | 故障检测 `/base_fault` |
 | 摇杆/键盘 | `scripts/control/joy_control.py`, `launch/sub/joy.launch.py`, `config/joy.yaml`, `config/base_control.yaml`, `scripts/control/base_control_router.py` |
 | 路径规划 | `scripts/control/path_plan.py`, `config/path_plan.yaml` |
 | 路径跟踪 | `scripts/control/nav_control.py`, `config/nav.yaml` |
