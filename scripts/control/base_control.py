@@ -115,6 +115,7 @@ class WhillBaseDriver(Node):
         self._motion_fault_latched = False
         self._last_fault_log_mono = 0.0
         self._last_fault_stop_try_mono = 0.0
+        self._fault_monitor_cooldown_until = 0.0
 
         # ── 订阅 ──
         cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
@@ -254,6 +255,7 @@ class WhillBaseDriver(Node):
                 self._require_cmd_reset = False
                 if self._motion_fault_latched:
                     self._motion_fault_latched = False
+                    self._fault_monitor_cooldown_until = time.monotonic() + 2.0
                     self._publish_fault(False)
                 self.get_logger().info("控制指令已复位，允许新的非零 /cmd_vel")
 
@@ -445,6 +447,8 @@ class WhillBaseDriver(Node):
     def _monitor_fault(self):
         """5Hz 轻量轮询：通过 TPDO 缓存检测电机故障，避免阻塞在 move_velocity。"""
         if not self.connected or self.whill is None or self._motion_fault_latched:
+            return
+        if time.monotonic() < self._fault_monitor_cooldown_until:
             return
         try:
             statuses = self.whill.get_fault_status(
