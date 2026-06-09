@@ -7,11 +7,12 @@
 Finav 的实机主链路可以概括为：
 
 ```text
-WHILL 底盘反馈 -> /odom_encoder \
-                               -> robot_localization EKF -> /odom + odom->base_link
-DM-IMU --------> /imu/data     /
+WHILL 底盘反馈 -> /odom_encoder -> robot_localization EKF -> /odom + odom->base_link
+
+DM-IMU --------> /imu/data     
 
 FREE 左/右雷达 -> /scan_left, /scan_right -> scan_fusion_node -> /scan
+
 URDF ----------> base_link -> laser_left_frame / laser_right_frame / imu_link 等静态 TF
 
 /scan + /odom + TF -> slam_toolbox
@@ -19,7 +20,9 @@ URDF ----------> base_link -> laser_left_frame / laser_right_frame / imu_link �
   定位模式: 加载 maps/<map>/<map>，输出 map->odom
 
 /map + /goal_pose + TF -> path_plan.py -> /plan
+
 /plan + TF -----------> nav_control.py -> /nav_cmd_vel -> base_control_router.py -> /cmd_vel
+
 /cmd_vel -------------> base_control.py -> WHILL 电机
 
 server/ros_bridge.py 订阅 ROS 状态并提供 Web 页面调试、建图、导航和配置编辑入口。
