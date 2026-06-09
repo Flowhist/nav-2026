@@ -9,6 +9,7 @@ Usage:
 import argparse
 import math
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -49,6 +50,69 @@ def _resolve_maps_dir() -> str:
         share_maps = ancestor / "share" / "finav" / "maps"
         if share_maps.is_dir():
             return str(share_maps)
+    return ""
+
+
+def _parse_ros2_param_value(output: str) -> str:
+    text = output.strip()
+    if not text:
+        return ""
+    marker = "value is:"
+    if marker in text:
+        text = text.split(marker, 1)[1].strip()
+    return text.strip().strip("'\"")
+
+
+def _ros2_param_get(node_name: str, param_name: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["ros2", "param", "get", node_name, param_name],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=1.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return _parse_ros2_param_value(proc.stdout)
+
+
+def _map_name_from_path(value: str) -> str:
+    if not value:
+        return ""
+    p = Path(value)
+    # slam_toolbox map_file_name usually ends with maps/<map>/<map>.
+    if p.name and p.parent.name == p.name:
+        return p.name
+    if p.suffix in (".yaml", ".posegraph"):
+        return p.stem
+    return p.name
+
+
+def _locations_file_exists(map_file: str, maps_dir: str) -> bool:
+    return bool(map_file) and (
+        Path(maps_dir) / map_file / f"{map_file}.locations.yaml"
+    ).exists()
+
+
+def _detect_running_map_file(maps_dir: str) -> str:
+    # nav.launch.py passes the selected map_file to these nodes when they are enabled.
+    for node_name in ("/nav_bridge", "/location_visualizer"):
+        map_file = _ros2_param_get(node_name, "map_file")
+        if _locations_file_exists(map_file, maps_dir):
+            print(f"检测到当前运行地图: {map_file} ({node_name})")
+            return map_file
+
+    # slam_toolbox localization exposes map_file_name as <maps_dir>/<map>/<map>.
+    map_path = _ros2_param_get("/slam_toolbox", "map_file_name")
+    map_file = _map_name_from_path(map_path)
+    if _locations_file_exists(map_file, maps_dir):
+        print(f"检测到当前运行地图: {map_file} (/slam_toolbox)")
+        return map_file
+
     return ""
 
 
@@ -193,6 +257,9 @@ def main(args: Optional[list] = None) -> None:
         sys.exit(1)
 
     map_file = ns.map_file.strip()
+    if not map_file:
+        map_file = _detect_running_map_file(maps_dir)
+
     if not map_file:
         # Try to auto-detect from running nodes or list available maps
         available = []
