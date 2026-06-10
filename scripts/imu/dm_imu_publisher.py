@@ -63,6 +63,7 @@ class DmImuNode(Node):
         self.declare_parameter("yaw_drift_rate_deg_s", 0.0)
         self.declare_parameter("publish_imu_data", True)
         self.declare_parameter("publish_rpy", True)
+        self.declare_parameter("publish_rate", 50.0)
 
         # 零偏校准参数
         self.declare_parameter("gyro_bias_x", 0.0)
@@ -92,6 +93,7 @@ class DmImuNode(Node):
         qos_reliable = bool(_p("qos_reliable", True))
         self.publish_imu_data = bool(_p("publish_imu_data", True))
         self.publish_rpy = bool(_p("publish_rpy", True))
+        self.publish_rate = max(1.0, float(_p("publish_rate", 50.0)))
 
         # 读取零偏参数
         self.gyro_bias = [
@@ -163,11 +165,13 @@ class DmImuNode(Node):
         self.get_logger().info("✓ IMU连接成功，后台读取线程已启动")
 
         # ---------- Timer for Publishing ----------
-        self.timer_period = 0.01  # 100Hz
+        self.timer_period = 1.0 / self.publish_rate
         self.timer = self.create_timer(self.timer_period, self.timer_callback)
         self.last_count = 0
 
-        self.get_logger().info('DM-IMU 节点已启动 (模式: USB)')
+        self.get_logger().info(
+            f"DM-IMU 节点已启动 (模式: USB, 发布频率: {self.publish_rate:.1f}Hz)"
+        )
 
     def corrected_yaw_deg(self, raw_yaw_deg: float, now_time) -> float:
         yaw_deg = raw_yaw_deg + self.yaw_offset_deg

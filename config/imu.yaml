@@ -8,8 +8,9 @@ dm_imu:
     frame_id: "imu_link"
     
     # 话题发布配置
-    publish_imu_data: true     # 发布 /imu/data (sensor_msgs/Imu) - 供EKF使用
+    publish_imu_data: true      # 发布 /imu/data (sensor_msgs/Imu) - 供EKF使用
     publish_rpy: false          # 发布 /imu/rpy (geometry_msgs/Vector3Stamped)
+    publish_rate: 50.0          # IMU话题发布频率(Hz)
     
     # RPY单位（false=弧度，true=度）
     publish_rpy_in_degree: false

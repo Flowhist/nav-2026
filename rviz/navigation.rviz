@@ -68,11 +68,6 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
-        laser_frame:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
         left_wheel_link:
           Alpha: 1
           Show Axes: false
@@ -104,8 +99,6 @@ Visualization Manager:
           Value: true
         laser:
           Value: true
-        laser_frame:
-          Value: true
         left_wheel_link:
           Value: true
         map:
@@ -128,8 +121,6 @@ Visualization Manager:
               front_indicator_link:
                 {}
               laser:
-                {}
-              laser_frame:
                 {}
               left_wheel_link:
                 {}
@@ -260,6 +251,18 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /goal_pose
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Locations
+      Namespaces:
+        locations: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /locations
       Value: true
     - Alpha: 1
       Arrow Length: 0.5

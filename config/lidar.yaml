@@ -13,7 +13,6 @@ left:
   scan_resolution: 1000
   start_angle: 0
   stop_angle: 215
-  offset_angle: 0
   range_min: 0.05
   range_max: 25.0
   filter_switch: 0
@@ -35,7 +34,6 @@ right:
   scan_resolution: 1000
   start_angle: -45
   stop_angle: 180
-  offset_angle: 0
   range_min: 0.05
   range_max: 25.0
   filter_switch: 0

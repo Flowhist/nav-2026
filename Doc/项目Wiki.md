@@ -34,7 +34,6 @@ server/ros_bridge.py 订阅 ROS 状态并提供 Web 页面调试、建图、导�
 - `odom`：连续里程计坐标系，由 EKF 发布到 `base_link` 的变换。
 - `base_link`：车体基座坐标系。
 - `laser_left_frame` / `laser_right_frame`：实机双雷达坐标系，来自 URDF 静态 TF。
-- `laser_frame`：保留给旧配置或仿真兼容使用。
 - `imu_link`：IMU 坐标系，来自 URDF 静态 TF。
 
 核心话题：
@@ -225,7 +224,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - `left.frame_id` / `right.frame_id`：通常为 `laser_left_frame`、`laser_right_frame`。
 - `left.topic_name` / `right.topic_name`：原始话题，默认 `/scan_left`、`/scan_right`。
 - `scan_frequency`：扫描频率。
-- `start_angle` / `stop_angle` / `offset_angle`：每个雷达的发布角度范围和偏置，可用于减少重合、扩大覆盖。
+- `start_angle` / `stop_angle`：每个雷达的发布角度范围，可用于减少重合、控制覆盖范围。
 - `is_reverse_postion`：物理反装或点序相反时反序 ranges；当前正装时保持 `false`。
 - `fusion.output_topic` / `fusion.output_frame`：融合输出话题和坐标系，默认 `/scan`、`base_link`。
 - `fusion.angle_*`、`fusion.range_*`、`sync_queue_size`、`tf_timeout_sec`：融合角度分辨率、距离范围、同步队列和 TF 等待时间。
@@ -296,7 +295,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 原理：
 
 - `robot_state_publisher` 从 URDF 发布静态/动态 TF。
-- 当前关键固定关系包括 `base_link -> laser_left_frame`、`base_link -> laser_right_frame`、`base_link -> imu_link`。`laser_frame` 仅保留给旧配置或仿真兼容。
+- 当前关键固定关系包括 `base_link -> laser_left_frame`、`base_link -> laser_right_frame`、`base_link -> imu_link`。
 - RViz 中任何 Fixed Frame 不等于消息自身 frame 时，都需要 TF 树中存在对应变换。
 
 开发入口：
