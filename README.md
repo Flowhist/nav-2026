@@ -108,7 +108,7 @@ ros2 launch finav nav.launch.py
   - 后端实际执行 `ros2 launch finav map.launch.py`
 - “结束建图”或离开建图页会调用：
   - `POST /api/runtime/mapping/stop`
-  - 后端执行 `scripts/tool/clean_map.sh`
+  - 后端执行 `scripts/map_process/clean_map.sh`
 
 ### 2. 导航页
 

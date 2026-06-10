@@ -2,139 +2,30 @@
 """Navigate to a named location from the current map's .locations.yaml.
 
 Usage:
-  ros2 run finav nav_to_location.py --map-file simap
-  python3 scripts/tool/nav_to_location.py --map-file simap
+  ros2 run finav nav_to_location.py                                        # auto-detect
+  ros2 run finav nav_to_location.py --ros-args -p map_file:=simap
+  python3 scripts/map_process/nav_to_location.py --map-file simap
 """
 
 import argparse
 import math
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import rclpy
-import yaml
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Path as NavPath
 from rclpy.node import Node
 
-
-def _resolve_maps_dir() -> str:
-    env_maps = os.environ.get("FINAV_MAPS_DIR", "").strip()
-    if env_maps and os.path.isdir(env_maps):
-        return env_maps
-    repo = os.environ.get("FINAV_REPO_DIR", "").strip()
-    if repo:
-        candidate = os.path.join(repo, "maps")
-        if os.path.isdir(candidate):
-            return candidate
-    # Prefer source-tree maps/ so edits go to the right place.
-    # When installed, walk up from install/ to workspace root → src/finav/maps.
-    exe = Path(__file__).resolve()
-    for ancestor in exe.parents:
-        src_maps = ancestor / "src" / "finav" / "maps"
-        if src_maps.is_dir():
-            return str(src_maps)
-    # Direct source-tree walk (running from source)
-    for _ in range(6):
-        candidate = exe.parent / "maps"
-        if candidate.is_dir():
-            return str(candidate)
-        exe = exe.parent
-    # Fallback: install share path
-    exe = Path(__file__).resolve()
-    for ancestor in exe.parents:
-        share_maps = ancestor / "share" / "finav" / "maps"
-        if share_maps.is_dir():
-            return str(share_maps)
-    return ""
-
-
-def _parse_ros2_param_value(output: str) -> str:
-    text = output.strip()
-    if not text:
-        return ""
-    marker = "value is:"
-    if marker in text:
-        text = text.split(marker, 1)[1].strip()
-    return text.strip().strip("'\"")
-
-
-def _ros2_param_get(node_name: str, param_name: str) -> str:
-    try:
-        proc = subprocess.run(
-            ["ros2", "param", "get", node_name, param_name],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=1.0,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
-    if proc.returncode != 0:
-        return ""
-    return _parse_ros2_param_value(proc.stdout)
-
-
-def _map_name_from_path(value: str) -> str:
-    if not value:
-        return ""
-    p = Path(value)
-    # slam_toolbox map_file_name usually ends with maps/<map>/<map>.
-    if p.name and p.parent.name == p.name:
-        return p.name
-    if p.suffix in (".yaml", ".posegraph"):
-        return p.stem
-    return p.name
-
-
-def _locations_file_exists(map_file: str, maps_dir: str) -> bool:
-    return bool(map_file) and (
-        Path(maps_dir) / map_file / f"{map_file}.locations.yaml"
-    ).exists()
-
-
-def _detect_running_map_file(maps_dir: str) -> str:
-    # nav.launch.py passes the selected map_file to these nodes when they are enabled.
-    for node_name in ("/nav_bridge", "/location_visualizer"):
-        map_file = _ros2_param_get(node_name, "map_file")
-        if _locations_file_exists(map_file, maps_dir):
-            print(f"检测到当前运行地图: {map_file} ({node_name})")
-            return map_file
-
-    # slam_toolbox localization exposes map_file_name as <maps_dir>/<map>/<map>.
-    map_path = _ros2_param_get("/slam_toolbox", "map_file_name")
-    map_file = _map_name_from_path(map_path)
-    if _locations_file_exists(map_file, maps_dir):
-        print(f"检测到当前运行地图: {map_file} (/slam_toolbox)")
-        return map_file
-
-    return ""
-
-
-def _load_locations(map_file: str, maps_dir: str) -> Dict[str, Dict[str, float]]:
-    path = Path(maps_dir) / map_file / f"{map_file}.locations.yaml"
-    if not path.exists():
-        print(f"错误: 地点文件不存在: {path}")
-        sys.exit(1)
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    entries = data.get("locations", {})
-    if not isinstance(entries, dict) or not entries:
-        print(f"错误: {path} 中没有地点定义")
-        sys.exit(1)
-    result = {}
-    for name, loc in entries.items():
-        if isinstance(loc, dict) and "x" in loc and "y" in loc:
-            result[str(name)] = {
-                "x": float(loc["x"]),
-                "y": float(loc["y"]),
-                "yaw_deg": float(loc.get("yaw_deg", 0.0)),
-            }
-    return result
+from map_utils import (
+    detect_running_map_file,
+    discover_maps_with_locations,
+    load_locations,
+    resolve_maps_dir,
+)
 
 
 def _select_location(locations: Dict[str, Dict[str, float]]) -> Tuple[str, Dict[str, float]]:
@@ -151,7 +42,7 @@ def _select_location(locations: Dict[str, Dict[str, float]]) -> Tuple[str, Dict[
     print("\n================ 可用地点列表 ================")
     for i, name in enumerate(names, start=1):
         loc = locations[name]
-        print(f"  {i}. {name}  ({loc['x']:.2f}, {loc['y']:.2f}, {loc['yaw_deg']:.1f}deg)")
+        print(f"  {i}. {name}  ({loc['x']:.2f}, {loc['y']:.2f}, {loc['yaw_deg']:.1f}°)")
     print("=============================================")
 
     while True:
@@ -196,7 +87,8 @@ class NavToLocation(Node):
         msg.pose.orientation.w = math.cos(self.goal_yaw * 0.5)
         self.pub_goal.publish(msg)
         self.get_logger().info(
-            f"目标已发送 -> {self.loc_name} ({self.goal_x:.2f}, {self.goal_y:.2f}, {math.degrees(self.goal_yaw):.1f}deg)"
+            f"目标已发送 -> {self.loc_name} "
+            f"({self.goal_x:.2f}, {self.goal_y:.2f}, {math.degrees(self.goal_yaw):.1f}°)"
         )
 
     def _on_plan(self, msg: NavPath) -> None:
@@ -251,22 +143,17 @@ def main(args: Optional[list] = None) -> None:
                         help="地图名称 (如 simap, map4)")
     ns = parser.parse_args()
 
-    maps_dir = _resolve_maps_dir()
+    maps_dir = resolve_maps_dir()
     if not maps_dir:
         print("未找到 maps 目录")
         sys.exit(1)
 
     map_file = ns.map_file.strip()
     if not map_file:
-        map_file = _detect_running_map_file(maps_dir)
+        map_file = detect_running_map_file(maps_dir)
 
     if not map_file:
-        # Try to auto-detect from running nodes or list available maps
-        available = []
-        for name in sorted(os.listdir(maps_dir)):
-            d = os.path.join(maps_dir, name)
-            if os.path.isdir(d) and os.path.exists(os.path.join(d, f"{name}.locations.yaml")):
-                available.append(name)
+        available = discover_maps_with_locations(maps_dir)
         if not available:
             print("未找到任何包含 .locations.yaml 的地图，请用 --map-file 指定")
             sys.exit(1)
@@ -282,10 +169,10 @@ def main(args: Optional[list] = None) -> None:
                 break
             print("输入无效")
 
-    locations = _load_locations(map_file, maps_dir)
+    locations = load_locations(Path(maps_dir) / map_file / f"{map_file}.locations.yaml")
     loc_name, loc = _select_location(locations)
 
-    print(f"\n正在导航到: {loc_name} ({loc['x']:.2f}, {loc['y']:.2f}, {loc['yaw_deg']:.1f}deg)")
+    print(f"\n正在导航到: {loc_name} ({loc['x']:.2f}, {loc['y']:.2f}, {loc['yaw_deg']:.1f}°)")
     print("等待到达... (Ctrl+C 中断)\n")
 
     rclpy.init(args=args)

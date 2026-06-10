@@ -122,15 +122,16 @@ install(PROGRAMS
   scripts/localization/auto_localize.py
   scripts/imu/dm_imu_publisher.py
   scripts/tool/TF.sh
-  scripts/tool/save_map.sh
   scripts/tool/clean_nav.sh
-  scripts/tool/clean_map.sh
-  scripts/tool/manual_save_map.py
-  scripts/tool/auto_localize_sim.sh
   scripts/tool/config_lidar_ip.py
-  scripts/tool/location_visualizer.py
-  scripts/tool/register_location.py
-  scripts/tool/nav_to_location.py
+  scripts/map_process/clean_map.sh
+  scripts/tool/save_map.sh
+  scripts/map_process/manual_save_map.py
+  scripts/map_process/map_utils.py
+  scripts/map_process/auto_localize_sim.sh
+  scripts/map_process/location_visualizer.py
+  scripts/map_process/register_location.py
+  scripts/map_process/nav_to_location.py
   sim/scripts/sim_chassis_sensor_pub.py
   sim/scripts/sim_gazebo_drive.py
   sim/scripts/sim_plan_visualizer.py

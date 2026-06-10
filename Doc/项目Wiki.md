@@ -311,8 +311,8 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - `config/slam_toolbox_map.yaml`
 - `config/slam_toolbox_nav.yaml`
 - `scripts/tool/save_map.sh`
-- `scripts/tool/manual_save_map.py`
-- `scripts/tool/clean_map.sh`
+- `scripts/map_process/manual_save_map.py`
+- `scripts/map_process/clean_map.sh`
 - `scripts/tool/clean_nav.sh`
 - `maps/`
 
@@ -326,7 +326,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 - 建图参数：`config/slam_toolbox_map.yaml`。
 - 定位参数：`config/slam_toolbox_nav.yaml`。
-- 地图保存和清理脚本：`scripts/tool/`。
+- 地图保存和清理脚本：`scripts/map_process/`。
 
 ### 3.7 自研路径规划模块
 
@@ -581,6 +581,6 @@ ros2 run tf2_ros tf2_echo map base_link
 | 路径规划 | `scripts/control/path_plan.py`, `config/path_plan.yaml` |
 | 路径跟踪 | `scripts/control/nav_control.py`, `config/nav.yaml` |
 | Web 后台 | `server/`, `server/web/` |
-| 地图 | `maps/`, `scripts/tool/save_map.sh`, `scripts/tool/manual_save_map.py` |
+| 地图 | `maps/`, `scripts/tool/save_map.sh`, `scripts/map_process/manual_save_map.py` |
 | RViz | `rviz/mapping.rviz`, `rviz/navigation.rviz` |
 | 仿真 | `sim/` |

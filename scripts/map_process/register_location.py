@@ -3,7 +3,7 @@
 
 Usage:
   ros2 run finav register_location.py
-  python3 scripts/tool/register_location.py
+  python3 scripts/map_process/register_location.py
 """
 
 import math
@@ -14,8 +14,14 @@ from pathlib import Path
 from tkinter import messagebox, simpledialog, ttk
 from typing import Dict, List, Optional, Tuple
 
-import yaml
 from PIL import Image, ImageDraw, ImageFont, ImageTk
+
+from map_utils import (
+    discover_maps,
+    load_locations,
+    resolve_maps_dir,
+    save_locations,
+)
 
 # Occupancy thresholds (matching map_utils.py)
 OCCUPIED_PX = 60
@@ -36,79 +42,6 @@ def _pixel_to_rgb(pixel: int) -> Tuple[int, int, int]:
     if pixel >= FREE_PX:
         return COLOR_FREE
     return COLOR_UNKNOWN
-
-
-def _resolve_maps_dir() -> str:
-    env_maps = os.environ.get("FINAV_MAPS_DIR", "").strip()
-    if env_maps and os.path.isdir(env_maps):
-        return env_maps
-    repo = os.environ.get("FINAV_REPO_DIR", "").strip()
-    if repo:
-        candidate = os.path.join(repo, "maps")
-        if os.path.isdir(candidate):
-            return candidate
-    # Prefer source-tree maps/ so edits go to the right place.
-    # When installed, walk up from install/ to workspace root → src/finav/maps.
-    exe = Path(__file__).resolve()
-    for ancestor in exe.parents:
-        src_maps = ancestor / "src" / "finav" / "maps"
-        if src_maps.is_dir():
-            return str(src_maps)
-    # Direct source-tree walk (running from source)
-    for _ in range(6):
-        candidate = exe.parent / "maps"
-        if candidate.is_dir():
-            return str(candidate)
-        exe = exe.parent
-    # Fallback: install share path
-    exe = Path(__file__).resolve()
-    for ancestor in exe.parents:
-        share_maps = ancestor / "share" / "finav" / "maps"
-        if share_maps.is_dir():
-            return str(share_maps)
-    return ""
-
-
-def _discover_maps(maps_dir: str) -> List[str]:
-    names = []
-    for name in sorted(os.listdir(maps_dir)):
-        d = os.path.join(maps_dir, name)
-        if not os.path.isdir(d):
-            continue
-        yml = os.path.join(d, f"{name}.yaml")
-        pgm = os.path.join(d, f"{name}.pgm")
-        if os.path.exists(yml) and os.path.exists(pgm):
-            names.append(name)
-    return names
-
-
-def _load_locations(path: Path) -> Dict[str, Dict[str, float]]:
-    if not path.exists():
-        return {}
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
-        return {}
-    entries = data.get("locations", {})
-    if not isinstance(entries, dict):
-        return {}
-    result = {}
-    for name, loc in entries.items():
-        if isinstance(loc, dict) and "x" in loc and "y" in loc:
-            result[str(name)] = {
-                "x": float(loc["x"]),
-                "y": float(loc["y"]),
-                "yaw_deg": float(loc.get("yaw_deg", 0.0)),
-            }
-    return result
-
-
-def _save_locations(path: Path, locations: Dict[str, Dict[str, float]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    out = {"locations": locations}
-    path.write_text(
-        yaml.dump(out, allow_unicode=True, default_flow_style=False), encoding="utf-8"
-    )
 
 
 def _try_load_font() -> ImageFont.FreeTypeFont:
@@ -139,13 +72,13 @@ class _App:
         self.root.geometry("500x400")
         self.root.minsize(400, 300)
 
-        self.maps_dir = _resolve_maps_dir()
+        self.maps_dir = resolve_maps_dir()
         if not self.maps_dir or not os.path.isdir(self.maps_dir):
             messagebox.showerror("错误", "未找到 maps 目录")
             self.root.destroy()
             return
 
-        self.maps = _discover_maps(self.maps_dir)
+        self.maps = discover_maps(self.maps_dir)
         if not self.maps:
             messagebox.showerror("错误", "未发现任何地图")
             self.root.destroy()
@@ -230,7 +163,7 @@ class _App:
         self.origin_x = parts[0] if len(parts) > 0 else 0.0
         self.origin_y = parts[1] if len(parts) > 1 else 0.0
 
-        self.locations = _load_locations(self.loc_path)
+        self.locations = load_locations(self.loc_path)
 
         self.pil_map = self._build_map_image()
         self.map_w = self.pil_map.width
@@ -294,7 +227,6 @@ class _App:
         self.status = ttk.Label(bar, text="", relief=tk.SUNKEN, anchor=tk.W, padding=3)
         self.status.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 0))
 
-        # Canvas area
         cframe = ttk.Frame(self.root)
         cframe.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         cframe.rowconfigure(0, weight=1)
@@ -336,7 +268,7 @@ class _App:
         self._redraw()
 
     def _on_resize(self) -> None:
-        pass  # User uses zoom buttons
+        pass
 
     def _update_status(self, text: str) -> None:
         self.status.config(text=text)
@@ -369,7 +301,7 @@ class _App:
             self._update_status(f"已删除「{name}」— 记得点击保存")
 
     def _on_save(self) -> None:
-        _save_locations(self.loc_path, self.locations)
+        save_locations(self.loc_path, self.locations)
         self._update_status(f"已保存 {len(self.locations)} 个地点")
         messagebox.showinfo("保存成功",
                             f"已保存 {len(self.locations)} 个地点到:\n{self.loc_path}")
@@ -506,7 +438,6 @@ class _App:
 
         self.canvas.config(scrollregion=(0, 0, zw, zh))
 
-        # Draw map base + overlay in one PIL image
         draw_pil = self.pil_map.copy()
         pil_draw = ImageDraw.Draw(draw_pil)
 
@@ -544,12 +475,12 @@ class _App:
 
 
 def main() -> None:
-    maps_dir = _resolve_maps_dir()
+    maps_dir = resolve_maps_dir()
     if not maps_dir or not os.path.isdir(maps_dir):
-        print("未找到 maps 目录，请设置 FINAV_MAPS_DIR 环境变量")
+        print("未找到 maps 目录")
         sys.exit(1)
 
-    maps = _discover_maps(maps_dir)
+    maps = discover_maps(maps_dir)
     if not maps:
         print("未发现任何地图")
         sys.exit(1)

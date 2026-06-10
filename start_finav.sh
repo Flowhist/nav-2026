@@ -45,7 +45,7 @@ START_CHECKS=6
 START_INTERVAL=0.1
 CLEANING_UP=0
 STOP_TIMEOUT=1.0
-MAP_CLEAN_SCRIPT="$REPO_DIR/scripts/tool/clean_map.sh"
+MAP_CLEAN_SCRIPT="$REPO_DIR/scripts/map_process/clean_map.sh"
 NAV_CLEAN_SCRIPT="$REPO_DIR/scripts/tool/clean_nav.sh"
 
 fail() {
