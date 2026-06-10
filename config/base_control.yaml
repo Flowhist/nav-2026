@@ -44,3 +44,4 @@ base_control_router:
     nav_cmd_timeout: 0.4                         # 导航控制输入超时（s）
     nav_cmd_vel_topic: '/nav_cmd_vel'            # 导航控制器输出，先进入仲裁器
     nav_clear_topic: '/nav_clear'                # 仲裁器抢停导航时发布清空信号
+    router_status_topic: '/base_control_router/status' # 仲裁器事件状态，供语音/上层业务订阅

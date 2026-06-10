@@ -82,6 +82,8 @@ def _select_map_from_terminal(map_names):
             if 1 <= idx <= len(map_names):
                 return map_names[idx - 1]
         print("输入无效，请输入上面列表中的数字编号。")
+
+
 def _resolve_sim_backend():
     try:
         return {
@@ -117,7 +119,7 @@ def generate_launch_description():
     )
     nav_cfg = os.path.join(pkg_share, "config", "nav.yaml")
     path_plan_cfg = os.path.join(pkg_share, "config", "path_plan.yaml")
-    auto_localize_cfg = os.path.join(pkg_share, "config", "auto_localize.yaml")
+    relocate_cfg = os.path.join(pkg_share, "sim", "config", "relocate.yaml")
     plan_visualizer_cfg = os.path.join(
         pkg_share, "sim", "config", "sim_plan_visualizer.yaml"
     )
@@ -145,8 +147,8 @@ def generate_launch_description():
     )
     maps_dir_arg = DeclareLaunchArgument("maps_dir", default_value=default_maps_dir)
     use_rviz_arg = DeclareLaunchArgument("use_rviz", default_value="true")
-    auto_localize_arg = DeclareLaunchArgument(
-        "auto_localize",
+    relocate_arg = DeclareLaunchArgument(
+        "relocate",
         default_value="false",
         description="Run one-shot scan-to-map global localization before navigation",
     )
@@ -158,7 +160,7 @@ def generate_launch_description():
     use_nav_bridge_arg = DeclareLaunchArgument(
         "use_nav_bridge",
         default_value="false",
-        description="Enable location-based voice navigation bridge (nav_bridge)",
+        description="Enable location-based voice navigation bridge (nav_voice_bridge)",
     )
     x_arg = DeclareLaunchArgument("x", default_value="-0.15")
     y_arg = DeclareLaunchArgument("y", default_value="-5.65")
@@ -169,7 +171,7 @@ def generate_launch_description():
     map_file = LaunchConfiguration("map_file")
     maps_dir = LaunchConfiguration("maps_dir")
     use_rviz = LaunchConfiguration("use_rviz")
-    auto_localize = LaunchConfiguration("auto_localize")
+    relocate = LaunchConfiguration("relocate")
     show_locations = LaunchConfiguration("show_locations")
     use_nav_bridge = LaunchConfiguration("use_nav_bridge")
     x = LaunchConfiguration("x")
@@ -341,14 +343,14 @@ def generate_launch_description():
         }.items(),
     )
 
-    auto_localize_node = Node(
+    relocate_node = Node(
         package="finav",
-        executable="auto_localize.py",
-        name="auto_localize",
+        executable="sim_relocate.py",
+        name="relocate",
         output="screen",
-        condition=IfCondition(auto_localize),
+        condition=IfCondition(relocate),
         parameters=[
-            auto_localize_cfg,
+            relocate_cfg,
             {
                 "use_sim_time": True,
                 "maps_dir": maps_dir,
@@ -361,8 +363,8 @@ def generate_launch_description():
 
     location_viz_node = Node(
         package="finav",
-        executable="location_visualizer.py",
-        name="location_visualizer",
+        executable="annotate_visualizer.py",
+        name="annotate_visualizer",
         output="screen",
         condition=IfCondition(show_locations),
         parameters=[
@@ -376,8 +378,8 @@ def generate_launch_description():
 
     nav_bridge_node = Node(
         package="finav",
-        executable="nav_bridge.py",
-        name="nav_bridge",
+        executable="nav_voice_bridge.py",
+        name="nav_voice_bridge",
         output="screen",
         condition=IfCondition(use_nav_bridge),
         parameters=[
@@ -392,7 +394,7 @@ def generate_launch_description():
 
     path_plan_node = Node(
         package="finav",
-        executable="path_plan.py",
+        executable="nav_path_plan.py",
         name="path_plan",
         output="screen",
         parameters=[path_plan_cfg],
@@ -430,25 +432,40 @@ def generate_launch_description():
             map_file_arg,
             maps_dir_arg,
             use_rviz_arg,
-            auto_localize_arg,
+            relocate_arg,
             show_locations_arg,
             use_nav_bridge_arg,
             x_arg,
             y_arg,
             z_arg,
             yaw_arg,
-            *([gz_resource_env, gz_sim_resource_env] if sim_backend["backend"] == "ros_gz_sim" else []),
+            *(
+                [gz_resource_env, gz_sim_resource_env]
+                if sim_backend["backend"] == "ros_gz_sim"
+                else []
+            ),
             gazebo,
             robot_state_publisher,
             *([spawn_entity] if spawn_entity is not None else []),
             *([bridge] if bridge is not None else []),
             *([gz_topic_adapter] if gz_topic_adapter is not None else []),
             *([sim_drive] if sim_drive is not None else []),
-            *([TimerAction(period=1.0, actions=[unpause_world])] if unpause_world is not None else []),
+            *(
+                [TimerAction(period=1.0, actions=[unpause_world])]
+                if unpause_world is not None
+                else []
+            ),
             TimerAction(period=2.0, actions=[slam_toolbox_nav_launch]),
-            TimerAction(period=3.0, actions=[auto_localize_node]),
+            TimerAction(period=3.0, actions=[relocate_node]),
             TimerAction(
-                period=2.5, actions=[path_plan_node, nav_control_node, plan_visualizer, nav_bridge_node, location_viz_node]
+                period=2.5,
+                actions=[
+                    path_plan_node,
+                    nav_control_node,
+                    plan_visualizer,
+                    nav_bridge_node,
+                    location_viz_node,
+                ],
             ),
             rviz,
         ]

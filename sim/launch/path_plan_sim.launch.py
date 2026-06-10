@@ -90,7 +90,7 @@ def generate_launch_description():
 
     planner = Node(
         package="finav",
-        executable="path_plan.py",
+        executable="nav_path_plan.py",
         name="path_plan",
         output="screen",
         parameters=[path_plan_cfg],

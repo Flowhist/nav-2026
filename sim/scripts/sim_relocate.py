@@ -91,7 +91,7 @@ def _read_pgm(path: Path) -> np.ndarray:
 
 class AutoLocalize(Node):
     def __init__(self) -> None:
-        super().__init__("auto_localize")
+        super().__init__("relocate")
 
         self.declare_parameter("maps_dir", "")
         self.declare_parameter("map_file", "map4")
@@ -160,7 +160,7 @@ class AutoLocalize(Node):
 
         self._load_map()
         self.get_logger().info(
-            "auto_localize waiting for %d scan(s) | map=%s | candidates=%d"
+            "relocate waiting for %d scan(s) | map=%s | candidates=%d"
             % (self.collect_scan_count, self.yaml_path, len(self.free_xy))
         )
 
@@ -263,7 +263,7 @@ class AutoLocalize(Node):
         second_score = fine[1][0] if len(fine) > 1 else -1.0
         gap = best[0] - second_score
         self.get_logger().info(
-            "auto_localize best score=%.3f second=%.3f gap=%.3f pose=(%.3f, %.3f, %.1fdeg) time=%.2fs"
+            "relocate best score=%.3f second=%.3f gap=%.3f pose=(%.3f, %.3f, %.1fdeg) time=%.2fs"
             % (best[0], second_score, gap, best[1][0], best[1][1], math.degrees(best[1][2]), elapsed)
         )
         if self.debug:
@@ -432,7 +432,7 @@ def main() -> None:
         pass
     except Exception as exc:
         if rclpy.ok():
-            Node("auto_localize_error").get_logger().error(str(exc))
+            Node("relocate_error").get_logger().error(str(exc))
         raise
     finally:
         if node is not None:

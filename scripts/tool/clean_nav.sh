@@ -12,7 +12,7 @@ patterns=(
   "r2000_node"
   "dm_imu_publisher.py"
   "ekf_node"
-  "path_plan.py"
+  "nav_path_plan.py"
   "nav_control.py"
   "robot_state_publisher"
   "joint_state_publisher"
@@ -26,7 +26,7 @@ for sig in TERM KILL; do
   sleep 1
 done
 
-remaining="$(pgrep -fa "nav.launch.py|localization_slam_toolbox_node|slam_toolbox|free_lidar_node|scan_fusion_node|r2000_node|dm_imu|ekf_node|path_plan.py|nav_control.py|robot_state_publisher|joint_state_publisher|static_transform_publisher" || true)"
+remaining="$(pgrep -fa "nav.launch.py|localization_slam_toolbox_node|slam_toolbox|free_lidar_node|scan_fusion_node|r2000_node|dm_imu|ekf_node|nav_path_plan.py|nav_control.py|robot_state_publisher|joint_state_publisher|static_transform_publisher" || true)"
 if [[ -n "$remaining" ]]; then
   printf '⚠ 导航相关残留进程:\n%s\n' "$remaining"
 else

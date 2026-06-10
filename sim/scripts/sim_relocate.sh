@@ -15,10 +15,10 @@ fi
 
 export ROS_LOG_DIR="${ROS_LOG_DIR:-/tmp/ros_log}"
 
-echo "[auto_localize_sim] map_file=${MAP_FILE}"
-echo "[auto_localize_sim] maps_dir=${MAPS_DIR}"
+echo "[relocate] map_file=${MAP_FILE}"
+echo "[relocate] maps_dir=${MAPS_DIR}"
 
-ros2 run finav auto_localize.py \
+ros2 run finav sim_relocate.py \
   --ros-args \
   -p use_sim_time:=true \
   -p maps_dir:="${MAPS_DIR}" \

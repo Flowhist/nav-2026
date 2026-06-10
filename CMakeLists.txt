@@ -113,31 +113,37 @@ install(
 
 # Install Python scripts
 install(PROGRAMS
-  scripts/control/nav_bridge.py
-  scripts/control/path_plan.py
+  scripts/control/nav_voice_bridge.py
+  scripts/control/nav_path_plan.py
   scripts/control/nav_control.py
   scripts/control/base_control.py
   scripts/control/base_control_router.py
   scripts/control/joy_control.py
-  scripts/localization/auto_localize.py
+  scripts/control/nav_to_location.py
+  scripts/control/nav_relocate.py
   scripts/imu/dm_imu_publisher.py
   scripts/tool/TF.sh
   scripts/tool/clean_nav.sh
-  scripts/tool/config_lidar_ip.py
-  scripts/map_process/clean_map.sh
+  scripts/tool/set_lidar_ip.py
+  scripts/tool/clean_map.sh
   scripts/tool/save_map.sh
-  scripts/map_process/manual_save_map.py
-  scripts/map_process/map_utils.py
-  scripts/map_process/auto_localize_sim.sh
-  scripts/map_process/location_visualizer.py
-  scripts/map_process/register_location.py
-  scripts/map_process/nav_to_location.py
+  scripts/tool/save_map.py
+  scripts/map_annotate/map_utils.py
+  scripts/map_annotate/annotate_visualizer.py
+  scripts/map_annotate/annotate_tool.py
+  sim/scripts/sim_relocate.py
+  sim/scripts/sim_relocate.sh
   sim/scripts/sim_chassis_sensor_pub.py
   sim/scripts/sim_gazebo_drive.py
   sim/scripts/sim_plan_visualizer.py
   sim/scripts/sim_send_goal.py
   sim/scripts/gz_topic_adapter.py
   start_finav.sh
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(FILES
+  scripts/control/nav_goal_utils.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

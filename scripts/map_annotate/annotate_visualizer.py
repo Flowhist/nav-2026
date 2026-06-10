@@ -2,8 +2,8 @@
 """Publish location markers from .locations.yaml to RViz.
 
 Usage:
-  ros2 run finav location_visualizer.py                            # auto-detect
-  ros2 run finav location_visualizer.py --ros-args -p map_file:=simap
+  ros2 run finav annotate_visualizer.py                            # auto-detect
+  ros2 run finav annotate_visualizer.py --ros-args -p map_file:=simap
 """
 
 import math
@@ -24,13 +24,19 @@ from map_utils import (
     resolve_maps_dir,
 )
 
-
 # ── 颜色调色板 ──
 
 PALETTE = [
-    (0.9, 0.2, 0.2), (0.2, 0.6, 0.9), (0.2, 0.8, 0.3), (0.9, 0.7, 0.1),
-    (0.8, 0.3, 0.8), (0.1, 0.8, 0.8), (0.9, 0.5, 0.2), (0.4, 0.5, 0.9),
-    (0.9, 0.3, 0.6), (0.3, 0.8, 0.6),
+    (0.9, 0.2, 0.2),
+    (0.2, 0.6, 0.9),
+    (0.2, 0.8, 0.3),
+    (0.9, 0.7, 0.1),
+    (0.8, 0.3, 0.8),
+    (0.1, 0.8, 0.8),
+    (0.9, 0.5, 0.2),
+    (0.4, 0.5, 0.9),
+    (0.9, 0.3, 0.6),
+    (0.3, 0.8, 0.6),
 ]
 
 
@@ -51,9 +57,10 @@ def _pose_at(x: float, y: float, yaw: float) -> Pose:
 
 # ── 节点 ──
 
+
 class LocationVisualizer(Node):
     def __init__(self) -> None:
-        super().__init__("location_visualizer")
+        super().__init__("annotate_visualizer")
 
         self.declare_parameter("map_file", "")
         self.declare_parameter("maps_dir", "")
@@ -121,8 +128,11 @@ class LocationVisualizer(Node):
             print("\n包含地点的可用地图:", file=sys.stderr)
             for m in available:
                 print(f"  - {m}", file=sys.stderr)
-            print(f"\n用法: ros2 run finav location_visualizer.py "
-                  f"--ros-args -p map_file:=<地图名>", file=sys.stderr)
+            print(
+                f"\n用法: ros2 run finav annotate_visualizer.py "
+                f"--ros-args -p map_file:=<地图名>",
+                file=sys.stderr,
+            )
 
     def _interactive_select(self, available: list) -> None:
         print("\n=== 包含地点的可用地图 ===")

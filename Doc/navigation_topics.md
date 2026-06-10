@@ -5,9 +5,9 @@
 ## 1. 导航主链路
 
 ```text
-RViz / nav_bridge
+RViz / nav_voice_bridge
   -> /goal_pose
-  -> path_plan
+  -> nav_path_plan.py
   -> /plan
   -> nav_control
   -> /nav_cmd_vel
@@ -19,11 +19,12 @@ RViz / nav_bridge
 
 | 话题 | 类型 | 主要数据 | 发布者 | 订阅者 | 频率/触发时机 |
 | --- | --- | --- | --- | --- | --- |
-| `/goal_pose` | `geometry_msgs/msg/PoseStamped` | 目标点位置 `pose.position.x/y` 和目标朝向 `pose.orientation`，坐标系为 `map` | RViz `2D Goal Pose` 或 `nav_bridge.py` | `path_plan.py` | 事件触发：设置目标点或语音/地点导航命中后发布一次 |
-| `/plan` | `nav_msgs/msg/Path` | 全局路径点序列，`header.frame_id` 通常为 `map` | `path_plan.py` | `nav_control.py`、RViz | 配置规划循环 `plan_rate_hz=2.0Hz`；新目标、地图更新或偏离路径触发重规划时发布；清空路径时可发布空 Path |
+| `/goal_pose` | `geometry_msgs/msg/PoseStamped` | 目标点位置 `pose.position.x/y` 和目标朝向 `pose.orientation`，坐标系为 `map` | RViz `2D Goal Pose` 或 `nav_voice_bridge.py` | `nav_path_plan.py` | 事件触发：设置目标点或语音/地点导航命中后发布一次 |
+| `/plan` | `nav_msgs/msg/Path` | 全局路径点序列，`header.frame_id` 通常为 `map` | `nav_path_plan.py` | `nav_control.py`、RViz | 配置规划循环 `plan_rate_hz=2.0Hz`；新目标、地图更新或偏离路径触发重规划时发布；清空路径时可发布空 Path |
 | `/nav_cmd_vel` | `geometry_msgs/msg/Twist` | 导航控制速度，主要使用 `linear.x` 和 `angular.z` | `nav_control.py` | `base_control_router.py` | 配置 `control_rate_hz=10.0Hz`；有有效路径时周期发布；到点、清空路径、重规划暂停时发布零速 |
 | `/cmd_vel` | `geometry_msgs/msg/Twist` | 最终底盘速度指令，主要使用 `linear.x` 和 `angular.z` | `base_control_router.py` | `base_control.py` | 配置 `router_rate=50.0Hz`；router 仲裁键盘、摇杆、Web、导航后周期发布 |
-| `/nav_clear` | `std_msgs/msg/Empty` | 清空当前导航控制/规划状态 | `base_control_router.py` | `path_plan.py`、`nav_control.py` | 事件触发：摇杆抢停导航、需要终止导航时发布；router 内部节流约 0.2s |
+| `/nav_clear` | `std_msgs/msg/Empty` | 清空当前导航控制/规划状态 | `base_control_router.py` | `nav_path_plan.py`、`nav_control.py` | 事件触发：摇杆抢停导航、需要终止导航时发布；router 内部节流约 0.2s |
+| `/base_control_router/status` | `std_msgs/msg/String` | 控制仲裁事件，例如 `joystick_stop:nav`、`joystick_reset`、`joystick_reset_required:nav ignored`、`base_fault_active`、`base_fault_cleared` | `base_control_router.py` | 语音/上层业务/调试终端 | 事件触发：抢停、复位、底盘故障变化或指令被拒绝时发布 |
 
 ## 2. 雷达与地图链路
 
@@ -32,7 +33,7 @@ RViz / nav_bridge
 | `/scan_left` | `sensor_msgs/msg/LaserScan` | 左雷达原始扫描，frame 为 `laser_left_frame` | `free_lidar_left_node` | `scan_fusion_node` | 雷达配置 `scan_frequency=30Hz`；实际受雷达输出和驱动处理影响 |
 | `/scan_right` | `sensor_msgs/msg/LaserScan` | 右雷达原始扫描，frame 为 `laser_right_frame` | `free_lidar_right_node` | `scan_fusion_node` | 雷达配置 `scan_frequency=30Hz`；实际受雷达输出和驱动处理影响 |
 | `/scan` | `sensor_msgs/msg/LaserScan` | 融合后的车体坐标系扫描，frame 配置为 `base_link`，角度范围 `[-pi, pi]` | `scan_fusion_node` | `slam_toolbox`、RViz | 输入雷达同步融合后发布，理论接近雷达频率；受左右雷达同步、`input_timeout_sec=1.0`、TF 查询影响 |
-| `/map` | `nav_msgs/msg/OccupancyGrid` | 栅格地图，包含 `info.resolution`、`origin`、`data` 占用概率 | `slam_toolbox` 定位模式 | `path_plan.py`、RViz | 配置 `map_update_interval=1.0s`，约 `1Hz`；定位模式加载已有地图并发布给规划和 RViz |
+| `/map` | `nav_msgs/msg/OccupancyGrid` | 栅格地图，包含 `info.resolution`、`origin`、`data` 占用概率 | `slam_toolbox` 定位模式 | `nav_path_plan.py`、RViz | 配置 `map_update_interval=1.0s`，约 `1Hz`；定位模式加载已有地图并发布给规划和 RViz |
 
 ## 3. 里程计、IMU 与定位链路
 
@@ -58,9 +59,9 @@ RViz / nav_bridge
 
 | 话题 | 类型 | 主要数据 | 发布者 | 订阅者 | 频率/触发时机 |
 | --- | --- | --- | --- | --- | --- |
-| `/nav_bridge/voice_command` | `std_msgs/msg/String` | 地点名称文本，例如 `.locations.yaml` 中的 key | 语音/上层业务 | `nav_bridge.py` | 事件触发；仅 `nav.launch.py use_nav_bridge:=true` 时启用 |
-| `/nav_bridge/status` | `std_msgs/msg/String` | 地点导航状态文本，例如 unknown location、navigating to xxx | `nav_bridge.py` | 上层业务/调试终端 | 事件触发：收到地点指令并处理后发布 |
-| `/locations` | `visualization_msgs/msg/MarkerArray` | 地图地点标记、箭头和文字标签 | `location_visualizer.py` | RViz | 节点启动加载 `.locations.yaml` 后发布一次；marker lifetime 为 0，RViz 中持续显示 |
+| `/nav_voice_bridge/voice_command` | `std_msgs/msg/String` | 地点名称文本，例如 `.locations.yaml` 中的 key | 语音/上层业务 | `nav_voice_bridge.py` | 事件触发；仅 `nav.launch.py use_nav_bridge:=true` 时启用 |
+| `/nav_voice_bridge/status` | `std_msgs/msg/String` | 地点指令处理结果，例如 unknown location、navigating to xxx；不代表完整导航成功/失败 | `nav_voice_bridge.py` | 上层业务/调试终端 | 事件触发：收到地点指令并处理后发布 |
+| `/locations` | `visualization_msgs/msg/MarkerArray` | 地图地点标记、箭头和文字标签 | `annotate_visualizer.py` | RViz | 节点启动加载 `.locations.yaml` 后发布一次；marker lifetime 为 0，RViz 中持续显示 |
 
 ## 6. 关键节点关系
 
@@ -69,7 +70,7 @@ RViz / nav_bridge
 | `free_lidar_left_node` / `free_lidar_right_node` | 两颗 FREE 雷达 TCP 数据 | `/scan_left`、`/scan_right` | 雷达 IP 来自 `config/lidar.yaml`，网络端口为 TCP `2111` |
 | `scan_fusion_node` | `/scan_left`、`/scan_right`、TF | `/scan` | 将双雷达点云转换/融合到 `base_link` |
 | `slam_toolbox` | `/scan`、`/odom`、地图文件 | `/map`、`/tf` 中的 `map -> odom` | `nav.launch.py` 中以 localization 模式启动 |
-| `path_plan.py` | `/map`、`/goal_pose`、TF `map -> base_link`、`/nav_clear` | `/plan` | 基于 OccupancyGrid 和车体足迹做全局规划 |
+| `nav_path_plan.py` | `/map`、`/goal_pose`、TF `map -> base_link`、`/nav_clear` | `/plan` | 基于 OccupancyGrid 和车体足迹做全局规划 |
 | `nav_control.py` | `/plan`、TF `map -> base_link`、`/nav_clear` | `/nav_cmd_vel` | Pure Pursuit + ROTATE/DRIVE 状态控制 |
 | `base_control_router.py` | `/nav_cmd_vel`、`/js_cmd_vel`、`/web_cmd_vel`、键盘输入 | `/cmd_vel`、`/nav_clear` | 唯一最终速度仲裁器；摇杆非零可抢停键盘/Web/导航 |
 | `base_control.py` | `/cmd_vel`、CAN 轮速反馈 | `/odom_encoder`、`/base_status` | 独占 CAN，向电机下发速度并发布编码器里程计 |
@@ -100,4 +101,3 @@ ros2 topic echo /base_status
 ros2 run tf2_ros tf2_echo map base_link
 ros2 run tf2_ros tf2_echo odom base_link
 ```
-

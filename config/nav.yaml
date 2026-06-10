@@ -8,7 +8,7 @@ nav_control:
     path_topic:           '/plan'
     base_frame:           'base_link'
     map_frame:            'map'
-    # 是否接受运行中新的 /plan（适配 path_plan 重规划）
+    # 是否接受运行中新的 /plan（适配 nav_path_plan 重规划）
     # true: 每次收到新路径都会切换到新路径继续跟踪
     # false: 仅使用首条路径直到到点/重置
     accept_replanned_path: true
@@ -50,14 +50,14 @@ nav_control:
     # ==================== 控制频率 ====================
     control_rate_hz:  10.0
 
-nav_bridge:
+nav_voice_bridge:
   ros__parameters:
     # 语音指令输入话题
-    voice_topic: "/nav_bridge/voice_command"
+    voice_topic: "/nav_voice_bridge/voice_command"
     # 导航目标输出话题
     goal_topic: "/goal_pose"
     # 状态反馈输出话题
-    status_topic: "/nav_bridge/status"
+    status_topic: "/nav_voice_bridge/status"
     # 当前地图名称（由 launch 参数传入）
     map_file: ""
     # 地图目录路径（由 launch 参数传入或自动检测）

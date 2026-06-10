@@ -19,7 +19,7 @@ URDF ----------> base_link -> laser_left_frame / laser_right_frame / imu_link �
   建图模式: 输出 /map 和 map->odom
   定位模式: 加载 maps/<map>/<map>，输出 map->odom
 
-/map + /goal_pose + TF -> path_plan.py -> /plan
+/map + /goal_pose + TF -> nav_path_plan.py -> /plan
 
 /plan + TF -----------> nav_control.py -> /nav_cmd_vel -> base_control_router.py -> /cmd_vel
 
@@ -109,7 +109,7 @@ ros2 launch finav map.launch.py
 
 - 雷达、IMU、EKF、机器人模型。
 - `slam_toolbox` 定位模式：加载已有地图。
-- `path_plan.py`：自研全局规划。
+- `nav_path_plan.py`：自研全局规划。
 - `nav_control.py`：路径跟踪并发布 `/cmd_vel`。
 
 典型用法：
@@ -311,8 +311,8 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - `config/slam_toolbox_map.yaml`
 - `config/slam_toolbox_nav.yaml`
 - `scripts/tool/save_map.sh`
-- `scripts/map_process/manual_save_map.py`
-- `scripts/map_process/clean_map.sh`
+- `scripts/tool/save_map.py`
+- `scripts/tool/clean_map.sh`
 - `scripts/tool/clean_nav.sh`
 - `maps/`
 
@@ -326,13 +326,13 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 - 建图参数：`config/slam_toolbox_map.yaml`。
 - 定位参数：`config/slam_toolbox_nav.yaml`。
-- 地图保存和清理脚本：`scripts/map_process/`。
+- 地图保存和清理脚本：`scripts/tool/`。
 
 ### 3.7 自研路径规划模块
 
 相关文件：
 
-- `scripts/control/path_plan.py`
+- `scripts/control/nav_path_plan.py`
 - `config/path_plan.yaml`
 
 原理：
@@ -347,7 +347,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 开发入口：
 
 - 车体尺寸、膨胀、安全边距、搜索上限：`config/path_plan.yaml`。
-- A*、足迹碰撞、路径平滑：`scripts/control/path_plan.py`。
+- A*、足迹碰撞、路径平滑：`scripts/control/nav_path_plan.py`。
 
 ### 3.8 路径跟踪与导航控制模块
 
@@ -475,7 +475,7 @@ CMake 安装内容：
    - 雷达：`third_party/free_lidar/`、`src/rosnode/scan_fusion_node.cpp`、`config/lidar.yaml`。
    - IMU/EKF：`scripts/imu/dm_imu_publisher.py`、`config/imu.yaml`、`config/ekf.yaml`。
    - 建图定位：`launch/sub/slam_toolbox.launch.py`、`config/slam_toolbox_*.yaml`。
-   - 路径规划：`scripts/control/path_plan.py`、`config/path_plan.yaml`。
+   - 路径规划：`scripts/control/nav_path_plan.py`、`config/path_plan.yaml`。
    - 路径跟踪：`scripts/control/nav_control.py`、`config/nav.yaml`。
    - Web：`server/`、`server/web/`。
    - 仿真：`sim/`。
@@ -578,9 +578,9 @@ ros2 run tf2_ros tf2_echo map base_link
 | 机器人模型 | `urdf/whillcar.urdf`, `launch/sub/robot_model.launch.py` |
 | 底盘控制 | `scripts/control/base_control.py`, `config/base_control.yaml` | 故障检测 `/base_fault` |
 | 摇杆/键盘 | `scripts/control/joy_control.py`, `launch/sub/joy.launch.py`, `config/joy.yaml`, `config/base_control.yaml`, `scripts/control/base_control_router.py` |
-| 路径规划 | `scripts/control/path_plan.py`, `config/path_plan.yaml` |
+| 路径规划 | `scripts/control/nav_path_plan.py`, `config/path_plan.yaml` |
 | 路径跟踪 | `scripts/control/nav_control.py`, `config/nav.yaml` |
 | Web 后台 | `server/`, `server/web/` |
-| 地图 | `maps/`, `scripts/tool/save_map.sh`, `scripts/map_process/manual_save_map.py` |
+| 地图 | `maps/`, `scripts/tool/save_map.sh`, `scripts/tool/save_map.py` |
 | RViz | `rviz/mapping.rviz`, `rviz/navigation.rviz` |
 | 仿真 | `sim/` |

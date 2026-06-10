@@ -2,8 +2,8 @@
 """Interactive map location registration tool (tkinter GUI).
 
 Usage:
-  ros2 run finav register_location.py
-  python3 scripts/map_process/register_location.py
+  ros2 run finav annotate_tool.py
+  python3 scripts/map_annotate/annotate_tool.py
 """
 
 import math

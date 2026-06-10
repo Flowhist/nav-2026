@@ -160,7 +160,7 @@ def generate_launch_description():
     use_nav_bridge_arg = DeclareLaunchArgument(
         "use_nav_bridge",
         default_value="false",
-        description="Enable location-based voice navigation bridge (nav_bridge)",
+        description="Enable location-based voice navigation bridge (nav_voice_bridge)",
     )
 
     map_file = LaunchConfiguration("map_file")
@@ -208,8 +208,8 @@ def generate_launch_description():
     # 6. 地点可视化：发布 MarkerArray 到 RViz
     location_viz_node = Node(
         package="finav",
-        executable="location_visualizer.py",
-        name="location_visualizer",
+        executable="annotate_visualizer.py",
+        name="annotate_visualizer",
         output="screen",
         condition=IfCondition(show_locations),
         parameters=[{"map_file": map_file}],
@@ -218,13 +218,13 @@ def generate_launch_description():
     # 7. 地点导航桥接：订阅语音指令，查表发布 /goal_pose
     nav_bridge_node = Node(
         package="finav",
-        executable="nav_bridge.py",
-        name="nav_bridge",
+        executable="nav_voice_bridge.py",
+        name="nav_voice_bridge",
         output="screen",
         condition=IfCondition(use_nav_bridge),
         parameters=[
             os.path.join(pkg_share, "config", "nav.yaml"),
-            {"map_file": map_file},
+            {"maps_dir": maps_dir, "map_file": map_file},
         ],
     )
 
@@ -240,7 +240,7 @@ def generate_launch_description():
     # 10. 轻量路径规划：/map + TF + /goal_pose -> /plan
     path_plan_node = Node(
         package="finav",
-        executable="path_plan.py",
+        executable="nav_path_plan.py",
         name="path_plan",
         output="screen",
         parameters=[os.path.join(pkg_share, "config", "path_plan.yaml")],

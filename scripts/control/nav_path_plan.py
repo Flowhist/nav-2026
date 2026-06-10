@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""path_plan.py
+"""nav_path_plan.py
 轻量全局路径规划节点：
   - 订阅 /map, /goal_pose
   - 通过 TF 查询 map->base_link 当前位姿

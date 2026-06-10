@@ -16,7 +16,7 @@ from enum import Enum
 import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
-from std_msgs.msg import Bool, Empty
+from std_msgs.msg import Bool, Empty, String
 
 
 class Source(Enum):
@@ -45,6 +45,7 @@ class BaseControlRouter(Node):
         self.declare_parameter("nav_cmd_vel_topic", "/nav_cmd_vel")
         self.declare_parameter("nav_clear_topic", "/nav_clear")
         self.declare_parameter("base_fault_topic", "/base_fault")
+        self.declare_parameter("router_status_topic", "/base_control_router/status")
 
         speeds = [float(v) for v in self.get_parameter("keyboard_linear_speeds").value]
         self._kb_speeds = [abs(v) for v in speeds if abs(v) > 1e-6] or [0.1, 0.2, 0.4, 0.6]
@@ -79,6 +80,9 @@ class BaseControlRouter(Node):
         self._cmd_pub = self.create_publisher(Twist, cmd_topic, 10)
         self._nav_clear_pub = self.create_publisher(
             Empty, str(self.get_parameter("nav_clear_topic").value), 10
+        )
+        self._status_pub = self.create_publisher(
+            String, str(self.get_parameter("router_status_topic").value), 10
         )
         self.create_subscription(
             Bool, str(self.get_parameter("js_state_topic").value), self._on_js_state, 10
@@ -128,6 +132,11 @@ class BaseControlRouter(Node):
     def _publish_stop(self):
         self._publish(self._zero())
 
+    def _publish_status(self, text: str):
+        msg = String()
+        msg.data = text
+        self._status_pub.publish(msg)
+
     def _clear_nav(self):
         now = time.monotonic()
         if now - self._last_nav_clear_time >= 0.2:
@@ -140,6 +149,7 @@ class BaseControlRouter(Node):
         now = time.monotonic()
         if now - self._last_lock_msg_time >= 1.0:
             self.get_logger().warn(f"请先复位摇杆～ ({reason})")
+            self._publish_status(f"joystick_reset_required:{reason}")
             self._last_lock_msg_time = now
 
     def _clear_control_state(self, *, clear_nav: bool = True):
@@ -165,9 +175,11 @@ class BaseControlRouter(Node):
         self._base_fault_active = active
         if active:
             self._clear_control_state(clear_nav=True)
+            self._publish_status("base_fault_active")
             self.get_logger().error("底盘急停/STO 或控制故障，已清空控制指令并保持停车")
         else:
             self._clear_control_state(clear_nav=True)
+            self._publish_status("base_fault_cleared")
             self.get_logger().info("底盘故障已复位，等待新的控制指令")
 
     def _enter_joystick_stop_lock(self, interrupted: Source):
@@ -180,6 +192,7 @@ class BaseControlRouter(Node):
         if interrupted == Source.NAV:
             self._clear_nav()
         self._publish_stop()
+        self._publish_status(f"joystick_stop:{interrupted.value}")
         self.get_logger().warn(f"摇杆抢停，已中断 {interrupted.value}，请先复位摇杆～")
 
     def _on_js_state(self, msg: Bool):
@@ -282,6 +295,7 @@ class BaseControlRouter(Node):
             if js_reset:
                 self._joystick_stop_latched = False
                 self._source = Source.NONE
+                self._publish_status("joystick_reset")
                 self.get_logger().info("摇杆已复位，允许新的控制指令")
             return
 

@@ -7,39 +7,34 @@ and publishes PoseStamped to /goal_pose.
 """
 
 import math
-import os
 from pathlib import Path
+import sys
 from typing import Dict, Optional
 
 import rclpy
-import yaml
 from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
+CONTROL_DIR = Path(__file__).resolve().parent
+if str(CONTROL_DIR) not in sys.path:
+    sys.path.insert(0, str(CONTROL_DIR))
+MAP_ANNOTATE_DIR = Path(__file__).resolve().parents[1] / "map_annotate"
+if str(MAP_ANNOTATE_DIR) not in sys.path:
+    sys.path.insert(0, str(MAP_ANNOTATE_DIR))
 
-def _resolve_maps_dir(param_val: str) -> str:
-    if param_val and os.path.isdir(param_val):
-        return param_val
-    env_maps = os.environ.get("FINAV_MAPS_DIR", "").strip()
-    if env_maps and os.path.isdir(env_maps):
-        return env_maps
-    repo = os.environ.get("FINAV_REPO_DIR", "").strip()
-    if repo:
-        candidate = os.path.join(repo, "maps")
-        if os.path.isdir(candidate):
-            return candidate
-    return ""
+from nav_goal_utils import make_map_goal
+from map_utils import detect_running_map_file, load_locations, resolve_maps_dir
 
 
 class NavBridge(Node):
     def __init__(self) -> None:
-        super().__init__("nav_bridge")
+        super().__init__("nav_voice_bridge")
 
-        self.declare_parameter("voice_topic", "/nav_bridge/voice_command")
+        self.declare_parameter("voice_topic", "/nav_voice_bridge/voice_command")
         self.declare_parameter("goal_topic", "/goal_pose")
-        self.declare_parameter("status_topic", "/nav_bridge/status")
+        self.declare_parameter("status_topic", "/nav_voice_bridge/status")
         self.declare_parameter("map_file", "")
         self.declare_parameter("maps_dir", "")
 
@@ -47,18 +42,21 @@ class NavBridge(Node):
         self.goal_topic = str(self.get_parameter("goal_topic").value)
         self.status_topic = str(self.get_parameter("status_topic").value)
         self.map_file = str(self.get_parameter("map_file").value).strip()
-        self.maps_dir = _resolve_maps_dir(str(self.get_parameter("maps_dir").value).strip())
+        param_maps_dir = str(self.get_parameter("maps_dir").value).strip()
+        self.maps_dir = param_maps_dir if param_maps_dir and Path(param_maps_dir).is_dir() else resolve_maps_dir()
+        if not self.map_file:
+            self.map_file = detect_running_map_file(self.maps_dir, require_locations=True)
 
         self.locations: Dict[str, Dict[str, float]] = {}
 
         self.pub_goal = self.create_publisher(PoseStamped, self.goal_topic, 10)
         self.pub_status = self.create_publisher(String, self.status_topic, 10)
         self.create_subscription(String, self.voice_topic, self._on_voice_command, 10)
-        self.create_service(Trigger, "/nav_bridge/reload", self._on_reload)
+        self.create_service(Trigger, "/nav_voice_bridge/reload", self._on_reload)
 
         self._load_locations()
         self.get_logger().info(
-            f"nav_bridge ready | map={self.map_file} | locations={len(self.locations)}"
+            f"nav_voice_bridge ready | map={self.map_file} | locations={len(self.locations)}"
         )
 
     def _locations_path(self) -> Optional[Path]:
@@ -68,6 +66,8 @@ class NavBridge(Node):
 
     def _load_locations(self) -> None:
         self.locations.clear()
+        if not self.map_file:
+            self.map_file = detect_running_map_file(self.maps_dir, require_locations=True)
         path = self._locations_path()
         if path is None:
             self.get_logger().warn("map_file or maps_dir not set, no locations loaded")
@@ -76,30 +76,12 @@ class NavBridge(Node):
             self.get_logger().warn(f"locations file not found: {path}")
             return
 
-        try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        except yaml.YAMLError as e:
-            self.get_logger().error(f"failed to parse {path}: {e}")
-            return
-
-        entries = data.get("locations")
-        if not isinstance(entries, dict):
-            self.get_logger().warn(f"no 'locations' dict in {path}")
-            return
-
-        for name, loc in entries.items():
-            if not isinstance(loc, dict) or "x" not in loc or "y" not in loc:
-                self.get_logger().error(f"skipping invalid location entry: {name}")
-                continue
-            try:
-                yaw_deg = float(loc.get("yaw_deg", 0.0))
-                self.locations[str(name)] = {
-                    "x": float(loc["x"]),
-                    "y": float(loc["y"]),
-                    "yaw_rad": math.radians(yaw_deg),
-                }
-            except (ValueError, TypeError) as e:
-                self.get_logger().error(f"bad value in location '{name}': {e}")
+        for name, loc in load_locations(path).items():
+            self.locations[name] = {
+                "x": loc["x"],
+                "y": loc["y"],
+                "yaw_rad": math.radians(loc.get("yaw_deg", 0.0)),
+            }
 
         self.get_logger().info(f"loaded {len(self.locations)} location(s) from {path}")
 
@@ -135,15 +117,7 @@ class NavBridge(Node):
         )
 
     def _publish_goal(self, x: float, y: float, yaw: float) -> None:
-        msg = PoseStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "map"
-        msg.pose.position.x = x
-        msg.pose.position.y = y
-        msg.pose.position.z = 0.0
-        msg.pose.orientation.z = math.sin(yaw * 0.5)
-        msg.pose.orientation.w = math.cos(yaw * 0.5)
-        self.pub_goal.publish(msg)
+        self.pub_goal.publish(make_map_goal(self.get_clock(), x, y, yaw))
 
     def _publish_status(self, text: str) -> None:
         msg = String()

@@ -2,7 +2,7 @@
 """
 共享地图工具：maps 目录解析、地图发现、地点读写、运行地图检测。
 
-被 register_location / location_visualizer / nav_to_location 共用。
+被 annotate_tool / annotate_visualizer / nav_to_location / relocate 共用。
 """
 
 import os
@@ -105,9 +105,16 @@ def save_locations(path: Path, locations: Dict[str, Dict[str, float]]) -> None:
     )
 
 
-def detect_running_map_file(maps_dir: str) -> str:
+def detect_running_map_file(maps_dir: str, require_locations: bool = True) -> str:
     """尝试从当前运行的 ROS 节点参数中自动检测 map_file。"""
     import subprocess as _sp
+
+    def _map_file_exists(map_file: str) -> bool:
+        if require_locations:
+            return _locations_file_exists(map_file, maps_dir)
+        return (
+            bool(map_file) and (Path(maps_dir) / map_file / f"{map_file}.yaml").exists()
+        )
 
     def _ros2_param_get(node_name: str, param_name: str) -> str:
         try:
@@ -129,10 +136,10 @@ def detect_running_map_file(maps_dir: str) -> str:
             text = text.split(marker, 1)[1].strip()
         return text.strip().strip("'\"")
 
-    # 优先查 nav_bridge / location_visualizer 自身的 map_file 参数
-    for node_name in ("/nav_bridge", "/location_visualizer"):
+    # 优先查 nav_voice_bridge / annotate_visualizer 自身的 map_file 参数
+    for node_name in ("/nav_voice_bridge", "/annotate_visualizer"):
         mf = _ros2_param_get(node_name, "map_file")
-        if mf and _locations_file_exists(mf, maps_dir):
+        if mf and _map_file_exists(mf):
             return mf
 
     # 从 slam_toolbox 的 map_file_name 反推
@@ -145,13 +152,14 @@ def detect_running_map_file(maps_dir: str) -> str:
             mf = p.stem
         else:
             mf = p.name
-        if _locations_file_exists(mf, maps_dir):
+        if _map_file_exists(mf):
             return mf
 
     return ""
 
 
 def _locations_file_exists(map_file: str, maps_dir: str) -> bool:
-    return bool(map_file) and (
-        Path(maps_dir) / map_file / f"{map_file}.locations.yaml"
-    ).exists()
+    return (
+        bool(map_file)
+        and (Path(maps_dir) / map_file / f"{map_file}.locations.yaml").exists()
+    )

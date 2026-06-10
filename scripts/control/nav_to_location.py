@@ -4,7 +4,7 @@
 Usage:
   ros2 run finav nav_to_location.py                                        # auto-detect
   ros2 run finav nav_to_location.py --ros-args -p map_file:=simap
-  python3 scripts/map_process/nav_to_location.py --map-file simap
+  python3 scripts/control/nav_to_location.py --map-file simap
 """
 
 import argparse
@@ -20,6 +20,14 @@ from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Path as NavPath
 from rclpy.node import Node
 
+CONTROL_DIR = Path(__file__).resolve().parent
+if str(CONTROL_DIR) not in sys.path:
+    sys.path.insert(0, str(CONTROL_DIR))
+MAP_ANNOTATE_DIR = Path(__file__).resolve().parents[1] / "map_annotate"
+if str(MAP_ANNOTATE_DIR) not in sys.path:
+    sys.path.insert(0, str(MAP_ANNOTATE_DIR))
+
+from nav_goal_utils import make_map_goal
 from map_utils import (
     detect_running_map_file,
     discover_maps_with_locations,
@@ -77,15 +85,9 @@ class NavToLocation(Node):
         self.create_timer(0.2, self._check)
 
     def send_goal(self) -> None:
-        msg = PoseStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "map"
-        msg.pose.position.x = self.goal_x
-        msg.pose.position.y = self.goal_y
-        msg.pose.position.z = 0.0
-        msg.pose.orientation.z = math.sin(self.goal_yaw * 0.5)
-        msg.pose.orientation.w = math.cos(self.goal_yaw * 0.5)
-        self.pub_goal.publish(msg)
+        self.pub_goal.publish(
+            make_map_goal(self.get_clock(), self.goal_x, self.goal_y, self.goal_yaw)
+        )
         self.get_logger().info(
             f"目标已发送 -> {self.loc_name} "
             f"({self.goal_x:.2f}, {self.goal_y:.2f}, {math.degrees(self.goal_yaw):.1f}°)"

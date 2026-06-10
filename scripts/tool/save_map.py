@@ -3,7 +3,7 @@
 手动保存地图脚本
 
 用法：
-    python3 scripts/map/manual_save_map.py --name my_map
+    python3 scripts/tool/save_map.py --name my_map
 
 说明：
 1) 保存到项目 maps/<地图名>/<地图名>.{pgm,yaml,data,posegraph}
@@ -102,7 +102,9 @@ def ensure_pgm_yaml_with_fallback(save_path: str) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="手动保存当前 SLAM 地图")
-    parser.add_argument("-n", "--name", default="manual_map", help="地图名（默认: manual_map）")
+    parser.add_argument(
+        "-n", "--name", default="manual_map", help="地图名（默认: manual_map）"
+    )
     args = parser.parse_args()
 
     safe_name = sanitize_name(args.name)
