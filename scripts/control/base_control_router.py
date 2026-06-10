@@ -16,6 +16,7 @@ from enum import Enum
 import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Bool, Empty, String
 
 
@@ -77,7 +78,12 @@ class BaseControlRouter(Node):
         self._kb_spd_idx = min(1, len(self._kb_speeds) - 1)
 
         cmd_topic = str(self.get_parameter("cmd_vel_topic").value)
-        self._cmd_pub = self.create_publisher(Twist, cmd_topic, 10)
+        cmd_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self._cmd_pub = self.create_publisher(Twist, cmd_topic, cmd_qos)
         self._nav_clear_pub = self.create_publisher(
             Empty, str(self.get_parameter("nav_clear_topic").value), 10
         )
@@ -88,13 +94,13 @@ class BaseControlRouter(Node):
             Bool, str(self.get_parameter("js_state_topic").value), self._on_js_state, 10
         )
         self.create_subscription(
-            Twist, str(self.get_parameter("js_cmd_vel_topic").value), self._on_js_cmd, 10
+            Twist, str(self.get_parameter("js_cmd_vel_topic").value), self._on_js_cmd, cmd_qos
         )
         self.create_subscription(
-            Twist, str(self.get_parameter("web_cmd_vel_topic").value), self._on_web_cmd, 10
+            Twist, str(self.get_parameter("web_cmd_vel_topic").value), self._on_web_cmd, cmd_qos
         )
         self.create_subscription(
-            Twist, str(self.get_parameter("nav_cmd_vel_topic").value), self._on_nav_cmd, 10
+            Twist, str(self.get_parameter("nav_cmd_vel_topic").value), self._on_nav_cmd, cmd_qos
         )
         self.create_subscription(
             Bool, str(self.get_parameter("base_fault_topic").value), self._on_base_fault, 10

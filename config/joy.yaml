@@ -7,7 +7,7 @@ joy_control:
     joy_topic: "/joy"
     state_topic: "/js_state"
     cmd_vel_topic: "/js_cmd_vel"
-    publish_rate: 25.0
+    publish_rate: 50.0
     reconnect_interval: 1.0
 
     # 当前安装实测：前后轴为 axes[1]，左右轴为 axes[0]。

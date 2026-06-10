@@ -8,7 +8,7 @@ base_control:
 
     # ==================== 发布频率 ====================
     update_rate: 10.0          # 里程计刷新频率（Hz）
-    cmd_send_rate: 10.0        # 控制指令下发频率（Hz）
+    cmd_send_rate: 50.0        # 控制指令下发频率（Hz）
     cmd_timeout: 0.35          # 超过该时间未收到新 cmd_vel 则自动归零（s）
 
     # ==================== CAN 总线 ====================
@@ -24,12 +24,12 @@ base_control:
     cmd_vel_topic: '/cmd_vel'
     max_linear_speed: 0.6                # 线速硬限（m/s）
     max_angular_speed: 0.5               # 角速硬限（rad/s）
-    acceleration: 150                    # 加速度（deg/s²）
+    acceleration: 1000                    # 加速度（deg/s²）
 
 # 摇杆速度档位配置
 joy_control:
   ros__parameters:
-    js_vel_low: 0.2       # 摇杆控制直行速度 低档（m/s）
+    js_vel_low: 0.3       # 摇杆控制直行速度 低档（m/s）
     js_vel_high: 0.4      # 摇杆控制直行速度 高档（m/s）
     js_rot_low: 10.0      # 摇杆控制旋转速度 低档（deg/s）
     js_rot_high: 25.0     # 摇杆控制旋转速度 高档（deg/s）

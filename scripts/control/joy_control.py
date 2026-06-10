@@ -15,6 +15,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import Joy
 from std_msgs.msg import Bool
 
@@ -225,6 +226,11 @@ class JoyControl(Node):
         self._reported_ready = False
         self._reported_missing = False
         self._last_twist = Twist()
+        cmd_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
 
         self._joy_pub = self.create_publisher(
             Joy, str(self.get_parameter("joy_topic").value), 10
@@ -233,7 +239,7 @@ class JoyControl(Node):
             Bool, str(self.get_parameter("state_topic").value), 10
         )
         self._cmd_pub = self.create_publisher(
-            Twist, str(self.get_parameter("cmd_vel_topic").value), 10
+            Twist, str(self.get_parameter("cmd_vel_topic").value), cmd_qos
         )
         publish_rate = max(1.0, float(self.get_parameter("publish_rate").value))
         self.create_timer(1.0 / publish_rate, self._publish)

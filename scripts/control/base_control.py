@@ -86,6 +86,11 @@ class WhillBaseDriver(Node):
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=10,
         )
+        cmd_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
         self.odom_pub = self.create_publisher(Odometry, "/odom_encoder", qos)
         self.fault_pub = self.create_publisher(Bool, "/base_fault", 10)
 
@@ -120,7 +125,7 @@ class WhillBaseDriver(Node):
         # ── 订阅 ──
         cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
         self.create_subscription(
-            Twist, cmd_vel_topic, self._on_cmd_vel, 10,
+            Twist, cmd_vel_topic, self._on_cmd_vel, cmd_qos,
             callback_group=self.cmd_sub_group,
         )
 
