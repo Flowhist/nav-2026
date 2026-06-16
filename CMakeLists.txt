@@ -125,6 +125,7 @@ install(PROGRAMS
   scripts/tool/TF.sh
   scripts/tool/clean_nav.sh
   scripts/tool/set_lidar_ip.py
+  scripts/tool/base_monitor.py
   scripts/tool/clean_map.sh
   scripts/tool/save_map.sh
   scripts/tool/save_map.py

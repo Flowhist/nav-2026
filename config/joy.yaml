@@ -18,7 +18,7 @@ joy_control:
     angular_direction: -1.0
 
     # 输入轴归一化后的死区和饱和区，范围通常为 0.0 ~ 1.0。
-    dead_zone: 0.05
+    dead_zone: 0.00
     sat_zone: 1.0
 
     # true: 四区离散控制，同一时间只输出前/后/左/右之一。

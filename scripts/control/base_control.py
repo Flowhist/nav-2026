@@ -30,7 +30,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float64MultiArray
 
 PROJECT_ROOT = "/home/embotic/nav_workspace/src/finav"
 
@@ -93,6 +93,9 @@ class WhillBaseDriver(Node):
         )
         self.odom_pub = self.create_publisher(Odometry, "/odom_encoder", qos)
         self.fault_pub = self.create_publisher(Bool, "/base_fault", 10)
+        self.wheel_velocity_pub = self.create_publisher(
+            Float64MultiArray, "/wheel_velocity_degps", qos
+        )
 
         # ── 里程计状态 ──
         self.x = 0.0
@@ -408,6 +411,10 @@ class WhillBaseDriver(Node):
             self.get_logger().error(f"读取轮速失败: {error}")
             self._latch_motion_fault(error)
             return
+
+        wheel_msg = Float64MultiArray()
+        wheel_msg.data = [float(vel[0]), float(vel[1])]
+        self.wheel_velocity_pub.publish(wheel_msg)
 
         v_left = self.wheel_velocity_sign * math.radians(vel[0]) * self.wheel_radius
         v_right = self.wheel_velocity_sign * math.radians(vel[1]) * self.wheel_radius
