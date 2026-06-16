@@ -13,9 +13,9 @@ joy_control:
     # 当前安装实测：前后轴为 axes[1]，左右轴为 axes[0]。
     # 如果实测方向相反，只改对应 direction 的正负号。
     linear_axis: 1
-    linear_direction: 1.0
+    linear_direction: -1.0
     angular_axis: 0
-    angular_direction: 1.0
+    angular_direction: -1.0
 
     # 输入轴归一化后的死区和饱和区，范围通常为 0.0 ~ 1.0。
     dead_zone: 0.05
