@@ -13,6 +13,11 @@ relocate:
     scan_to_base_yaw_deg: 0.0
     coarse_xy_step_m: 0.25
     coarse_yaw_step_deg: 10.0
+    enable_fast_coarse_search: true
+    coarse_prefilter_xy_step_m: 0.50
+    coarse_prefilter_top_k: 80
+    coarse_refine_radius_m: 0.35
+    fallback_full_search: true
     fine_xy_radius_m: 0.30
     fine_xy_step_m: 0.05
     fine_yaw_radius_deg: 10.0

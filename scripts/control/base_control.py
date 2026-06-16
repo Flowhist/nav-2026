@@ -35,6 +35,12 @@ from std_msgs.msg import Bool, Float64MultiArray
 PROJECT_ROOT = "/home/embotic/nav_workspace/src/finav"
 
 
+def select_wheel_acceleration(left_degps: float, right_degps: float, acceleration: int, acceleration_stop: int) -> int:
+    if abs(float(left_degps)) < 1e-6 and abs(float(right_degps)) < 1e-6:
+        return int(acceleration_stop)
+    return int(acceleration)
+
+
 class WhillBaseDriver(Node):
     def __init__(self):
         super().__init__("base_control")
@@ -54,6 +60,7 @@ class WhillBaseDriver(Node):
         self.declare_parameter("max_linear_speed", 0.6)
         self.declare_parameter("max_angular_speed", 1.2)
         self.declare_parameter("acceleration", 100)
+        self.declare_parameter("acceleration_stop", 100)
         self.declare_parameter("cmd_resend_interval", 0.5)
 
         # ── 参数读取 ──
@@ -65,6 +72,7 @@ class WhillBaseDriver(Node):
         self.max_linear_speed = float(self.get_parameter("max_linear_speed").value)
         self.max_angular_speed = float(self.get_parameter("max_angular_speed").value)
         self.acceleration = int(self.get_parameter("acceleration").value)
+        self.acceleration_stop = int(self.get_parameter("acceleration_stop").value)
         self.cmd_resend_interval = max(
             0.1, float(self.get_parameter("cmd_resend_interval").value)
         )
@@ -153,6 +161,7 @@ class WhillBaseDriver(Node):
         self.get_logger().info(
             f"WHILL 底盘驱动已启动 | odom={self.update_rate:.1f}Hz "
             f"| cmd_send={self.cmd_send_rate:.1f}Hz | cmd_timeout={self.cmd_timeout:.2f}s "
+            f"| accel={self.acceleration}/{self.acceleration_stop}(stop) "
             f"| motors L/R={self.left_motor_id}/{self.right_motor_id} "
             f"| wheel_sign={self.wheel_velocity_sign:.0f}"
         )
@@ -209,7 +218,7 @@ class WhillBaseDriver(Node):
                 return
             try:
                 self.whill.move_velocity(
-                    [self.left_motor_id, self.right_motor_id], 0.0, self.acceleration
+                    [self.left_motor_id, self.right_motor_id], 0.0, self.acceleration_stop
                 )
             except Exception:
                 pass
@@ -237,7 +246,7 @@ class WhillBaseDriver(Node):
 
         # 恢复后立即发一次零速，清空电机残留状态
         try:
-            whill.move_velocity([1, 2], 0.0, self.acceleration)
+            whill.move_velocity([self.left_motor_id, self.right_motor_id], 0.0, self.acceleration_stop)
         except Exception:
             pass
         return whill
@@ -370,13 +379,14 @@ class WhillBaseDriver(Node):
             try:
                 l = float(left_degps)
                 r = float(right_degps)
+                accel = select_wheel_acceleration(l, r, self.acceleration, self.acceleration_stop)
                 if abs(l - r) < 1e-6:
                     self.whill.move_velocity(
-                        [self.left_motor_id, self.right_motor_id], l, self.acceleration
+                        [self.left_motor_id, self.right_motor_id], l, accel
                     )
                 else:
-                    self.whill.move_velocity([self.left_motor_id], l, self.acceleration)
-                    self.whill.move_velocity([self.right_motor_id], r, self.acceleration)
+                    self.whill.move_velocity([self.left_motor_id], l, accel)
+                    self.whill.move_velocity([self.right_motor_id], r, accel)
             except Exception as exc:
                 error = exc
 
@@ -493,7 +503,7 @@ class WhillBaseDriver(Node):
             if not self.connected or self.whill is None:
                 return
             try:
-                self.whill.move_velocity([1, 2], 0.0, self.acceleration)
+                self.whill.move_velocity([self.left_motor_id, self.right_motor_id], 0.0, self.acceleration_stop)
             except Exception:
                 pass
 

@@ -24,15 +24,16 @@ base_control:
     cmd_vel_topic: '/cmd_vel'
     max_linear_speed: 0.6                # 线速硬限（m/s）
     max_angular_speed: 0.5               # 角速硬限（rad/s）
-    acceleration: 750                    # 加速度（deg/s²）
+    acceleration: 350                    # 普通速度指令加速度（deg/s²）
+    acceleration_stop: 500               # 归零/急停速度指令加速度（deg/s²）
 
 # 摇杆速度档位配置
 joy_control:
   ros__parameters:
     js_vel_low: 0.3       # 摇杆控制直行速度 低档（m/s）
     js_vel_high: 0.4      # 摇杆控制直行速度 高档（m/s）
-    js_rot_low: 10.0      # 摇杆控制旋转速度 低档（deg/s）
-    js_rot_high: 25.0     # 摇杆控制旋转速度 高档（deg/s）
+    js_rot_low: 25.0      # 摇杆控制旋转速度 低档（deg/s）
+    js_rot_high: 50.0     # 摇杆控制旋转速度 高档（deg/s）
 
 # 控制仲裁（键盘 / 摇杆 / Web / 导航）
 base_control_router:

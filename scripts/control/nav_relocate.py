@@ -139,6 +139,11 @@ class AutoLocalize(Node):
         self.declare_parameter("scan_to_base_yaw_deg", 0.0)
         self.declare_parameter("coarse_xy_step_m", 0.25)
         self.declare_parameter("coarse_yaw_step_deg", 10.0)
+        self.declare_parameter("enable_fast_coarse_search", True)
+        self.declare_parameter("coarse_prefilter_xy_step_m", 0.50)
+        self.declare_parameter("coarse_prefilter_top_k", 80)
+        self.declare_parameter("coarse_refine_radius_m", 0.35)
+        self.declare_parameter("fallback_full_search", True)
         self.declare_parameter("fine_xy_radius_m", 0.30)
         self.declare_parameter("fine_xy_step_m", 0.05)
         self.declare_parameter("fine_yaw_radius_deg", 10.0)
@@ -171,6 +176,14 @@ class AutoLocalize(Node):
         self.scan_to_base_yaw = math.radians(float(self.get_parameter("scan_to_base_yaw_deg").value))
         self.coarse_xy_step_m = max(0.05, float(self.get_parameter("coarse_xy_step_m").value))
         self.coarse_yaw_step = math.radians(max(1.0, float(self.get_parameter("coarse_yaw_step_deg").value)))
+        self.enable_fast_coarse_search = bool(self.get_parameter("enable_fast_coarse_search").value)
+        self.coarse_prefilter_xy_step_m = max(
+            self.coarse_xy_step_m,
+            float(self.get_parameter("coarse_prefilter_xy_step_m").value),
+        )
+        self.coarse_prefilter_top_k = max(1, int(self.get_parameter("coarse_prefilter_top_k").value))
+        self.coarse_refine_radius_m = max(0.0, float(self.get_parameter("coarse_refine_radius_m").value))
+        self.fallback_full_search = bool(self.get_parameter("fallback_full_search").value)
         self.fine_xy_radius_m = max(0.0, float(self.get_parameter("fine_xy_radius_m").value))
         self.fine_xy_step_m = max(0.02, float(self.get_parameter("fine_xy_step_m").value))
         self.fine_yaw_radius = math.radians(max(0.0, float(self.get_parameter("fine_yaw_radius_deg").value)))
@@ -242,7 +255,14 @@ class AutoLocalize(Node):
         self._build_free_candidates()
 
     def _build_free_candidates(self) -> None:
-        step_px = max(1, int(round(self.coarse_xy_step_m / self.resolution)))
+        self.free_xy = self._build_free_candidates_for_step(self.coarse_xy_step_m)
+        if self.enable_fast_coarse_search and self.coarse_prefilter_xy_step_m > self.coarse_xy_step_m:
+            self.prefilter_free_xy = self._build_free_candidates_for_step(self.coarse_prefilter_xy_step_m)
+        else:
+            self.prefilter_free_xy = self.free_xy
+
+    def _build_free_candidates_for_step(self, step_m: float) -> np.ndarray:
+        step_px = max(1, int(round(step_m / self.resolution)))
         free_rows, free_cols = np.nonzero(self.free[::step_px, ::step_px])
         rows = free_rows * step_px
         cols = free_cols * step_px
@@ -250,7 +270,7 @@ class AutoLocalize(Node):
             rows = rows[:: self.free_candidate_stride]
             cols = cols[:: self.free_candidate_stride]
         xs, ys = self._pixel_to_world(cols.astype(np.float32), rows.astype(np.float32))
-        self.free_xy = np.column_stack((xs, ys)).astype(np.float32)
+        return np.column_stack((xs, ys)).astype(np.float32)
 
     def _on_scan(self, msg: LaserScan) -> None:
         if self.done:
@@ -296,11 +316,17 @@ class AutoLocalize(Node):
         start = time.monotonic()
         coarse = self._coarse_search(scan_xy)
         fine = self._fine_search(scan_xy, coarse[: self.top_k])
-        elapsed = time.monotonic() - start
+        best, second_score, gap = self._rank_scores(fine)
 
-        best = fine[0]
-        second_score = fine[1][0] if len(fine) > 1 else -1.0
-        gap = best[0] - second_score
+        if getattr(self, "fallback_full_search", True) and not self._accepted_scores(best[0], gap):
+            self.get_logger().info(
+                "fast relocate confidence low; falling back to full coarse search"
+            )
+            coarse = self._full_coarse_search(scan_xy)
+            fine = self._fine_search(scan_xy, coarse[: self.top_k])
+            best, second_score, gap = self._rank_scores(fine)
+
+        elapsed = time.monotonic() - start
         self.get_logger().info(
             "relocate best score=%.3f second=%.3f gap=%.3f pose=(%.3f, %.3f, %.1fdeg) time=%.2fs"
             % (best[0], second_score, gap, best[1][0], best[1][1], math.degrees(best[1][2]), elapsed)
@@ -311,7 +337,7 @@ class AutoLocalize(Node):
                     "candidate %d score=%.3f pose=(%.3f, %.3f, %.1fdeg)"
                     % (i, score, pose[0], pose[1], math.degrees(pose[2]))
                 )
-        if best[0] < self.min_score or gap < self.min_score_gap:
+        if not self._accepted_scores(best[0], gap):
             self.get_logger().warn(
                 "auto localization rejected: score/gap below threshold; use manual initial pose"
             )
@@ -321,20 +347,120 @@ class AutoLocalize(Node):
         self.accepted = True
         self.get_logger().info("auto localization accepted and /initialpose published")
 
+    def _rank_scores(self, ranked: List[Tuple[float, Pose]]) -> Tuple[Tuple[float, Pose], float, float]:
+        best = ranked[0] if ranked else (-1.0, (0.0, 0.0, 0.0))
+        second_score = ranked[1][0] if len(ranked) > 1 else -1.0
+        return best, second_score, best[0] - second_score
+
+    def _accepted_scores(self, score: float, gap: float) -> bool:
+        return score >= self.min_score and gap >= self.min_score_gap
+
     def _coarse_search(self, scan_xy: np.ndarray) -> List[Tuple[float, Pose]]:
+        if (
+            not self.enable_fast_coarse_search
+            or self.prefilter_free_xy is self.free_xy
+            or self.coarse_refine_radius_m <= 0.0
+        ):
+            return self._full_coarse_search(scan_xy)
+
+        prefilter_keep = max(self.coarse_prefilter_top_k, self.top_k * 3)
+        prefilter = self._coarse_search_over_translations(
+            scan_xy,
+            self.prefilter_free_xy,
+            per_yaw_top_k=max(1, min(self.top_k, self.coarse_prefilter_top_k)),
+            keep_count=prefilter_keep,
+        )
+        refined = self._refine_coarse_candidates(scan_xy, prefilter[:prefilter_keep])
+        if self.debug:
+            self.get_logger().info(
+                "fast coarse candidates: prefilter=%d/%d refined=%d full_candidates=%d"
+                % (len(prefilter), len(self.prefilter_free_xy), len(refined), len(self.free_xy))
+            )
+        return refined or prefilter[: max(self.top_k * 3, self.top_k)]
+
+    def _full_coarse_search(self, scan_xy: np.ndarray) -> List[Tuple[float, Pose]]:
+        return self._coarse_search_over_translations(
+            scan_xy,
+            self.free_xy,
+            per_yaw_top_k=self.top_k,
+            keep_count=max(self.top_k * 3, self.top_k),
+        )
+
+    def _coarse_search_over_translations(
+        self,
+        scan_xy: np.ndarray,
+        translations: np.ndarray,
+        *,
+        per_yaw_top_k: int,
+        keep_count: int,
+    ) -> List[Tuple[float, Pose]]:
         results: List[Tuple[float, Pose]] = []
         yaws = np.arange(-math.pi, math.pi, self.coarse_yaw_step, dtype=np.float32)
         for yaw in yaws:
             local = self._rotate_points(scan_xy, float(yaw))
-            scores = self._score_translations(local, self.free_xy)
+            scores = self._score_translations(local, translations)
+            if scores.size == 0:
+                continue
+            count = min(max(1, per_yaw_top_k), scores.size)
+            top_idx = np.argpartition(scores, -count)[-count:]
+            for idx in top_idx:
+                x = float(translations[idx, 0])
+                y = float(translations[idx, 1])
+                results.append((float(scores[idx]), (x, y, float(yaw))))
+        results.sort(key=lambda item: item[0], reverse=True)
+        return results[:keep_count]
+
+    def _refine_coarse_candidates(
+        self, scan_xy: np.ndarray, seeds: List[Tuple[float, Pose]]
+    ) -> List[Tuple[float, Pose]]:
+        if not seeds:
+            return []
+
+        results: List[Tuple[float, Pose]] = []
+        steps = int(math.ceil(self.coarse_refine_radius_m / self.coarse_xy_step_m))
+        offsets = (np.arange(-steps, steps + 1, dtype=np.float32) * self.coarse_xy_step_m)
+        xy_offsets = np.asarray([(dx, dy) for dx in offsets for dy in offsets], dtype=np.float32)
+        yaws = sorted({round(seed[1][2], 6) for seed in seeds})
+
+        for yaw_key in yaws:
+            centers = np.asarray(
+                [(pose[0], pose[1]) for _, pose in seeds if round(pose[2], 6) == yaw_key],
+                dtype=np.float32,
+            )
+            if centers.size == 0:
+                continue
+            translations = (centers[:, None, :] + xy_offsets[None, :, :]).reshape(-1, 2)
+            cols, rows = self._world_to_pixel(translations[:, 0], translations[:, 1])
+            in_bounds = (cols >= 0) & (cols < self.width) & (rows >= 0) & (rows < self.height)
+            if not np.any(in_bounds):
+                continue
+            cols = cols[in_bounds]
+            rows = rows[in_bounds]
+            translations = translations[in_bounds]
+            keep = self.free[rows, cols]
+            if not np.any(keep):
+                continue
+            cols = cols[keep]
+            rows = rows[keep]
+            translations = translations[keep]
+            _, unique_idx = np.unique(np.column_stack((rows, cols)), axis=0, return_index=True)
+            translations = translations[np.sort(unique_idx)]
+
+            yaw = float(yaw_key)
+            local = self._rotate_points(scan_xy, yaw)
+            scores = self._score_translations(local, translations)
             if scores.size == 0:
                 continue
             count = min(self.top_k, scores.size)
             top_idx = np.argpartition(scores, -count)[-count:]
             for idx in top_idx:
-                x = float(self.free_xy[idx, 0])
-                y = float(self.free_xy[idx, 1])
-                results.append((float(scores[idx]), (x, y, float(yaw))))
+                results.append(
+                    (
+                        float(scores[idx]),
+                        (float(translations[idx, 0]), float(translations[idx, 1]), yaw),
+                    )
+                )
+
         results.sort(key=lambda item: item[0], reverse=True)
         return results[: max(self.top_k * 3, self.top_k)]
 
