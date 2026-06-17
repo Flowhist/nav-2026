@@ -20,6 +20,23 @@ from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Bool, Empty, String
 
 
+def resolve_keyboard_command(key: str, speed: float, angular_speed: float) -> tuple[float, float]:
+    speed = float(speed)
+    angular_speed = float(angular_speed)
+    mapping = {
+        "w": (speed, 0.0),
+        "s": (-speed, 0.0),
+        "a": (0.0, angular_speed),
+        "d": (0.0, -angular_speed),
+        "q": (speed, angular_speed),
+        "e": (speed, -angular_speed),
+        "z": (-speed, angular_speed),
+        "c": (-speed, -angular_speed),
+        " ": (0.0, 0.0),
+    }
+    return mapping.get(key, (0.0, 0.0))
+
+
 class Source(Enum):
     NONE = "none"
     JOYSTICK = "joystick"
@@ -116,7 +133,7 @@ class BaseControlRouter(Node):
             self.get_logger().warn("stdin is not a tty, keyboard control disabled")
 
         self.get_logger().info(
-            "base_control_router started | WSAD move | J/K speed | Space stop | "
+            "base_control_router started | WSAD move | Q/E/Z/C diagonal | J/K speed | Space stop | "
             "joystick nonzero interrupts active keyboard/web/nav control"
         )
 
@@ -237,31 +254,20 @@ class BaseControlRouter(Node):
             self._warn_reset_required("keyboard ignored")
             return
 
-        if key == "w":
-            self._kb_linear = self._kb_speeds[self._kb_spd_idx]
-            self._kb_angular = 0.0
-            self._source = Source.KEYBOARD
-        elif key == "s":
-            self._kb_linear = -self._kb_speeds[self._kb_spd_idx]
-            self._kb_angular = 0.0
-            self._source = Source.KEYBOARD
-        elif key == "a":
-            self._kb_linear = 0.0
-            self._kb_angular = self._kb_rot_spd
-            self._source = Source.KEYBOARD
-        elif key == "d":
-            self._kb_linear = 0.0
-            self._kb_angular = -self._kb_rot_spd
-            self._source = Source.KEYBOARD
+        if key in ("w", "s", "a", "d", "q", "e", "z", "c", " "):
+            self._kb_linear, self._kb_angular = resolve_keyboard_command(
+                key,
+                self._kb_speeds[self._kb_spd_idx],
+                self._kb_rot_spd,
+            )
+            self._source = Source.KEYBOARD if self._nonzero_keyboard() else Source.NONE
         elif key == "j":
             self._kb_spd_idx = min(self._kb_spd_idx + 1, len(self._kb_speeds) - 1)
         elif key == "k":
             self._kb_spd_idx = max(self._kb_spd_idx - 1, 0)
-        elif key == " ":
-            self._kb_linear = 0.0
-            self._kb_angular = 0.0
-            if self._source == Source.KEYBOARD:
-                self._source = Source.NONE
+
+    def _nonzero_keyboard(self) -> bool:
+        return abs(self._kb_linear) > 1e-6 or abs(self._kb_angular) > 1e-6
 
     def _poll_keyboard(self):
         if self._old_term is None:
@@ -272,7 +278,7 @@ class BaseControlRouter(Node):
 
     def _select_non_joystick_source(self) -> tuple[Source, Twist]:
         now = time.monotonic()
-        if self._kb_enabled and self._old_term is not None and self._source == Source.KEYBOARD:
+        if self._kb_enabled and self._old_term is not None and self._nonzero_keyboard():
             msg = Twist()
             msg.linear.x = self._kb_linear
             msg.angular.z = self._kb_angular
@@ -289,6 +295,8 @@ class BaseControlRouter(Node):
         self._poll_keyboard()
 
         if self._base_fault_active:
+            self._kb_linear = 0.0
+            self._kb_angular = 0.0
             self._publish_stop()
             return
 

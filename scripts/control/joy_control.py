@@ -95,12 +95,8 @@ def joy_axes_to_twist(axes, cfg: JoyMappingConfig) -> Twist:
         cfg.dead_zone,
         cfg.sat_zone,
     )
-    if cfg.discrete_motion_enable:
-        if abs(linear) >= abs(angular):
-            angular = 0.0
-        else:
-            linear = 0.0
-
+    # discrete_motion_enable now means each active axis snaps to a speed tier.
+    # Both axes may remain active, giving 8-way manual control.
     msg.linear.x = _tiered_speed(
         linear, cfg.linear_speed_low, cfg.linear_speed_high, cfg.speed_split
     )

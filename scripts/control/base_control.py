@@ -380,13 +380,13 @@ class WhillBaseDriver(Node):
                 l = float(left_degps)
                 r = float(right_degps)
                 accel = select_wheel_acceleration(l, r, self.acceleration, self.acceleration_stop)
-                if abs(l - r) < 1e-6:
-                    self.whill.move_velocity(
-                        [self.left_motor_id, self.right_motor_id], l, accel
-                    )
-                else:
-                    self.whill.move_velocity([self.left_motor_id], l, accel)
-                    self.whill.move_velocity([self.right_motor_id], r, accel)
+                # if abs(l - r) < 1e-6:
+                #     self.whill.move_velocity(
+                #         [self.left_motor_id, self.right_motor_id], l, accel
+                #     )
+                # else:
+                self.whill.move_velocity([self.left_motor_id], l, accel)
+                self.whill.move_velocity([self.right_motor_id], r, accel)
             except Exception as exc:
                 error = exc
 
