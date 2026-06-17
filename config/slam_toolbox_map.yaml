@@ -54,7 +54,7 @@ slam_toolbox:
     
     # 激光雷达范围（根据新雷达规格调整）
     minimum_range: 0.05
-    min_laser_range: 0.05
+    min_laser_range: 0.11
     max_laser_range: 25.0
     minimum_angle: -3.14159
     maximum_angle: 3.14159

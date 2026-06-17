@@ -159,7 +159,7 @@ def generate_launch_description():
     )
     use_nav_bridge_arg = DeclareLaunchArgument(
         "use_nav_bridge",
-        default_value="false",
+        default_value="true",
         description="Enable location-based voice navigation bridge (nav_voice_bridge)",
     )
 
