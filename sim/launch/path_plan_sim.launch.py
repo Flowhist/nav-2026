@@ -13,7 +13,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     pkg_share = get_package_share_directory("finav")
-    default_map_yaml = os.path.join(pkg_share, "maps", "map4", "map4.yaml")
+    default_map_yaml = os.path.join(pkg_share, "maps", "longcorridor", "longcorridor.yaml")
     default_rviz = os.path.join(pkg_share, "sim", "rviz", "path_plan_sim.rviz")
     path_plan_cfg = os.path.join(pkg_share, "config", "path_plan.yaml")
     fake_pose_cfg = os.path.join(pkg_share, "sim", "config", "sim_fake_pose.yaml")

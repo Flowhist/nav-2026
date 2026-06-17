@@ -11,7 +11,7 @@ left:
   baud: 921600
   scan_frequency: 30
   scan_resolution: 1000
-  start_angle: 0
+  start_angle: 10
   stop_angle: 215
   range_min: 0.05
   range_max: 25.0
@@ -33,7 +33,7 @@ right:
   scan_frequency: 30
   scan_resolution: 1000
   start_angle: -45
-  stop_angle: 180
+  stop_angle: 170
   range_min: 0.05
   range_max: 25.0
   filter_switch: 0

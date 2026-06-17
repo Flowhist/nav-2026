@@ -119,6 +119,32 @@ def scan_xy_to_base_xy(
     return np.column_stack((base_x, base_y)).astype(np.float32)
 
 
+def build_limited_fallback_candidates(
+    fast_candidates: List[Tuple[float, Pose]],
+    free_xy,
+    radius_m: float,
+    max_candidates: int,
+) -> np.ndarray:
+    """Return free translations near fast coarse candidates for bounded fallback."""
+    free = np.asarray(free_xy, dtype=np.float32)
+    if free.size == 0 or not fast_candidates:
+        return np.empty((0, 2), dtype=np.float32)
+    free = free.reshape((-1, 2))
+    centers = np.asarray([(pose[0], pose[1]) for _, pose in fast_candidates], dtype=np.float32)
+    radius = max(0.0, float(radius_m))
+    keep = np.zeros((free.shape[0],), dtype=bool)
+    radius_sq = radius * radius
+    for start in range(0, centers.shape[0], 256):
+        chunk = centers[start : start + 256]
+        delta = free[:, None, :] - chunk[None, :, :]
+        keep |= np.any(np.sum(delta * delta, axis=2) <= radius_sq, axis=1)
+    limited = free[keep]
+    if max_candidates > 0 and limited.shape[0] > max_candidates:
+        idx = np.linspace(0, limited.shape[0] - 1, max_candidates).astype(np.int32)
+        limited = limited[idx]
+    return limited.astype(np.float32)
+
+
 class AutoLocalize(Node):
     def __init__(self) -> None:
         super().__init__("relocate")
@@ -144,6 +170,9 @@ class AutoLocalize(Node):
         self.declare_parameter("coarse_prefilter_top_k", 80)
         self.declare_parameter("coarse_refine_radius_m", 0.35)
         self.declare_parameter("fallback_full_search", True)
+        self.declare_parameter("fallback_limited_search", True)
+        self.declare_parameter("fallback_limited_radius_m", 1.2)
+        self.declare_parameter("fallback_limited_max_candidates", 8000)
         self.declare_parameter("fine_xy_radius_m", 0.30)
         self.declare_parameter("fine_xy_step_m", 0.05)
         self.declare_parameter("fine_yaw_radius_deg", 10.0)
@@ -184,6 +213,9 @@ class AutoLocalize(Node):
         self.coarse_prefilter_top_k = max(1, int(self.get_parameter("coarse_prefilter_top_k").value))
         self.coarse_refine_radius_m = max(0.0, float(self.get_parameter("coarse_refine_radius_m").value))
         self.fallback_full_search = bool(self.get_parameter("fallback_full_search").value)
+        self.fallback_limited_search = bool(self.get_parameter("fallback_limited_search").value)
+        self.fallback_limited_radius_m = max(0.0, float(self.get_parameter("fallback_limited_radius_m").value))
+        self.fallback_limited_max_candidates = max(100, int(self.get_parameter("fallback_limited_max_candidates").value))
         self.fine_xy_radius_m = max(0.0, float(self.get_parameter("fine_xy_radius_m").value))
         self.fine_xy_step_m = max(0.02, float(self.get_parameter("fine_xy_step_m").value))
         self.fine_yaw_radius = math.radians(max(0.0, float(self.get_parameter("fine_yaw_radius_deg").value)))
@@ -319,10 +351,28 @@ class AutoLocalize(Node):
         best, second_score, gap = self._rank_scores(fine)
 
         if getattr(self, "fallback_full_search", True) and not self._accepted_scores(best[0], gap):
-            self.get_logger().info(
-                "fast relocate confidence low; falling back to full coarse search"
-            )
-            coarse = self._full_coarse_search(scan_xy)
+            if getattr(self, "fallback_limited_search", True):
+                limited_xy = build_limited_fallback_candidates(
+                    coarse,
+                    self.free_xy,
+                    self.fallback_limited_radius_m,
+                    self.fallback_limited_max_candidates,
+                )
+                self.get_logger().info(
+                    "fast relocate confidence low; bounded fallback candidates=%d/%d"
+                    % (len(limited_xy), len(self.free_xy))
+                )
+                coarse = self._coarse_search_over_translations(
+                    scan_xy,
+                    limited_xy,
+                    per_yaw_top_k=self.top_k,
+                    keep_count=max(self.top_k * 3, self.top_k),
+                )
+            else:
+                self.get_logger().info(
+                    "fast relocate confidence low; falling back to full coarse search"
+                )
+                coarse = self._full_coarse_search(scan_xy)
             fine = self._fine_search(scan_xy, coarse[: self.top_k])
             best, second_score, gap = self._rank_scores(fine)
 

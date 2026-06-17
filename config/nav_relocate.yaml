@@ -18,6 +18,10 @@ relocate:
     coarse_prefilter_top_k: 80
     coarse_refine_radius_m: 0.35
     fallback_full_search: true
+    # 低置信fallback默认只在fast候选附近扩展，不直接全图重扫。
+    fallback_limited_search: true
+    fallback_limited_radius_m: 1.2
+    fallback_limited_max_candidates: 8000
     fine_xy_radius_m: 0.30
     fine_xy_step_m: 0.05
     fine_yaw_radius_deg: 10.0

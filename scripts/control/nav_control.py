@@ -19,6 +19,7 @@
 """
 
 import math
+import time
 from enum import Enum, auto
 from typing import List, Optional, Tuple
 
@@ -123,6 +124,7 @@ class ChassisControlNav(Node):
         self._replan_pause_until_ns = 0
         self._js_active = False
         self._cmd_msg = Twist()
+        self._last_wait_log_mono = 0.0
 
         # 订阅与发布
         self.pub = self.create_publisher(Twist, self.output_topic, 10)
@@ -166,6 +168,14 @@ class ChassisControlNav(Node):
         """发布零速度，立即停车。"""
         self._pub(0.0, 0.0)
 
+    def _log_wait_reason(self, reason: str, interval_s: float = 2.0):
+        """低频打印等待/停顿原因，避免控制循环刷屏。"""
+        now = time.monotonic()
+        if now - self._last_wait_log_mono < interval_s:
+            return
+        self._last_wait_log_mono = now
+        self.get_logger().warn(reason)
+
     def _reset(self):
         """重置路径跟踪状态机与历史误差缓存。"""
         self.path_points = []
@@ -190,6 +200,9 @@ class ChassisControlNav(Node):
         if self.replan_pause_s > 0.0:
             now_ns = self.get_clock().now().nanoseconds
             self._replan_pause_until_ns = now_ns + int(self.replan_pause_s * 1e9)
+            self.get_logger().info(
+                f"导航暂停原因: 收到重规划路径，先急停等待 {self.replan_pause_s:.2f}s 再跟踪新路径"
+            )
         else:
             self._replan_pause_until_ns = 0
 
@@ -219,7 +232,7 @@ class ChassisControlNav(Node):
             if self.has_started or self.path_points:
                 self._stop()
                 self._reset()
-                self.get_logger().info("路径已清空，导航停止")
+                self.get_logger().info("导航停止原因: 收到空 /plan，已急停并清空路径跟踪状态")
             return
         new_points = [
             (float(point.pose.position.x), float(point.pose.position.y))
@@ -266,7 +279,7 @@ class ChassisControlNav(Node):
         """处理导航清空命令并复位控制状态。"""
         self._stop()
         self._reset()
-        self.get_logger().info("收到导航清空指令，已急停并重置状态")
+        self.get_logger().info("导航停止原因: 收到 /nav_clear，已急停并重置状态")
 
     # === 纯追踪目标点 =========================================================
 
@@ -449,10 +462,17 @@ class ChassisControlNav(Node):
         now = self.get_clock().now().nanoseconds
         if now < self._replan_pause_until_ns:
             self._stop()
+            left_s = max(0.0, (self._replan_pause_until_ns - now) * 1e-9)
+            self._log_wait_reason(
+                f"导航暂停原因: 重规划路径切换保护中，剩余 {left_s:.2f}s"
+            )
             return
 
         pose = self._get_pose()
         if pose is None:
+            self._log_wait_reason(
+                f"导航等待原因: 无法获取 TF {self.path_frame}->{self.base_frame}，暂不发布新的导航速度"
+            )
             return
         x, y, yaw = pose
 
@@ -462,7 +482,9 @@ class ChassisControlNav(Node):
         if d2_goal <= self.goal_tol_sq:
             dist_goal = math.sqrt(d2_goal)
             self._stop()
-            self.get_logger().info(f"OK 到达终点 | 距终点={dist_goal:.2f}m")
+            self.get_logger().info(
+                f"导航停止原因: 到达终点，距终点={dist_goal:.2f}m <= {self.goal_tol:.2f}m"
+            )
             self._reset()
             return
 

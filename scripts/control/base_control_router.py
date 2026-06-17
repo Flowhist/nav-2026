@@ -30,8 +30,8 @@ def resolve_keyboard_command(key: str, speed: float, angular_speed: float) -> tu
         "d": (0.0, -angular_speed),
         "q": (speed, angular_speed),
         "e": (speed, -angular_speed),
-        "c": (-speed, angular_speed),
         "z": (-speed, -angular_speed),
+        "c": (-speed, angular_speed),
         " ": (0.0, 0.0),
     }
     return mapping.get(key, (0.0, 0.0))

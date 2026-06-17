@@ -103,6 +103,10 @@ def joy_axes_to_twist(axes, cfg: JoyMappingConfig) -> Twist:
     msg.angular.z = _tiered_speed(
         angular, cfg.angular_speed_low, cfg.angular_speed_high, cfg.speed_split
     )
+    # Backward diagonals are named from the driver's perspective:
+    # stick left while reversing should command rear-left, not rear-right.
+    if msg.linear.x < 0.0 and msg.angular.z != 0.0:
+        msg.angular.z = -msg.angular.z
     return msg
 
 

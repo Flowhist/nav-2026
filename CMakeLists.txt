@@ -148,6 +148,12 @@ install(FILES
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(DIRECTORY
+  scripts/control/path_planning/
+  DESTINATION lib/${PROJECT_NAME}/path_planning
+  FILES_MATCHING PATTERN "*.py"
+)
+
 # Install IMU Python modules (dm_serial, dm_crc, etc.)
 install(DIRECTORY
   third_party/dm_imu/dm_imu_modules/

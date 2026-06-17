@@ -13,6 +13,10 @@ path_plan:
     base_frame: "base_link"
     # 规划频率(Hz)：提高到 5Hz，减小点目标后的等待感
     plan_rate_hz: 2.0
+    # fast2d: 快速2D全局规划；se2: 旧的带航向/车体运动原语规划
+    planner_mode: "fast2d"
+    # fast2d失败时是否自动退回SE2；默认关闭，避免失败目标长时间卡住。
+    fast2d_allow_se2_fallback: false
 
     # ===== 栅格判定与碰撞安全 =====
     # 占用阈值(0~100)：越小越保守（更多格子视为障碍）
@@ -20,7 +24,7 @@ path_plan:
     # 未知区域是否按障碍处理：true更安全，false更激进
     treat_unknown_as_occupied: true
     # 障碍额外安全边界(米)：减小一点，提高窄通道通过率
-    inflation_radius_m: 0.1
+    inflation_radius_m: 0.6
     # 搜索扩展上限：越大越不易失败，但最坏耗时更长
     max_search_expansions: 200000
     # 单次规划最大耗时，防止坏目标长期占住单线程节点
@@ -65,6 +69,14 @@ path_plan:
     turn_cost_weight: 0.20
     # 规划耗时统计日志节流间隔，0 表示关闭
     timing_log_interval_s: 1.0
+
+    # ===== SE2搜索空间裁剪（仅 planner_mode=se2 或 fast2d fallback 时使用）=====
+    # 用轻量2D A*生成粗路径走廊，再在走廊内做SE2 A*。
+    enable_search_corridor: true
+    # 走廊半径(米)：越小越快但越容易裁掉需要绕行/摆头的可行空间。
+    search_corridor_radius_m: 1.2
+    # 2D粗路径最大扩展数，防止异常目标拖慢。
+    search_corridor_max_expansions: 200000
 
     # ===== 重规划与平滑 =====
     # 地图更新时是否触发重规划
