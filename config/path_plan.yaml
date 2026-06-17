@@ -28,7 +28,7 @@ path_plan:
     # 搜索扩展上限：越大越不易失败，但最坏耗时更长
     max_search_expansions: 200000
     # 单次规划最大耗时，防止坏目标长期占住单线程节点
-    max_planning_time_s: 1.5
+    max_planning_time_s: 2.5
     # 目标点落在障碍/未知/膨胀区时直接拒绝，不尝试吸附到附近空地
     reject_occupied_goal: true
     # 到目标判定容差(米)：越小越精确
@@ -39,6 +39,8 @@ path_plan:
     stop_on_new_goal_clear_path: true
     # 任意重规划触发时先清空当前路径，停车等待下一拍新路径
     stop_before_replan_clear_path: true
+
+    # -------------- 以下均用于se2路径规划，暂时不再使用 ---------------
 
     # ===== 车体几何（与 URDF 对齐）=====
     # base_link 到车头最前端

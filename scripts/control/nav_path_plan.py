@@ -365,7 +365,10 @@ class PathPlanner(Node):
         self.map_msg = msg
         self.map_seq = seq
         self._map_processed_dirty = True
-        if self.replan_on_map_update:
+        if self.replan_on_map_update or (
+            getattr(self, "plan_failed_for_current_goal", False)
+            and getattr(self, "goal_pose_world", None) is not None
+        ):
             self.map_dirty = True
 
     def _on_goal(self, msg: PoseStamped) -> None:

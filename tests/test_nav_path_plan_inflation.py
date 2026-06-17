@@ -94,3 +94,63 @@ def test_map_callback_defers_inflation_until_planning_needs_it():
     assert module.PathPlanner._ensure_processed_map(planner) is True
     assert rebuild_calls == [True]
     assert planner._map_processed_dirty is False
+
+
+def test_map_update_retries_only_after_failed_goal_when_replan_on_map_update_disabled():
+    module = _load_module(
+        Path(__file__).resolve().parents[1] / "scripts" / "control" / "nav_path_plan.py",
+        "nav_path_plan_failed_goal_retry_under_test",
+    )
+    planner = object.__new__(module.PathPlanner)
+    planner.map_frame = "map"
+    planner.map_seq = -1
+    planner.map_msg = None
+    planner.map_dirty = False
+    planner.replan_on_map_update = False
+    planner.plan_failed_for_current_goal = True
+    planner.goal_pose_world = (1.0, 2.0, 0.0)
+    planner._map_processed_dirty = False
+
+    msg = SimpleNamespace(
+        header=SimpleNamespace(
+            frame_id="map",
+            stamp=SimpleNamespace(sec=2, nanosec=3),
+        ),
+        info=SimpleNamespace(width=2, height=2),
+        data=[0, 0, 0, 0],
+    )
+
+    module.PathPlanner._on_map(planner, msg)
+
+    assert planner._map_processed_dirty is True
+    assert planner.map_dirty is True
+
+
+def test_map_update_does_not_replan_active_successful_path_when_disabled():
+    module = _load_module(
+        Path(__file__).resolve().parents[1] / "scripts" / "control" / "nav_path_plan.py",
+        "nav_path_plan_no_active_map_replan_under_test",
+    )
+    planner = object.__new__(module.PathPlanner)
+    planner.map_frame = "map"
+    planner.map_seq = -1
+    planner.map_msg = None
+    planner.map_dirty = False
+    planner.replan_on_map_update = False
+    planner.plan_failed_for_current_goal = False
+    planner.goal_pose_world = (1.0, 2.0, 0.0)
+    planner._map_processed_dirty = False
+
+    msg = SimpleNamespace(
+        header=SimpleNamespace(
+            frame_id="map",
+            stamp=SimpleNamespace(sec=3, nanosec=4),
+        ),
+        info=SimpleNamespace(width=2, height=2),
+        data=[0, 0, 0, 0],
+    )
+
+    module.PathPlanner._on_map(planner, msg)
+
+    assert planner._map_processed_dirty is True
+    assert planner.map_dirty is False

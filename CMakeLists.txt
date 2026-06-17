@@ -119,7 +119,6 @@ install(PROGRAMS
   scripts/control/base_control.py
   scripts/control/base_control_router.py
   scripts/control/joy_control.py
-  scripts/control/nav_to_location.py
   scripts/control/nav_relocate.py
   scripts/imu/dm_imu_publisher.py
   scripts/tool/TF.sh
@@ -140,11 +139,6 @@ install(PROGRAMS
   sim/scripts/sim_send_goal.py
   sim/scripts/gz_topic_adapter.py
   start_finav.sh
-  DESTINATION lib/${PROJECT_NAME}
-)
-
-install(FILES
-  scripts/control/nav_goal_utils.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

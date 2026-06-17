@@ -3,18 +3,23 @@
 # 下游 SLAM、Web、导航仍只使用 /scan。
 
 left:
+  # 左雷达网络与 ROS 输出
   scanner_ip: 10.86.81.111
   frame_id: laser_left_frame
   topic_name: /scan_left
   is_ethernet: true
+  # 串口模式备用；以太网模式下通常不生效
   port_name: /dev/ttyUSB0
   baud: 921600
+  # 雷达采样频率、角分辨率与裁剪角度
   scan_frequency: 30
   scan_resolution: 1000
   start_angle: 10
   stop_angle: 215
+  # 有效量程，超出范围的点会被过滤
   range_min: 0.05
   range_max: 25.0
+  # 原厂滤波/归一化参数；调试点云形状时优先保持滤波关闭
   filter_switch: 0
   single_filter_enable: false
   cluster_num: 10
@@ -24,18 +29,23 @@ left:
   use_recv_time_stamp: false
 
 right:
+  # 右雷达网络与 ROS 输出
   scanner_ip: 10.86.81.112
   frame_id: laser_right_frame
   topic_name: /scan_right
   is_ethernet: true
+  # 串口模式备用；以太网模式下通常不生效
   port_name: /dev/ttyUSB0
   baud: 921600
+  # 雷达采样频率、角分辨率与裁剪角度
   scan_frequency: 30
   scan_resolution: 1000
   start_angle: -45
   stop_angle: 170
+  # 有效量程，超出范围的点会被过滤
   range_min: 0.05
   range_max: 25.0
+  # 原厂滤波/归一化参数；调试点云形状时优先保持滤波关闭
   filter_switch: 0
   single_filter_enable: false
   cluster_num: 10
@@ -45,13 +55,17 @@ right:
   use_recv_time_stamp: false
 
 fusion:
+  # 双雷达融合后的统一 LaserScan 输出
   output_topic: /scan
   output_frame: base_link
+  # 输出扫描角度范围与角分辨率
   angle_min: -3.141592653589793
   angle_max: 3.141592653589793
   angle_increment: 0.0017453292519943296
+  # 融合后保留的有效量程
   range_min: 0.05
   range_max: 25.0
+  # 同步队列和 TF 等待时间；丢帧/延迟时优先检查这里
   sync_queue_size: 10
   input_timeout_sec: 1.0
   tf_timeout_sec: 0.1

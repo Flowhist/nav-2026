@@ -2,7 +2,7 @@
 """
 共享地图工具：maps 目录解析、地图发现、地点读写、运行地图检测。
 
-被 annotate_tool / annotate_visualizer / nav_to_location / relocate 共用。
+被 annotate_tool / annotate_visualizer / nav_voice_bridge / relocate 共用。
 """
 
 import os

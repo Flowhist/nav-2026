@@ -19,6 +19,8 @@ URDF ----------> base_link -> laser_left_frame / laser_right_frame / imu_link �
   建图模式: 输出 /map 和 map->odom
   定位模式: 加载 maps/<map>/<map>，输出 map->odom
 
+地点名 -> nav_voice_bridge.py -> /goal_pose
+
 /map + /goal_pose + TF -> nav_path_plan.py -> /plan
 
 /plan + TF -----------> nav_control.py -> /nav_cmd_vel -> base_control_router.py -> /cmd_vel
@@ -44,7 +46,7 @@ server/ros_bridge.py 订阅 ROS 状态并提供 Web 页面调试、建图、导�
 - `/odom_encoder`：底盘编码器里程计。
 - `/odom`：EKF 融合里程计。
 - `/map`：SLAM 输出占据栅格。
-- `/goal_pose`：导航目标。
+- `/goal_pose`：导航目标，由 RViz 或 `nav_voice_bridge.py` 发布。
 - `/plan`：自研规划器输出路径。
 - `/cmd_vel`：底盘速度指令。
 
@@ -339,17 +341,41 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 - 订阅 `/map` 和 `/goal_pose`。
 - 通过 TF 查询当前 `map -> base_link`。
-- 将 OccupancyGrid 转成可碰撞检测的栅格，并按真实矩形车体足迹采样。
-- 使用离散航向的 SE2 A* 搜索路径，比单纯二维栅格更能约束车体朝向和转弯。
+- 仅在真正需要规划时处理当前最新 OccupancyGrid，生成膨胀障碍栅格，避免 `/map` 高频更新造成持续负载。
+- 默认使用快速 2D A* 在膨胀栅格上规划，并按路径切线补齐 yaw。
+- 保留离散航向 SE2 A* 作为可选模式或 fallback，用真实矩形车体足迹做更精细的碰撞检查。
 - 规划结果发布为 `/plan`，类型为 `nav_msgs/Path`。
-- 支持目标变化、偏离路径触发重规划、路径 shortcut 平滑和路径点重采样。
+- 支持目标变化、失败目标在地图更新后重试、偏离路径触发重规划、路径 shortcut 平滑和路径点重采样。
 
 开发入口：
 
 - 车体尺寸、膨胀、安全边距、搜索上限：`config/path_plan.yaml`。
-- A*、足迹碰撞、路径平滑：`scripts/control/nav_path_plan.py`。
+- 调度、地图处理和路径发布：`scripts/control/nav_path_plan.py`。
+- 快速 2D 规划：`scripts/control/path_planning/fast2d.py`。
+- 可选 SE2 规划：`scripts/control/path_planning/se2.py`。
 
-### 3.8 路径跟踪与导航控制模块
+### 3.8 地点导航桥接模块
+
+相关文件：
+
+- `scripts/control/nav_voice_bridge.py`
+- `config/nav.yaml`
+- `maps/<map>/<map>.locations.yaml`
+
+原理：
+
+- 订阅 `/nav_voice_bridge/voice_command`，消息内容是地点名称。
+- 从当前地图的 `.locations.yaml` 查找地点坐标和朝向。
+- 发布 `geometry_msgs/PoseStamped` 到 `/goal_pose`，交给 `nav_path_plan.py` 规划。
+- 发布 `/nav_voice_bridge/status` 反馈地点是否命中；该状态不表示最终到达。
+
+开发入口：
+
+- 实机启动时使用 `ros2 launch finav nav.launch.py use_nav_bridge:=true`。
+- 手动测试地点导航时发布 `/nav_voice_bridge/voice_command`。
+- 不再保留单独的 `nav_to_location.py` 入口；地点导航统一通过 `nav_voice_bridge.py`。
+
+### 3.9 路径跟踪与导航控制模块
 
 相关文件：
 
@@ -369,7 +395,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - 线速度、角速度、Pure Pursuit 预瞄距离、到点阈值：`config/nav.yaml`。
 - 控制状态机、前瞻点和角速度计算：`scripts/control/nav_control.py`。
 
-### 3.9 Web 调试后台
+### 3.10 Web 调试后台
 
 相关文件：
 
@@ -401,7 +427,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - 修改启动/清理逻辑：`server/process_manager.py`。
 - 修改页面和交互：`server/web/`。
 
-### 3.10 仿真模块
+### 3.11 仿真模块
 
 相关文件：
 

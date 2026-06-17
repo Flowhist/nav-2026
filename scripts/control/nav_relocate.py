@@ -27,11 +27,17 @@ MAP_ANNOTATE_DIR = Path(__file__).resolve().parents[1] / "map_annotate"
 if str(MAP_ANNOTATE_DIR) not in sys.path:
     sys.path.insert(0, str(MAP_ANNOTATE_DIR))
 
-from nav_goal_utils import set_yaw_orientation
 from map_utils import detect_running_map_file, resolve_maps_dir
 
 
 Pose = Tuple[float, float, float]
+
+
+def set_yaw_orientation(orientation, yaw_rad: float) -> None:
+    orientation.x = 0.0
+    orientation.y = 0.0
+    orientation.z = math.sin(yaw_rad * 0.5)
+    orientation.w = math.cos(yaw_rad * 0.5)
 
 
 def _parse_simple_yaml(path: Path) -> Dict[str, object]:

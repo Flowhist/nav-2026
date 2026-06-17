@@ -2,6 +2,7 @@
 
 import heapq
 import math
+import time
 from typing import Dict, List, Optional, Set, Tuple
 
 GridIndex = Tuple[int, int]
@@ -111,7 +112,10 @@ def grid_astar(planner, start: GridIndex, goal: GridIndex) -> List[GridIndex]:
         (1, -1, math.sqrt(2.0)), (1, 1, math.sqrt(2.0)),
     ]
     expansions = 0
+    deadline = time.monotonic() + float(getattr(planner, "max_planning_time_s", 1.5))
     while open_heap:
+        if time.monotonic() > deadline:
+            return []
         _, g, current = heapq.heappop(open_heap)
         if current in closed:
             continue
@@ -119,6 +123,8 @@ def grid_astar(planner, start: GridIndex, goal: GridIndex) -> List[GridIndex]:
             return reconstruct_grid_path(parent, current)
         closed.add(current)
         expansions += 1
+        if hasattr(planner, "plan_stats"):
+            planner.plan_stats["expansions"] = expansions
         if expansions > getattr(planner, "search_corridor_max_expansions", 200000):
             return []
         for dx, dy, cost in neighbors:

@@ -16,7 +16,7 @@ nav_control:
     replan_pause_s: 0.20
 
     # ==================== 速度 ====================
-    linear_speed_mps:          0.20   # 直行最大线速 (m/s)
+    linear_speed_mps:          0.35   # 直行最大线速 (m/s)
 
     # ROTATE 模式角速上限（PD 控制原地旋转）
     angular_speed_degps:       20.0

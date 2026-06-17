@@ -24,8 +24,25 @@ MAP_ANNOTATE_DIR = Path(__file__).resolve().parents[1] / "map_annotate"
 if str(MAP_ANNOTATE_DIR) not in sys.path:
     sys.path.insert(0, str(MAP_ANNOTATE_DIR))
 
-from nav_goal_utils import make_map_goal
 from map_utils import detect_running_map_file, load_locations, resolve_maps_dir
+
+
+def set_yaw_orientation(orientation, yaw_rad: float) -> None:
+    orientation.x = 0.0
+    orientation.y = 0.0
+    orientation.z = math.sin(yaw_rad * 0.5)
+    orientation.w = math.cos(yaw_rad * 0.5)
+
+
+def make_map_goal(clock, x: float, y: float, yaw_rad: float, frame_id: str = "map") -> PoseStamped:
+    msg = PoseStamped()
+    msg.header.stamp = clock.now().to_msg()
+    msg.header.frame_id = frame_id
+    msg.pose.position.x = float(x)
+    msg.pose.position.y = float(y)
+    msg.pose.position.z = 0.0
+    set_yaw_orientation(msg.pose.orientation, yaw_rad)
+    return msg
 
 
 class NavBridge(Node):

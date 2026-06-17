@@ -1,35 +1,45 @@
 relocate:
   ros__parameters:
+    # 输入/输出话题与坐标系
     scan_topic: /scan
     initialpose_topic: /initialpose
     map_frame: map
+    # 扫描采集：收集多帧后合并，点数越多越稳但越慢
     collect_scan_count: 5
     max_wait_scan_s: 12.0
     max_scan_points: 360
+    # 扫描点有效量程
     min_range_m: 0.10
     max_range_m: 12.0
+    # /scan 到 base_link 的外参；当前融合 scan 已在 base_link 下
     scan_to_base_x_m: 0.0
     scan_to_base_y_m: 0.0
     scan_to_base_yaw_deg: 0.0
+    # 粗搜索分辨率：步长越小越准但越慢
     coarse_xy_step_m: 0.25
     coarse_yaw_step_deg: 10.0
+    # 快速粗搜索：先稀疏筛选，再在候选附近细化
     enable_fast_coarse_search: true
     coarse_prefilter_xy_step_m: 0.50
     coarse_prefilter_top_k: 80
     coarse_refine_radius_m: 0.35
+    # 低置信 fallback：默认只在 fast 候选附近扩展，不直接全图重扫
     fallback_full_search: true
-    # 低置信fallback默认只在fast候选附近扩展，不直接全图重扫。
     fallback_limited_search: true
     fallback_limited_radius_m: 1.2
     fallback_limited_max_candidates: 8000
+    # 精搜索范围与分辨率，用于最终姿态微调
     fine_xy_radius_m: 0.30
     fine_xy_step_m: 0.05
     fine_yaw_radius_deg: 10.0
     fine_yaw_step_deg: 2.0
+    # 保留的候选数量
     top_k: 10
+    # 匹配评分参数：贴墙/点云偏移时可适当放宽 sigma 或阈值
     max_endpoint_dist_m: 0.55
     match_sigma_m: 0.16
     min_score: 0.40
     min_score_gap: 0.055
+    # 候选降采样与调试日志
     free_candidate_stride: 1
     debug: false
