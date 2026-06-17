@@ -30,8 +30,8 @@ def resolve_keyboard_command(key: str, speed: float, angular_speed: float) -> tu
         "d": (0.0, -angular_speed),
         "q": (speed, angular_speed),
         "e": (speed, -angular_speed),
-        "z": (-speed, angular_speed),
-        "c": (-speed, -angular_speed),
+        "c": (-speed, angular_speed),
+        "z": (-speed, -angular_speed),
         " ": (0.0, 0.0),
     }
     return mapping.get(key, (0.0, 0.0))
@@ -239,7 +239,7 @@ class BaseControlRouter(Node):
             self._warn_reset_required("nav ignored")
 
     def _handle_key(self, key: str):
-        if self._base_fault_active and key in ("w", "s", "a", "d", " "):
+        if self._base_fault_active and key in ("w", "s", "a", "d", "q", "e", "z", "c", " "):
             self._publish_stop()
             self.get_logger().warn("底盘故障未复位，忽略键盘控制")
             return
@@ -250,7 +250,7 @@ class BaseControlRouter(Node):
             return
         if not self._kb_enabled:
             return
-        if key in ("w", "s", "a", "d", " ") and self._joystick_stop_latched:
+        if key in ("w", "s", "a", "d", "q", "e", "z", "c", " ") and self._joystick_stop_latched:
             self._warn_reset_required("keyboard ignored")
             return
 
