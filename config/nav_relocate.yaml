@@ -5,7 +5,7 @@ relocate:
     initialpose_topic: /initialpose
     map_frame: map
     # 扫描采集：收集多帧后合并，点数越多越稳但越慢
-    collect_scan_count: 5
+    collect_scan_count: 4
     max_wait_scan_s: 12.0
     max_scan_points: 360
     # 扫描点有效量程
@@ -34,12 +34,12 @@ relocate:
     fine_yaw_radius_deg: 10.0
     fine_yaw_step_deg: 2.0
     # 保留的候选数量
-    top_k: 10
+    top_k: 5
     # 匹配评分参数：贴墙/点云偏移时可适当放宽 sigma 或阈值
     max_endpoint_dist_m: 0.55
     match_sigma_m: 0.16
     min_score: 0.40
-    min_score_gap: 0.055
+    min_score_gap: 0.001
     # 候选降采样与调试日志
     free_candidate_stride: 1
     debug: false

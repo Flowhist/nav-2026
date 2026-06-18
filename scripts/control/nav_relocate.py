@@ -187,7 +187,7 @@ class AutoLocalize(Node):
         self.declare_parameter("max_endpoint_dist_m", 0.55)
         self.declare_parameter("match_sigma_m", 0.16)
         self.declare_parameter("min_score", 0.40)
-        self.declare_parameter("min_score_gap", 0.055)
+        self.declare_parameter("min_score_gap", 0.001)
         self.declare_parameter("free_candidate_stride", 1)
         self.declare_parameter("debug", False)
 

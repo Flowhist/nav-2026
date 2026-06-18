@@ -209,7 +209,7 @@ ros2 topic echo /nav_voice_bridge/status
 模拟语音命令：
 
 ```bash
-ros2 topic pub --once /nav_voice_bridge/voice_command std_msgs/msg/String "{data: 'spot1'}"
+ros2 topic pub --once /nav_voice_bridge/voice_command std_msgs/msg/String "{data: '电梯口'}"
 ```
 
 确认目标点已发布：

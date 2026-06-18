@@ -30,7 +30,7 @@ from rclpy.qos import (
     QoSReliabilityPolicy,
 )
 from rclpy.time import Time
-from std_msgs.msg import Empty
+from std_msgs.msg import Empty, String
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from path_planning import fast2d as fast2d_planner
@@ -110,6 +110,7 @@ class PathPlanner(Node):
         self.declare_parameter("map_topic", "/map")
         self.declare_parameter("goal_topic", "/goal_pose")
         self.declare_parameter("path_topic", "/plan")
+        self.declare_parameter("nav_clear_reason_topic", "/nav_clear_reason")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("plan_rate_hz", 2.0)
@@ -154,6 +155,7 @@ class PathPlanner(Node):
         self.map_topic = str(self.get_parameter("map_topic").value)
         self.goal_topic = str(self.get_parameter("goal_topic").value)
         self.path_topic = str(self.get_parameter("path_topic").value)
+        self.nav_clear_reason_topic = str(self.get_parameter("nav_clear_reason_topic").value)
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.base_frame = str(self.get_parameter("base_frame").value)
         self.plan_rate_hz = float(self.get_parameter("plan_rate_hz").value)
@@ -262,6 +264,9 @@ class PathPlanner(Node):
         self.active_search_corridor: Optional[Set[GridIndex]] = None
         self._last_timing_log_mono = 0.0
         self._last_wait_log_mono = 0.0
+        self._last_nav_clear_reason = ""
+        self._last_nav_clear_reason_time = 0.0
+        self._nav_clear_reason_window_s = 1.0
         self._reset_plan_stats()
 
         self.path_pub = self.create_publisher(Path, self.path_topic, 10)
@@ -273,6 +278,9 @@ class PathPlanner(Node):
         )
         self.create_subscription(OccupancyGrid, self.map_topic, self._on_map, map_qos)
         self.create_subscription(PoseStamped, self.goal_topic, self._on_goal, 10)
+        self.create_subscription(
+            String, self.nav_clear_reason_topic, self._on_nav_clear_reason, 10
+        )
         self.create_subscription(Empty, "/nav_clear", self._on_nav_clear, 10)
 
         plan_period = 1.0 / max(self.plan_rate_hz, 0.5)
@@ -400,12 +408,28 @@ class PathPlanner(Node):
 
     def _on_nav_clear(self, _msg: Empty) -> None:
         """清空当前导航目标与路径状态。"""
+        reason = self._recent_nav_clear_reason()
         self.goal_pose_world = None
         self.goal_dirty = False
         self.plan_failed_for_current_goal = False
         self.last_plan_poses = []
         self._publish_path([], None)
-        self.get_logger().info("导航停止原因: 收到 /nav_clear，已清空目标和路径")
+        self.get_logger().info(
+            f"导航停止原因: 收到 /nav_clear，触发源={reason}，已清空目标和路径"
+        )
+
+    def _on_nav_clear_reason(self, msg: String) -> None:
+        self._last_nav_clear_reason = str(msg.data).strip()
+        self._last_nav_clear_reason_time = time.monotonic()
+
+    def _recent_nav_clear_reason(self, now: Optional[float] = None) -> str:
+        now = time.monotonic() if now is None else now
+        if (
+            self._last_nav_clear_reason
+            and now - self._last_nav_clear_reason_time <= self._nav_clear_reason_window_s
+        ):
+            return self._last_nav_clear_reason
+        return "unknown"
 
     def _handle_plan_failure(self, reason: str) -> None:
         """统一处理规划失败：清路径、复位标志并记录日志。"""

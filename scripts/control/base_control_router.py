@@ -37,6 +37,10 @@ def resolve_keyboard_command(key: str, speed: float, angular_speed: float) -> tu
     return mapping.get(key, (0.0, 0.0))
 
 
+def format_nav_clear_status(reason: str) -> str:
+    return f"nav_clear:{str(reason).strip() or 'unspecified'}"
+
+
 class Source(Enum):
     NONE = "none"
     JOYSTICK = "joystick"
@@ -62,6 +66,7 @@ class BaseControlRouter(Node):
         self.declare_parameter("web_cmd_vel_topic", "/web_cmd_vel")
         self.declare_parameter("nav_cmd_vel_topic", "/nav_cmd_vel")
         self.declare_parameter("nav_clear_topic", "/nav_clear")
+        self.declare_parameter("nav_clear_reason_topic", "/nav_clear_reason")
         self.declare_parameter("base_fault_topic", "/base_fault")
         self.declare_parameter("router_status_topic", "/base_control_router/status")
 
@@ -103,6 +108,9 @@ class BaseControlRouter(Node):
         self._cmd_pub = self.create_publisher(Twist, cmd_topic, cmd_qos)
         self._nav_clear_pub = self.create_publisher(
             Empty, str(self.get_parameter("nav_clear_topic").value), 10
+        )
+        self._nav_clear_reason_pub = self.create_publisher(
+            String, str(self.get_parameter("nav_clear_reason_topic").value), 10
         )
         self._status_pub = self.create_publisher(
             String, str(self.get_parameter("router_status_topic").value), 10
@@ -160,13 +168,22 @@ class BaseControlRouter(Node):
         msg.data = text
         self._status_pub.publish(msg)
 
-    def _clear_nav(self):
+    def _publish_nav_clear_reason(self, reason: str):
+        msg = String()
+        msg.data = str(reason).strip() or "unspecified"
+        self._nav_clear_reason_pub.publish(msg)
+
+    def _clear_nav(self, reason: str = "unspecified"):
         now = time.monotonic()
         if now - self._last_nav_clear_time >= 0.2:
+            self._publish_nav_clear_reason(reason)
             self._nav_clear_pub.publish(Empty())
             self._nav_cmd = Twist()
             self._nav_time = 0.0
             self._last_nav_clear_time = now
+            text = format_nav_clear_status(reason)
+            self._publish_status(text)
+            self.get_logger().warn(f"发布 /nav_clear，原因: {reason}")
 
     def _warn_reset_required(self, reason: str):
         now = time.monotonic()
@@ -175,7 +192,7 @@ class BaseControlRouter(Node):
             self._publish_status(f"joystick_reset_required:{reason}")
             self._last_lock_msg_time = now
 
-    def _clear_control_state(self, *, clear_nav: bool = True):
+    def _clear_control_state(self, *, clear_nav: bool = True, nav_clear_reason: str = "control_state_clear"):
         self._source = Source.NONE
         self._joystick_stop_latched = False
         self._kb_linear = 0.0
@@ -187,7 +204,7 @@ class BaseControlRouter(Node):
         self._js_cmd = Twist()
         self._js_time = 0.0
         if clear_nav:
-            self._clear_nav()
+            self._clear_nav(nav_clear_reason)
         self._publish_stop()
 
     def _on_base_fault(self, msg: Bool):
@@ -197,11 +214,11 @@ class BaseControlRouter(Node):
 
         self._base_fault_active = active
         if active:
-            self._clear_control_state(clear_nav=True)
+            self._clear_control_state(clear_nav=True, nav_clear_reason="base_fault_active")
             self._publish_status("base_fault_active")
             self.get_logger().error("底盘急停/STO 或控制故障，已清空控制指令并保持停车")
         else:
-            self._clear_control_state(clear_nav=True)
+            self._clear_control_state(clear_nav=True, nav_clear_reason="base_fault_cleared")
             self._publish_status("base_fault_cleared")
             self.get_logger().info("底盘故障已复位，等待新的控制指令")
 
@@ -213,7 +230,7 @@ class BaseControlRouter(Node):
         self._web_cmd = Twist()
         self._web_time = 0.0
         if interrupted == Source.NAV:
-            self._clear_nav()
+            self._clear_nav("joystick_interrupt_nav")
         self._publish_stop()
         self._publish_status(f"joystick_stop:{interrupted.value}")
         self.get_logger().warn(f"摇杆抢停，已中断 {interrupted.value}，请先复位摇杆～")
@@ -235,7 +252,7 @@ class BaseControlRouter(Node):
         self._nav_cmd = msg
         self._nav_time = time.monotonic()
         if self._joystick_stop_latched:
-            self._clear_nav()
+            self._clear_nav("nav_cmd_ignored_while_joystick_stop_latched")
             self._warn_reset_required("nav ignored")
 
     def _handle_key(self, key: str):

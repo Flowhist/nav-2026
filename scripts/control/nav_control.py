@@ -26,7 +26,7 @@ from typing import List, Optional, Tuple
 import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Path
-from std_msgs.msg import Empty
+from std_msgs.msg import Empty, String
 from rclpy.node import Node
 from rclpy.time import Time
 from tf2_ros import Buffer, TransformException, TransformListener
@@ -46,6 +46,7 @@ class ChassisControlNav(Node):
         # 参数声明
         self.declare_parameter("output_cmd_vel_topic", "/nav_cmd_vel")
         self.declare_parameter("path_topic", "/plan")
+        self.declare_parameter("nav_clear_reason_topic", "/nav_clear_reason")
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("accept_replanned_path", True)
@@ -75,6 +76,7 @@ class ChassisControlNav(Node):
         # 读取参数
         self.output_topic = str(self.get_parameter("output_cmd_vel_topic").value)
         self.path_topic = str(self.get_parameter("path_topic").value)
+        self.nav_clear_reason_topic = str(self.get_parameter("nav_clear_reason_topic").value)
         self.base_frame = str(self.get_parameter("base_frame").value)
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.accept_replanned_path = bool(
@@ -125,10 +127,16 @@ class ChassisControlNav(Node):
         self._js_active = False
         self._cmd_msg = Twist()
         self._last_wait_log_mono = 0.0
+        self._last_nav_clear_reason = ""
+        self._last_nav_clear_reason_time = 0.0
+        self._nav_clear_reason_window_s = 1.0
 
         # 订阅与发布
         self.pub = self.create_publisher(Twist, self.output_topic, 10)
         self.create_subscription(Path, self.path_topic, self._on_path, 10)  # 订阅 /path
+        self.create_subscription(
+            String, self.nav_clear_reason_topic, self._on_nav_clear_reason, 10
+        )
         self.create_subscription(Empty, "/nav_clear", self._on_nav_clear, 10)
 
         self.tf_buffer = Buffer()
@@ -175,6 +183,19 @@ class ChassisControlNav(Node):
             return
         self._last_wait_log_mono = now
         self.get_logger().warn(reason)
+
+    def _on_nav_clear_reason(self, msg: String):
+        self._last_nav_clear_reason = str(msg.data).strip()
+        self._last_nav_clear_reason_time = time.monotonic()
+
+    def _recent_nav_clear_reason(self, now: Optional[float] = None) -> str:
+        now = time.monotonic() if now is None else now
+        if (
+            self._last_nav_clear_reason
+            and now - self._last_nav_clear_reason_time <= self._nav_clear_reason_window_s
+        ):
+            return self._last_nav_clear_reason
+        return "unknown"
 
     def _reset(self):
         """重置路径跟踪状态机与历史误差缓存。"""
@@ -277,9 +298,12 @@ class ChassisControlNav(Node):
 
     def _on_nav_clear(self, _msg: Empty):
         """处理导航清空命令并复位控制状态。"""
+        reason = self._recent_nav_clear_reason()
         self._stop()
         self._reset()
-        self.get_logger().info("导航停止原因: 收到 /nav_clear，已急停并重置状态")
+        self.get_logger().info(
+            f"导航停止原因: 收到 /nav_clear，触发源={reason}，已急停并重置状态"
+        )
 
     # === 纯追踪目标点 =========================================================
 
