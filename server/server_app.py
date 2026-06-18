@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
-from map_utils import list_saved_maps, load_map_preview
+from map_utils import list_saved_maps, load_map_preview, load_map_locations
 from process_manager import RuntimeManager
 from ros_bridge import RosBridge
 from state_store import StateStore
@@ -91,6 +91,16 @@ class ServerApp:
                 if path == "/api/maps":
                     self._json(HTTPStatus.OK, {"maps": list_saved_maps(app.maps_dir)})
                     return
+                if path.startswith("/api/maps/") and path.endswith("/locations"):
+                    name = unquote(path.removeprefix("/api/maps/").removesuffix("/locations")).strip("/")
+                    if app._resolve_map_dir(name) is None:
+                        self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid map name"})
+                        return
+                    self._json(
+                        HTTPStatus.OK,
+                        {"map_file": name, "locations": load_map_locations(app.maps_dir, name)},
+                    )
+                    return
                 if path.startswith("/api/maps/"):
                     name = unquote(path.removeprefix("/api/maps/")).strip("/")
                     payload = load_map_preview(app.maps_dir, name)
@@ -152,6 +162,26 @@ class ServerApp:
                 if path == "/api/nav/cancel":
                     app.bridge.command({"type": "cancel_nav"})
                     self._json(HTTPStatus.OK, {"ok": True})
+                    return
+
+                if path == "/api/nav/relocate":
+                    map_file = body.get("map_file", "")
+                    params = {"map_file": map_file} if isinstance(map_file, str) and map_file.strip() else {}
+                    try:
+                        runtime = app.runtime.run_relocate(params=params)
+                    except RuntimeError as exc:
+                        self._json(HTTPStatus.CONFLICT, {"ok": False, "error": str(exc)})
+                        return
+                    self._json(HTTPStatus.OK, {"ok": True, "runtime": runtime})
+                    return
+
+                if path == "/api/nav/location":
+                    name = body.get("name", "")
+                    if not isinstance(name, str) or not name.strip():
+                        self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "name is required"})
+                        return
+                    app.bridge.command({"type": "nav_to_location", "name": name.strip()})
+                    self._json(HTTPStatus.OK, {"ok": True, "name": name.strip()})
                     return
 
                 if path == "/api/teleop/cmd_vel":

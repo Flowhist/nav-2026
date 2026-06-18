@@ -102,6 +102,9 @@ class RuntimeManager:
         if mode not in {"mapping", "navigation"}:
             raise ValueError(f"unsupported runtime mode: {mode}")
 
+        if mode == "navigation":
+            self._stop_relocate()
+
         proc = None
         with self._lock:
             proc = self._procs.get(mode)
@@ -158,10 +161,84 @@ class RuntimeManager:
     def stop_all(self) -> Dict[str, object]:
         self.stop("mapping")
         self.stop("navigation")
+        self._stop_relocate()
         return self.snapshot()
 
+    def run_relocate(self, params: Dict[str, object] | None = None) -> Dict[str, object]:
+        """Run a one-shot global relocation (ros2 run finav nav_relocate.py).
+
+        Relocate is not a long-running stack: nav_relocate.py auto-detects the
+        running map, samples /scan, publishes /initialpose, then exits on its own.
+        It therefore requires the navigation stack to be up.
+        """
+        nav = self._status_for("navigation")
+        if not nav["running"] or nav["stopping"]:
+            raise RuntimeError("navigation must be running before relocate")
+
+        with self._lock:
+            proc = self._procs.get("relocate")
+            if proc and proc.poll() is None:
+                self.state_store.add_event("info", "relocate already running")
+                return self._snapshot_unlocked()
+
+            log_path = self.runtime_dir / "relocate.log"
+            log_handle = log_path.open("ab")
+            command = self._build_run_command("nav_relocate.py", params=params)
+            proc = subprocess.Popen(
+                ["bash", "-lc", command],
+                cwd=str(self.repo_dir),
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            self._procs["relocate"] = proc
+            self._meta["relocate"] = {
+                "stopping": False,
+                "started_at": time.time(),
+                "pid": proc.pid,
+                "log_path": str(log_path),
+                "params": dict(params or {}),
+                "log_handle": log_handle,
+            }
+            self._sync_status()
+
+        self.state_store.add_event(
+            "info",
+            "relocate start requested",
+            {"pid": proc.pid, "params": dict(params or {})},
+        )
+        watcher = threading.Thread(target=self._watch, args=("relocate", proc), daemon=True)
+        watcher.start()
+        return self.snapshot()
+
+    def _stop_relocate(self) -> None:
+        proc = None
+        with self._lock:
+            proc = self._procs.get("relocate")
+            if proc is None or proc.poll() is not None:
+                self._close_log_handle("relocate")
+                self._procs.pop("relocate", None)
+                meta = self._meta.setdefault("relocate", {})
+                meta["stopping"] = False
+                meta["pid"] = None
+                self._sync_status()
+                return
+            meta = self._meta.setdefault("relocate", {})
+            meta["stopping"] = True
+            self._sync_status()
+
+        if proc and proc.poll() is None:
+            self._terminate_process_group(proc)
+        with self._lock:
+            self._close_log_handle("relocate")
+            self._procs.pop("relocate", None)
+            meta = self._meta.setdefault("relocate", {})
+            meta["stopping"] = False
+            meta["pid"] = None
+            self._sync_status()
+
     def read_log(self, mode: str, tail: int = 300) -> Dict[str, object]:
-        if mode not in {"mapping", "navigation"}:
+        if mode not in {"mapping", "navigation", "relocate"}:
             raise ValueError(f"unsupported runtime mode: {mode}")
 
         log_path = self.runtime_dir / f"{mode}.log"
@@ -195,7 +272,7 @@ class RuntimeManager:
         return {"mode": mode, "lines": lines, "path": str(log_path), "updated_at": stat.st_mtime}
 
     def clear_log(self, mode: str) -> Dict[str, object]:
-        if mode not in {"mapping", "navigation"}:
+        if mode not in {"mapping", "navigation", "relocate"}:
             raise ValueError(f"unsupported runtime mode: {mode}")
 
         log_path = self.runtime_dir / f"{mode}.log"
@@ -206,7 +283,7 @@ class RuntimeManager:
         self.state_store.add_event("info", f"{mode} log cleared")
         return {"mode": mode, "path": str(log_path), "ok": True}
 
-    def _build_launch_command(self, launch_file: str, launch_args: Dict[str, object] | None = None) -> str:
+    def _build_ros_env_parts(self) -> list[str]:
         ros_setup = "/opt/ros/humble/setup.bash"
         local_setup = self.workspace_dir / "install" / "local_setup.bash"
         setup = self.workspace_dir / "install" / "setup.bash"
@@ -225,12 +302,30 @@ class RuntimeManager:
         parts.append(f"export FINAV_MAPS_DIR='{self.repo_dir / 'maps'}'")
         if fastdds.exists():
             parts.append(f"export FASTRTPS_DEFAULT_PROFILES_FILE='{fastdds}'")
+        return parts
+
+    def _build_launch_command(self, launch_file: str, launch_args: Dict[str, object] | None = None) -> str:
+        parts = self._build_ros_env_parts()
         launch_cmd = ["ros2", "launch", "finav", launch_file]
         for key, value in (launch_args or {}).items():
             if value is None:
                 continue
             launch_cmd.append(f"{key}:={value}")
         parts.append("exec " + " ".join(shlex.quote(part) for part in launch_cmd))
+        return " && ".join(parts)
+
+    def _build_run_command(self, executable: str, params: Dict[str, object] | None = None) -> str:
+        parts = self._build_ros_env_parts()
+        run_cmd = ["ros2", "run", "finav", executable]
+        ros_args: list[str] = []
+        for key, value in (params or {}).items():
+            if value is None:
+                continue
+            ros_args.extend(["-p", f"{key}:={value}"])
+        if ros_args:
+            run_cmd.append("--ros-args")
+            run_cmd.extend(ros_args)
+        parts.append("exec " + " ".join(shlex.quote(part) for part in run_cmd))
         return " && ".join(parts)
 
     def _status_for(self, mode: str) -> Dict[str, object]:
@@ -249,11 +344,13 @@ class RuntimeManager:
     def _sync_status(self) -> None:
         mapping = self._status_for("mapping")
         navigation = self._status_for("navigation")
+        relocate = self._status_for("relocate")
         self.state_store.update_status(
             {
                 "runtime": {
                     "mapping": mapping,
                     "navigation": navigation,
+                    "relocate": relocate,
                     "busy": bool(mapping["stopping"] or navigation["stopping"]),
                 }
             }
@@ -263,6 +360,7 @@ class RuntimeManager:
         data = {
             "mapping": self._status_for("mapping"),
             "navigation": self._status_for("navigation"),
+            "relocate": self._status_for("relocate"),
         }
         data["busy"] = bool(data["mapping"]["stopping"] or data["navigation"]["stopping"])
         return data

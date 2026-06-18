@@ -20,6 +20,8 @@ const appState = {
   previewMap: null,
   previewMapName: "",
   navMapName: "",
+  navLocations: [],
+  navLocationsFor: "",
   dockView: "events",
   dockAutoFollow: {
     events: true,

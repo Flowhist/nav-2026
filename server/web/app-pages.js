@@ -127,9 +127,57 @@ function renderNavMapPicker() {
       appState.navMapName = item.name;
       renderNavMapPicker();
       toggleNavMapMenu(false);
+      loadNavLocations().catch(console.error);
     });
     box.appendChild(btn);
   });
+}
+
+async function loadNavLocations(force = false) {
+  const map = appState.navMapName;
+  if (!map) {
+    appState.navLocations = [];
+    appState.navLocationsFor = "";
+    renderNavLocationList();
+    return;
+  }
+  if (!force && appState.navLocationsFor === map) {
+    renderNavLocationList();
+    return;
+  }
+  try {
+    const data = await api(`/api/maps/${encodeURIComponent(map)}/locations`);
+    appState.navLocations = Array.isArray(data.locations) ? data.locations : [];
+    appState.navLocationsFor = map;
+  } catch (err) {
+    console.error(err);
+    appState.navLocations = [];
+    appState.navLocationsFor = map;
+  }
+  renderNavLocationList();
+}
+
+function renderNavLocationList() {
+  const list = $("navLocationList");
+  if (list) {
+    list.innerHTML = "";
+    appState.navLocations.forEach((loc) => {
+      const opt = document.createElement("option");
+      opt.value = loc.name;
+      list.appendChild(opt);
+    });
+  }
+  const hint = $("navLocationHint");
+  if (hint) {
+    if (!appState.navMapName) {
+      hint.textContent = "请先选择导航地图。";
+    } else if (!appState.navLocations.length) {
+      hint.textContent = `地图“${appState.navMapName}”未标注地点，可直接输入地名尝试下发。`;
+    } else {
+      const names = appState.navLocations.map((loc) => loc.name).join("、");
+      hint.textContent = `可用地点：${names}`;
+    }
+  }
 }
 
 function formatFileSize(bytes) {
@@ -170,9 +218,23 @@ function renderRuntimeControls() {
   $("btnArmInit").disabled = !navCommandsEnabled;
   $("btnArmGoal").disabled = !navCommandsEnabled;
   $("btnCancelNav").disabled = !navCommandsEnabled;
+
+  const relocate = getRuntime("relocate");
+  const relocateBusy = relocate.running || relocate.stopping;
+  const btnRelocate = $("btnRelocate");
+  if (btnRelocate) {
+    btnRelocate.disabled = !navCommandsEnabled || relocateBusy;
+    btnRelocate.textContent = relocateBusy ? "重定位中…" : "重定位";
+    btnRelocate.classList.toggle("active", relocateBusy);
+  }
   if (!navCommandsEnabled && appState.navPlacementMode && typeof setNavPlacementMode === "function") {
     setNavPlacementMode(null);
   }
+
+  const navLocationInput = $("navLocationInput");
+  const btnNavLocation = $("btnNavLocation");
+  if (navLocationInput) navLocationInput.disabled = !navCommandsEnabled;
+  if (btnNavLocation) btnNavLocation.disabled = !navCommandsEnabled || !navLocationInput.value.trim();
 }
 
 function splitYamlComment(line) {
@@ -407,6 +469,7 @@ async function loadSavedMaps() {
     }
     renderMapList();
     renderNavMapPicker();
+    loadNavLocations().catch(console.error);
     if (appState.previewMapName) {
       await loadPreviewMap(appState.previewMapName, false);
     }

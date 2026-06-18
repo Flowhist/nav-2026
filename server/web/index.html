@@ -176,6 +176,15 @@
                 <button id="btnStartNavigation" class="primary wide">开始导航</button>
                 <button id="btnStopNavigation" class="danger wide">结束导航</button>
               </div>
+              <div class="nav-location">
+                <label for="navLocationInput">按地名导航</label>
+                <div class="nav-location-row">
+                  <input id="navLocationInput" type="text" list="navLocationList" placeholder="输入地名，如 spot1" autocomplete="off" />
+                  <button id="btnNavLocation" class="primary" type="button">前往</button>
+                </div>
+                <datalist id="navLocationList"></datalist>
+                <p id="navLocationHint" class="subtle">通过 voice_command 下发地点，需要导航运行中且地图已标注地点。</p>
+              </div>
             </section>
 
             <section class="glass panel">
@@ -183,9 +192,10 @@
               <div class="stack">
                 <button id="btnArmInit" class="wide">设置初始位姿</button>
                 <button id="btnArmGoal" class="primary wide">设置目的地</button>
+                <button id="btnRelocate" class="wide">重定位</button>
                 <button id="btnCancelNav" class="danger wide">停止 / 清空</button>
               </div>
-              <p class="subtle">进入设置模式后，在地图上按下并拖出方向，松开后立即发布。</p>
+              <p class="subtle">进入设置模式后，在地图上按下并拖出方向，松开后立即发布。重定位会根据当前地图与雷达自动估计位姿。</p>
             </section>
           </aside>
         </div>

@@ -419,12 +419,45 @@ function bind() {
 
   $("btnArmInit").addEventListener("click", () => setNavPlacementMode(appState.navPlacementMode === "initial" ? null : "initial"));
   $("btnArmGoal").addEventListener("click", () => setNavPlacementMode(appState.navPlacementMode === "goal" ? null : "goal"));
+  $("btnRelocate").addEventListener("click", async () => {
+    setNavPlacementMode(null);
+    appState.navDrag = null;
+    try {
+      const body = appState.navMapName ? { map_file: appState.navMapName } : {};
+      const data = await api("/api/nav/relocate", "POST", body);
+      if (data.runtime) {
+        appState.status = { ...(appState.status || {}), runtime: data.runtime };
+        renderRuntimeControls();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
   $("btnCancelNav").addEventListener("click", async () => {
     setNavPlacementMode(null);
     appState.navDrag = null;
     await api("/api/nav/cancel", "POST", {});
     renderLiveCanvases();
   });
+
+  const sendNavLocation = async () => {
+    const input = $("navLocationInput");
+    const name = (input.value || "").trim();
+    if (!name) return;
+    try {
+      await api("/api/nav/location", "POST", { name });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+  $("btnNavLocation").addEventListener("click", () => sendNavLocation());
+  $("navLocationInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      sendNavLocation();
+    }
+  });
+  $("navLocationInput").addEventListener("input", () => renderRuntimeControls());
 
   $("statusToggle").addEventListener("click", () => {
     const dock = $("statusDock");

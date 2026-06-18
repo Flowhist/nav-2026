@@ -113,7 +113,7 @@ class _BridgeNode:
             HistoryPolicy,
         )
         from sensor_msgs.msg import LaserScan
-        from std_msgs.msg import Bool, Empty
+        from std_msgs.msg import Bool, Empty, String
         from tf2_msgs.msg import TFMessage
         from tf2_ros import Buffer, TransformListener
 
@@ -125,6 +125,7 @@ class _BridgeNode:
         self.PoseWithCovarianceStamped = PoseWithCovarianceStamped
         self.Twist = Twist
         self.Empty = Empty
+        self.String = String
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -133,6 +134,7 @@ class _BridgeNode:
         self.pub_web_cmd = self.create_publisher(Twist, "/web_cmd_vel", 10)
         self.pub_initial = self.create_publisher(PoseWithCovarianceStamped, "/initialpose", 10)
         self.pub_nav_clear = self.create_publisher(Empty, "/nav_clear", 10)
+        self.pub_voice = self.create_publisher(String, "/nav_voice_bridge/voice_command", 10)
 
         map_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
@@ -153,6 +155,9 @@ class _BridgeNode:
 
         self.create_subscription(Bool, "/js_state", lambda m: _BridgeNode._on_js_state(self, m), 10)
         self.create_subscription(TFMessage, "/tf", lambda m: _BridgeNode._on_tf(self, m), 50)
+        self.create_subscription(
+            String, "/nav_voice_bridge/status", lambda m: _BridgeNode._on_voice_status(self, m), 10
+        )
 
         self._counts = {
             "odom": 0,
@@ -436,6 +441,25 @@ class _BridgeNode:
             self.state_store.update_status({"robot": {"goal_pose": None, "plan": {"points": 0, "length_m": 0.0, "updated_at": time.time()}}})
             self.state_store.update_scene({"goal_pose": None, "plan": {"points": 0, "length_m": 0.0, "points_xy": [], "updated_at": time.time()}})
             _BridgeNode._event(self, "info", "navigation state cleared and robot stopped")
+
+        elif ctype == "nav_to_location":
+            name = str(cmd.get("name", "")).strip()
+            if not name:
+                _BridgeNode._event(self, "warn", "nav_to_location ignored: empty name")
+                return
+            msg = self.String()
+            msg.data = name
+            self.pub_voice.publish(msg)
+            self.state_store.update_status({"nav_voice": {"command": name, "updated_at": time.time()}})
+            _BridgeNode._event(self, "info", "location command published", {"name": name})
+
+    @staticmethod
+    def _on_voice_status(self: Any, msg: Any) -> None:
+        text = str(getattr(msg, "data", "")).strip()
+        if not text:
+            return
+        self.state_store.update_status({"nav_voice": {"status": text, "updated_at": time.time()}})
+        _BridgeNode._event(self, "info", "nav_voice status", {"status": text})
 
     @staticmethod
     def _publish_metrics(self: Any) -> None:

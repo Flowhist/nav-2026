@@ -528,6 +528,33 @@ canvas {
   gap: 12px;
 }
 
+.nav-location {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.nav-location > label {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.nav-location-row {
+  display: flex;
+  gap: 8px;
+}
+
+.nav-location-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-location-row button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .panel,
 .preview-side {
   padding: 20px;

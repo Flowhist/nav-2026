@@ -144,3 +144,65 @@ def list_saved_maps(map_dir: Path) -> List[Dict[str, object]]:
         )
 
     return items
+
+
+def load_map_locations(map_dir: Path, name: str) -> List[Dict[str, object]]:
+    """Read location names + coords from <map>/<map>.locations.yaml.
+
+    Returns a list of {name, x, y, yaw_deg}. Parsing is intentionally simple
+    (flat-key YAML), matching the rest of this module which avoids a yaml dep.
+    """
+    loc_path = map_dir / name / f"{name}.locations.yaml"
+    if not loc_path.exists():
+        return []
+
+    results: List[Dict[str, object]] = []
+    current: Optional[str] = None
+    fields: Dict[str, float] = {}
+
+    def _flush() -> None:
+        if current is not None and "x" in fields and "y" in fields:
+            results.append(
+                {
+                    "name": current,
+                    "x": float(fields["x"]),
+                    "y": float(fields["y"]),
+                    "yaw_deg": float(fields.get("yaw_deg", 0.0)),
+                }
+            )
+
+    in_locations = False
+    for raw_line in loc_path.read_text(encoding="utf-8").splitlines():
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        line = raw_line.strip()
+
+        if indent == 0:
+            in_locations = line.rstrip(":") == "locations" or line.startswith("locations:")
+            continue
+        if not in_locations:
+            continue
+
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+
+        # Location header lines (e.g. "spot1:") sit one level under "locations:".
+        if not value:
+            _flush()
+            current = key
+            fields = {}
+            continue
+
+        if current is not None:
+            try:
+                fields[key] = float(value.strip("'\""))
+            except ValueError:
+                pass
+
+    _flush()
+    return results
+
