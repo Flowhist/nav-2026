@@ -210,6 +210,20 @@
             </div>
             <div id="mapList" class="map-list"></div>
             <button id="btnDeletePreviewMap" class="danger wide" disabled>删除所选地图</button>
+            <div class="location-editor">
+              <div class="panel-head">
+                <h3>地点标注</h3>
+                <span id="previewLocationMeta" class="subtle">未选择地图</span>
+              </div>
+              <div class="location-actions">
+                <button id="btnAddPreviewLocation" disabled>添加地点</button>
+                <button id="btnCancelPreviewLocation" disabled>取消</button>
+              </div>
+              <div id="previewLocationList" class="location-list"></div>
+              <div class="location-actions single">
+                <button id="btnDeletePreviewLocation" class="danger" disabled>删除选中</button>
+              </div>
+            </div>
           </aside>
           <section class="preview-main glass">
             <div class="pane-head">
@@ -226,7 +240,7 @@
                   </svg>
                 </button>
                 <div id="previewHelp" class="map-help hidden">
-                  地图预览同样支持滚轮缩放、左键平移和右键旋转。
+                  地图预览支持滚轮缩放、左键平移和右键旋转。添加地点时左键拖拽设定朝向，松开后输入名称。
                 </div>
               </div>
             </div>
@@ -247,6 +261,11 @@
                 <p class="subtle">点击卡片查看并直接修改 `config/` 下的 YAML 参数</p>
               </div>
               <button id="btnRefreshConfigs">刷新</button>
+            </div>
+            <div id="configApplyPanel" class="config-apply-panel hidden">
+              <strong>重启生效</strong>
+              <div id="configRestartActions" class="config-restart-actions"></div>
+              <span id="configRestartNotice" class="save-notice hidden"></span>
             </div>
             <div id="configCards" class="config-cards"></div>
           </section>
@@ -337,6 +356,24 @@
     <div class="blocking-card">
       <div class="blocking-spinner"></div>
       <p>正在结束进程……</p>
+    </div>
+  </div>
+
+  <div id="annotationDialog" class="annotation-dialog hidden" aria-hidden="true">
+    <div class="annotation-card" role="dialog" aria-modal="true" aria-labelledby="annotationDialogTitle">
+      <div class="annotation-head">
+        <h3 id="annotationDialogTitle">地点标注</h3>
+        <p id="annotationDialogMeta" class="subtle"></p>
+      </div>
+      <label id="annotationNameLabel" class="annotation-name-field">
+        <span>地点名称</span>
+        <input id="annotationNameInput" type="text" autocomplete="off" />
+      </label>
+      <p id="annotationDialogMessage" class="annotation-message subtle"></p>
+      <div class="annotation-actions">
+        <button id="annotationDialogCancel" type="button">取消</button>
+        <button id="annotationDialogConfirm" class="primary" type="button">确定</button>
+      </div>
     </div>
   </div>
 

@@ -41,10 +41,23 @@ def _load_joy_config(config_path: str):
     return defaults
 
 
+def _resolve_config_dir(pkg_share: str) -> str:
+    repo_dir = os.environ.get("FINAV_REPO_DIR", "").strip()
+    if repo_dir and os.path.isdir(repo_dir):
+        return os.path.join(repo_dir, "config")
+    candidate = os.path.abspath(
+        os.path.join(pkg_share, "..", "..", "..", "..", "src", "finav", "config")
+    )
+    if os.path.isdir(candidate):
+        return candidate
+    return os.path.join(pkg_share, "config")
+
+
 def generate_launch_description():
     pkg_share = get_package_share_directory("finav")
-    joy_config_path = os.path.join(pkg_share, "config", "joy.yaml")
-    base_control_config_path = os.path.join(pkg_share, "config", "base_control.yaml")
+    config_dir = _resolve_config_dir(pkg_share)
+    joy_config_path = os.path.join(config_dir, "joy.yaml")
+    base_control_config_path = os.path.join(config_dir, "base_control.yaml")
     joy_cfg = _load_joy_config(joy_config_path)
 
     use_joystick_arg = DeclareLaunchArgument(

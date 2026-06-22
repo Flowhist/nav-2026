@@ -19,6 +19,10 @@ const appState = {
   },
   previewMap: null,
   previewMapName: "",
+  previewLocations: [],
+  previewSelectedLocation: "",
+  previewAnnotationMode: false,
+  previewAnnotationDraft: null,
   navMapName: "",
   navLocations: [],
   navLocationsFor: "",
@@ -39,6 +43,7 @@ const appState = {
     name: "",
     path: "",
     content: "",
+    impact: null,
   },
   teleop: {
     keyboardEnabled: false,
@@ -148,7 +153,7 @@ function buildMapRaster(mapData, prefix) {
   for (let y = 0; y < mapData.height; y += 1) {
     for (let x = 0; x < mapData.width; x += 1) {
       const src = y * mapData.width + x;
-      const dstY = mapData.height - 1 - y;
+      const dstY = prefix === "preview" ? y : mapData.height - 1 - y;
       const dstX = x;
       const dst = (dstY * mapData.width + dstX) * 4;
       const value = mapData.data[src];
@@ -378,8 +383,19 @@ function drawScene(canvas, mapData, scene, options = {}) {
     drawArrow(ctx, view, canvas, scene.robot_pose_map, "#c46a2b");
   }
 
+  if (options.locations?.length) {
+    options.locations.forEach((loc) => {
+      const color = loc.name === options.selectedLocation ? "#ff9f1c" : "#d83b2d";
+      drawArrow(ctx, view, canvas, loc, color, loc.name);
+    });
+  }
+
   if (options.dragPose) {
     drawArrow(ctx, view, canvas, options.dragPose, "rgba(28, 57, 48, 0.82)", options.dragPose.label);
+  }
+
+  if (options.annotationDraft) {
+    drawArrow(ctx, view, canvas, options.annotationDraft, "#1d6fc2", "新地点");
   }
 }
 

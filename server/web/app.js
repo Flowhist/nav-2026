@@ -282,6 +282,230 @@ async function finishNavDrag(event) {
   }
 }
 
+function findPreviewLocationAt(canvas, event) {
+  if (!appState.previewMap || !canvas._view) return "";
+  const pointer = getCanvasPointer(canvas, event);
+  if (!pointer) return "";
+
+  let bestName = "";
+  let bestDist = Infinity;
+  appState.previewLocations.forEach((loc) => {
+    const pt = worldToScreen(canvas._view, canvas, loc.x, loc.y);
+    const dist = Math.hypot(pt.x - pointer.x, pt.y - pointer.y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestName = loc.name;
+    }
+  });
+  return bestDist <= 18 * (window.devicePixelRatio || 1) ? bestName : "";
+}
+
+function selectPreviewLocation(name) {
+  appState.previewSelectedLocation = name || "";
+  renderPreviewLocationList();
+  renderPreviewCanvas();
+}
+
+function startPreviewAnnotationDrag(canvas, event) {
+  const world = clientToWorld(canvas, event.clientX, event.clientY);
+  if (!world) return false;
+  appState.previewAnnotationDraft = {
+    canvasId: canvas.id,
+    pointerId: event.pointerId,
+    start: world,
+    current: world,
+    x: world.x,
+    y: world.y,
+    yaw_deg: 0,
+  };
+  if (canvas.setPointerCapture) canvas.setPointerCapture(event.pointerId);
+  renderPreviewCanvas();
+  return true;
+}
+
+function updatePreviewAnnotationDrag(event) {
+  const draft = appState.previewAnnotationDraft;
+  if (!draft || draft.pointerId !== event.pointerId) return;
+  const canvas = $(draft.canvasId);
+  const world = clientToWorld(canvas, event.clientX, event.clientY);
+  if (!world) return;
+  draft.current = world;
+  draft.yaw_deg = Math.atan2(world.y - draft.start.y, world.x - draft.start.x) * 180 / Math.PI;
+  renderPreviewCanvas();
+}
+
+function showAnnotationDialog(options) {
+  return new Promise((resolve) => {
+    const dialog = $("annotationDialog");
+    const title = $("annotationDialogTitle");
+    const meta = $("annotationDialogMeta");
+    const nameField = $("annotationNameLabel");
+    const input = $("annotationNameInput");
+    const message = $("annotationDialogMessage");
+    const cancel = $("annotationDialogCancel");
+    const confirm = $("annotationDialogConfirm");
+    const isNameMode = options.mode === "name";
+
+    title.textContent = options.title || "地点标注";
+    meta.textContent = options.meta || "";
+    message.textContent = options.message || "";
+    message.classList.remove("error");
+    nameField.classList.toggle("hidden", !isNameMode);
+    input.value = options.initialValue || "";
+    confirm.textContent = options.confirmText || "确定";
+    confirm.className = options.danger ? "danger" : "primary";
+
+    const cleanup = () => {
+      dialog.classList.add("hidden");
+      dialog.setAttribute("aria-hidden", "true");
+      confirm.removeEventListener("click", onConfirm);
+      cancel.removeEventListener("click", onCancel);
+      dialog.removeEventListener("keydown", onKeydown);
+    };
+    const close = (value) => {
+      cleanup();
+      resolve(value);
+    };
+    const onCancel = () => close(isNameMode ? null : false);
+    const onConfirm = () => {
+      if (!isNameMode) {
+        close(true);
+        return;
+      }
+      const value = input.value.trim();
+      const error = options.validate ? options.validate(value) : "";
+      if (error) {
+        message.textContent = error;
+        message.classList.add("error");
+        input.focus();
+        return;
+      }
+      close(value);
+    };
+    const onKeydown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        onConfirm();
+      }
+    };
+
+    confirm.addEventListener("click", onConfirm);
+    cancel.addEventListener("click", onCancel);
+    dialog.addEventListener("keydown", onKeydown);
+    dialog.classList.remove("hidden");
+    dialog.setAttribute("aria-hidden", "false");
+    window.setTimeout(() => (isNameMode ? input : confirm).focus(), 0);
+  });
+}
+
+function showAnnotationNameDialog({ x, y, yawDeg }) {
+  return showAnnotationDialog({
+    mode: "name",
+    title: "添加地点",
+    meta: `坐标 (${x.toFixed(2)}, ${y.toFixed(2)}) · 朝向 ${yawDeg.toFixed(1)}°`,
+    message: "输入后会自动保存到当前地图的 locations 文件。",
+    confirmText: "添加",
+    validate: (value) => {
+      if (!value) return "地点名称不能为空。";
+      if (value.includes(":")) return "地点名称不能包含冒号。";
+      return "";
+    },
+  });
+}
+
+function showAnnotationConfirmDialog({ title, message, confirmText = "确定", danger = false }) {
+  return showAnnotationDialog({
+    mode: "confirm",
+    title,
+    message,
+    confirmText,
+    danger,
+  });
+}
+
+async function finishPreviewAnnotationDrag(event) {
+  const draft = appState.previewAnnotationDraft;
+  if (!draft || draft.pointerId !== event.pointerId) return;
+  const canvas = $(draft.canvasId);
+  const world = clientToWorld(canvas, event.clientX, event.clientY) || draft.current || draft.start;
+  const dx = world.x - draft.start.x;
+  const dy = world.y - draft.start.y;
+  const yawDeg = Math.hypot(dx, dy) < 0.03 ? 0 : Math.atan2(dy, dx) * 180 / Math.PI;
+
+  if (canvas.releasePointerCapture) {
+    try {
+      canvas.releasePointerCapture(event.pointerId);
+    } catch (_err) {
+      // ignore
+    }
+  }
+  appState.previewAnnotationDraft = null;
+
+  const cleanName = await showAnnotationNameDialog({
+    x: draft.start.x,
+    y: draft.start.y,
+    yawDeg,
+  });
+  if (!cleanName) {
+    renderPreviewCanvas();
+    return;
+  }
+  const existing = appState.previewLocations.findIndex((loc) => loc.name === cleanName);
+  if (existing >= 0) {
+    const overwrite = await showAnnotationConfirmDialog({
+      title: "覆盖地点",
+      message: `地点“${cleanName}”已存在，是否用新的坐标和朝向覆盖？`,
+      confirmText: "覆盖",
+    });
+    if (!overwrite) {
+      renderPreviewCanvas();
+      return;
+    }
+  }
+
+  const loc = {
+    name: cleanName,
+    x: Number(draft.start.x.toFixed(3)),
+    y: Number(draft.start.y.toFixed(3)),
+    yaw_deg: Number(yawDeg.toFixed(1)),
+  };
+  if (existing >= 0) appState.previewLocations.splice(existing, 1, loc);
+  else appState.previewLocations.push(loc);
+  appState.previewSelectedLocation = cleanName;
+  appState.previewAnnotationMode = false;
+  renderPreviewLocationList();
+  renderPreviewCanvas();
+  savePreviewLocations();
+}
+
+function setPreviewAnnotationMode(enabled) {
+  appState.previewAnnotationMode = !!enabled && !!appState.previewMapName;
+  appState.previewAnnotationDraft = null;
+  if (appState.previewAnnotationMode) appState.previewSelectedLocation = "";
+  renderPreviewLocationList();
+  renderPreviewCanvas();
+}
+
+async function deletePreviewSelectedLocation() {
+  const name = appState.previewSelectedLocation;
+  if (!name) return;
+  const confirmed = await showAnnotationConfirmDialog({
+    title: "删除地点",
+    message: `确认删除地点“${name}”吗？删除后会自动保存。`,
+    confirmText: "删除",
+    danger: true,
+  });
+  if (!confirmed) return;
+  appState.previewLocations = appState.previewLocations.filter((loc) => loc.name !== name);
+  appState.previewSelectedLocation = "";
+  renderPreviewLocationList();
+  renderPreviewCanvas();
+  savePreviewLocations();
+}
+
 function bindCanvasInteractions(canvasId, options = {}) {
   const canvas = $(canvasId);
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
@@ -313,6 +537,14 @@ function bindCanvasInteractions(canvasId, options = {}) {
 
     if (options.allowPlacement && appState.navPlacementMode && appState.scene.map) {
       if (startNavDrag(canvas, event)) return;
+    }
+    if (options.allowPreviewAnnotation && appState.previewMap) {
+      if (appState.previewAnnotationMode && startPreviewAnnotationDrag(canvas, event)) return;
+      const selected = findPreviewLocationAt(canvas, event);
+      if (selected) {
+        selectPreviewLocation(selected);
+        return;
+      }
     }
 
     startViewportGesture(canvas, event, "pan");
@@ -475,6 +707,9 @@ function bind() {
   });
   $("btnRefreshMaps").addEventListener("click", () => loadSavedMaps().catch(console.error));
   $("btnDeletePreviewMap").addEventListener("click", () => deleteSelectedPreviewMap().catch(console.error));
+  $("btnAddPreviewLocation").addEventListener("click", () => setPreviewAnnotationMode(true));
+  $("btnCancelPreviewLocation").addEventListener("click", () => setPreviewAnnotationMode(false));
+  $("btnDeletePreviewLocation").addEventListener("click", () => deletePreviewSelectedLocation().catch(console.error));
   $("btnRefreshConfigs").addEventListener("click", () => loadConfigs().catch(console.error));
   $("configBackBtn").addEventListener("click", showConfigOverview);
   $("configSaveBtn").addEventListener("click", () => saveConfigEditor().catch(console.error));
@@ -486,21 +721,24 @@ function bind() {
 
   bindCanvasInteractions("mappingCanvas");
   bindCanvasInteractions("navigationCanvas", { allowPlacement: true });
-  bindCanvasInteractions("previewCanvas");
+  bindCanvasInteractions("previewCanvas", { allowPreviewAnnotation: true });
 
   window.addEventListener("pointermove", (event) => {
     updateViewportGesture(event);
     updateNavDrag(event);
+    updatePreviewAnnotationDrag(event);
   });
 
   window.addEventListener("pointerup", (event) => {
     endViewportGesture(event);
     finishNavDrag(event).catch(console.error);
+    finishPreviewAnnotationDrag(event).catch(console.error);
   });
 
   window.addEventListener("pointercancel", (event) => {
     endViewportGesture(event);
     finishNavDrag(event).catch(console.error);
+    finishPreviewAnnotationDrag(event).catch(console.error);
   });
 
   window.addEventListener("keydown", handleKeyboardTeleop);

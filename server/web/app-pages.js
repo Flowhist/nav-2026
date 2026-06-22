@@ -48,9 +48,13 @@ function updateSceneHints() {
       : "等待 `/map` 数据...";
   }
 
-  $("previewHint").textContent = appState.previewMap
-    ? `${cameraHint}｜${appState.previewMap.width} × ${appState.previewMap.height}｜分辨率 ${fmt(appState.previewMap.resolution, 3)} m`
-    : "请选择左侧地图";
+  if (appState.previewAnnotationMode) {
+    $("previewHint").textContent = "添加地点中：左键拖拽方向，松开后输入名称；右键仍可旋转视图。";
+  } else {
+    $("previewHint").textContent = appState.previewMap
+      ? `${cameraHint}｜标注 ${appState.previewLocations.length} 个｜${appState.previewMap.width} × ${appState.previewMap.height}`
+      : "请选择左侧地图";
+  }
 }
 
 function renderLiveCanvases() {
@@ -71,7 +75,12 @@ function renderLiveCanvases() {
 }
 
 function renderPreviewCanvas() {
-  drawScene($("previewCanvas"), appState.previewMap, null, { prefix: "preview" });
+  drawScene($("previewCanvas"), appState.previewMap, null, {
+    prefix: "preview",
+    locations: appState.previewLocations,
+    selectedLocation: appState.previewSelectedLocation,
+    annotationDraft: appState.previewAnnotationDraft,
+  });
   updateSceneHints();
 }
 
@@ -318,6 +327,36 @@ function renderConfigHighlight() {
   syncConfigEditorScroll();
 }
 
+function renderConfigRestartActions() {
+  const panel = $("configApplyPanel");
+  const actions = $("configRestartActions");
+  const targetsByMode = new Map();
+  appState.configs.forEach((file) => {
+    const targets = file.impact && Array.isArray(file.impact.restart_targets) ? file.impact.restart_targets : [];
+    targets.forEach((target) => {
+      if (target && target.mode && !targetsByMode.has(target.mode)) {
+        targetsByMode.set(target.mode, target);
+      }
+    });
+  });
+  actions.innerHTML = "";
+  const targets = Array.from(targetsByMode.values());
+  if (!targets.length) {
+    panel.classList.add("hidden");
+    return;
+  }
+
+  panel.classList.remove("hidden");
+  targets.forEach((target) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.restartMode = target.mode;
+    btn.textContent = `重启${target.label || target.mode}`;
+    btn.addEventListener("click", () => restartRuntimeTarget(target.mode, btn).catch(console.error));
+    actions.appendChild(btn);
+  });
+}
+
 function setConfigSaveNotice(text = "", kind = "ok") {
   const node = $("configSaveNotice");
   if (configSaveNoticeTimer) {
@@ -337,6 +376,14 @@ function setConfigSaveNotice(text = "", kind = "ok") {
     node.classList.add("hidden");
     node.dataset.kind = "";
   }, 2200);
+}
+
+function setConfigRestartNotice(text = "", kind = "ok") {
+  const node = $("configRestartNotice");
+  if (!node) return;
+  node.textContent = text;
+  node.dataset.kind = kind;
+  node.classList.toggle("hidden", !text);
 }
 
 function renderConfigCards() {
@@ -360,6 +407,7 @@ async function loadConfigs() {
   try {
     const data = await api("/api/configs");
     appState.configs = data.files || [];
+    renderConfigRestartActions();
     renderConfigCards();
   } catch (err) {
     console.error(err);
@@ -384,6 +432,7 @@ async function openConfigEditor(name) {
       name: data.name || name,
       path: data.path || `config/${name}`,
       content: data.content || "",
+      impact: data.impact || null,
     };
     $("configEditorTitle").textContent = data.name || name;
     $("configEditorMeta").textContent = data.path || `config/${name}`;
@@ -400,8 +449,9 @@ async function saveConfigEditor() {
   if (!appState.configEditor.name) return;
   const content = $("configEditor").value;
   try {
-    await api(`/api/configs/${encodeURIComponent(appState.configEditor.name)}`, "POST", { content });
+    const data = await api(`/api/configs/${encodeURIComponent(appState.configEditor.name)}`, "POST", { content });
     appState.configEditor.content = content;
+    appState.configEditor.impact = data.impact || appState.configEditor.impact;
     await loadConfigs();
     if (appState.configEditor.name === "base_control.yaml" && typeof loadTeleopConfig === "function") {
       await loadTeleopConfig();
@@ -410,6 +460,27 @@ async function saveConfigEditor() {
   } catch (err) {
     console.error(err);
     setConfigSaveNotice("保存失败", "error");
+  }
+}
+
+async function restartRuntimeTarget(mode, button) {
+  if (!mode) return;
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "重启中…";
+  try {
+    const data = await api(`/api/runtime/${encodeURIComponent(mode)}/restart`, "POST", {});
+    if (data.runtime) {
+      appState.status = { ...(appState.status || {}), runtime: data.runtime };
+      renderRuntimeControls();
+    }
+    setConfigRestartNotice("已请求重启", "ok");
+  } catch (err) {
+    console.error(err);
+    setConfigRestartNotice("重启失败", "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
   }
 }
 
@@ -456,10 +527,15 @@ async function loadSavedMaps() {
     if (!appState.savedMaps.length) {
       appState.previewMapName = "";
       appState.previewMap = null;
+      appState.previewLocations = [];
+      appState.previewSelectedLocation = "";
+      appState.previewAnnotationMode = false;
+      appState.previewAnnotationDraft = null;
       appState.navMapName = "";
       $("previewTitle").textContent = "地图预览";
       $("previewMeta").textContent = "从 `maps/` 目录读取 `.pgm` 与 `.yaml`";
       renderMapList();
+      renderPreviewLocationList();
       renderNavMapPicker();
       renderPreviewCanvas();
       return;
@@ -488,6 +564,10 @@ async function deleteSelectedPreviewMap() {
     if (appState.previewMapName === name) {
       appState.previewMapName = "";
       appState.previewMap = null;
+      appState.previewLocations = [];
+      appState.previewSelectedLocation = "";
+      appState.previewAnnotationMode = false;
+      appState.previewAnnotationDraft = null;
     }
     await loadSavedMaps();
   } catch (err) {
@@ -499,13 +579,82 @@ async function loadPreviewMap(name, rerenderList = true) {
   try {
     appState.previewMap = await api(`/api/maps/${encodeURIComponent(name)}`);
     appState.previewMapName = name;
+    appState.previewSelectedLocation = "";
+    appState.previewAnnotationMode = false;
+    appState.previewAnnotationDraft = null;
+    await loadPreviewLocations(name);
     resetViewport("previewCanvas");
     $("previewTitle").textContent = `地图预览 · ${name}`;
     $("previewMeta").textContent = `尺寸 ${appState.previewMap.width} × ${appState.previewMap.height}，分辨率 ${fmt(appState.previewMap.resolution, 3)} m/px`;
     if (rerenderList) renderMapList();
     else $("btnDeletePreviewMap").disabled = false;
+    renderPreviewLocationList();
     renderPreviewCanvas();
   } catch (err) {
     console.error(err);
+  }
+}
+
+async function loadPreviewLocations(name) {
+  try {
+    const data = await api(`/api/maps/${encodeURIComponent(name)}/locations`);
+    appState.previewLocations = Array.isArray(data.locations) ? data.locations : [];
+  } catch (err) {
+    console.error(err);
+    appState.previewLocations = [];
+  }
+}
+
+function renderPreviewLocationList() {
+  const box = $("previewLocationList");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!appState.previewMapName) {
+    box.innerHTML = `<div class="subtle">请选择地图后标注</div>`;
+  } else if (!appState.previewLocations.length) {
+    box.innerHTML = `<div class="subtle">暂无地点标注</div>`;
+  } else {
+    appState.previewLocations.forEach((loc) => {
+      const btn = document.createElement("button");
+      btn.className = "location-item" + (loc.name === appState.previewSelectedLocation ? " active" : "");
+      btn.type = "button";
+      btn.innerHTML = `<strong>${escapeHtml(loc.name)}</strong><span>x=${fmt(loc.x, 3)}, y=${fmt(loc.y, 3)}, yaw=${fmt(loc.yaw_deg, 1)}°</span>`;
+      btn.addEventListener("click", () => {
+        appState.previewSelectedLocation = loc.name;
+        renderPreviewLocationList();
+        renderPreviewCanvas();
+      });
+      box.appendChild(btn);
+    });
+  }
+
+  setText(
+    "previewLocationMeta",
+    appState.previewMapName
+      ? `${appState.previewLocations.length} 个地点`
+      : "未选择地图",
+  );
+  $("btnAddPreviewLocation").disabled = !appState.previewMapName;
+  $("btnAddPreviewLocation").classList.toggle("active", appState.previewAnnotationMode);
+  $("btnCancelPreviewLocation").disabled = !appState.previewAnnotationMode;
+  $("btnDeletePreviewLocation").disabled = !appState.previewSelectedLocation;
+}
+
+async function savePreviewLocations() {
+  if (!appState.previewMapName) return;
+  try {
+    const data = await api(`/api/maps/${encodeURIComponent(appState.previewMapName)}/locations`, "POST", {
+      locations: appState.previewLocations,
+    });
+    appState.previewLocations = Array.isArray(data.locations) ? data.locations : appState.previewLocations;
+    if (appState.navMapName === appState.previewMapName) {
+      appState.navLocationsFor = "";
+      loadNavLocations(true).catch(console.error);
+    }
+  } catch (err) {
+    console.error(err);
+  } finally {
+    renderPreviewLocationList();
+    renderPreviewCanvas();
   }
 }

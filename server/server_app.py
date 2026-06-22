@@ -10,10 +10,72 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
-from map_utils import list_saved_maps, load_map_preview, load_map_locations
+from map_utils import list_saved_maps, load_map_preview, load_map_locations, save_map_locations
 from process_manager import RuntimeManager
 from ros_bridge import RosBridge
 from state_store import StateStore
+
+
+RESTART_TARGETS = {
+    "base_drive": "底盘驱动",
+}
+
+CONFIG_IMPACTS: Dict[str, Dict[str, object]] = {
+    "base_control.yaml": {
+        "message": "保存后需要重启底盘驱动，运行中的节点不会自动读取新速度参数。",
+        "restart_targets": ["base_drive"],
+    },
+    "joy.yaml": {
+        "message": "保存后需要重启底盘驱动。",
+        "restart_targets": ["base_drive"],
+    },
+    "slam_toolbox_map.yaml": {
+        "message": "保存后重启建图链路生效；Web 启动时会读取 src/finav/config，不需要 colcon build。",
+        "restart_targets": [],
+    },
+    "slam_toolbox_nav.yaml": {
+        "message": "保存后重启导航链路生效；Web 启动时会读取 src/finav/config，不需要 colcon build。",
+        "restart_targets": [],
+    },
+    "nav.yaml": {
+        "message": "保存后重启导航链路生效。",
+        "restart_targets": [],
+    },
+    "path_plan.yaml": {
+        "message": "保存后重启导航链路生效。",
+        "restart_targets": [],
+    },
+    "lidar.yaml": {
+        "message": "保存后重启建图或导航链路中的雷达节点生效。",
+        "restart_targets": [],
+    },
+    "imu.yaml": {
+        "message": "保存后重启建图或导航链路中的 IMU 节点生效。",
+        "restart_targets": [],
+    },
+    "ekf.yaml": {
+        "message": "保存后重启建图或导航链路中的 EKF 节点生效。",
+        "restart_targets": [],
+    },
+}
+
+
+def describe_config_impact(name: str) -> Dict[str, object]:
+    impact = CONFIG_IMPACTS.get(name, {})
+    target_modes = list(impact.get("restart_targets", []))
+    return {
+        "requires_restart": True,
+        "message": str(
+            impact.get(
+                "message",
+                "保存后通常需要重启相关节点或 launch 才会生效；运行中的节点不会自动读取 YAML。",
+            )
+        ),
+        "restart_targets": [
+            {"mode": mode, "label": RESTART_TARGETS.get(mode, mode)}
+            for mode in target_modes
+        ],
+    }
 
 
 class ServerApp:
@@ -124,6 +186,7 @@ class ServerApp:
                             "name": target.name,
                             "path": f"config/{target.name}",
                             "content": target.read_text(encoding="utf-8"),
+                            "impact": describe_config_impact(target.name),
                         },
                     )
                     return
@@ -209,6 +272,23 @@ class ServerApp:
                     app.bridge.command({"type": "save_map", "name": body.get("name", "manual_map")})
                     self._json(HTTPStatus.OK, {"ok": True})
                     return
+                if path.startswith("/api/maps/") and path.endswith("/locations"):
+                    name = unquote(path.removeprefix("/api/maps/").removesuffix("/locations")).strip("/")
+                    target = app._resolve_map_dir(name)
+                    if target is None:
+                        self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid map name"})
+                        return
+                    if not target.exists() or not target.is_dir():
+                        self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"map not found: {name}"})
+                        return
+                    try:
+                        locations = save_map_locations(app.maps_dir, name, body.get("locations", []))
+                    except ValueError as exc:
+                        self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+                        return
+                    app.state.add_event("info", "map locations saved", {"name": name, "count": len(locations)})
+                    self._json(HTTPStatus.OK, {"ok": True, "map_file": name, "locations": locations})
+                    return
                 if path.startswith("/api/maps/") and path.endswith("/delete"):
                     name = unquote(path.removeprefix("/api/maps/").removesuffix("/delete")).strip("/")
                     target = app._resolve_map_dir(name)
@@ -248,6 +328,15 @@ class ServerApp:
                         return
                     self._json(HTTPStatus.OK, payload)
                     return
+                if path.startswith("/api/runtime/") and path.endswith("/restart"):
+                    mode = unquote(path.removeprefix("/api/runtime/").removesuffix("/restart")).strip("/")
+                    try:
+                        runtime = app.runtime.restart(mode)
+                    except ValueError as exc:
+                        self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+                        return
+                    self._json(HTTPStatus.OK, {"ok": True, "runtime": runtime})
+                    return
                 if path.startswith("/api/configs/"):
                     rel_name = unquote(path.removeprefix("/api/configs/")).strip("/")
                     target = app._resolve_config_path(rel_name)
@@ -263,7 +352,7 @@ class ServerApp:
                         return
                     target.write_text(content, encoding="utf-8")
                     app.state.add_event("info", "config saved", {"file": target.name})
-                    self._json(HTTPStatus.OK, {"ok": True, "name": target.name})
+                    self._json(HTTPStatus.OK, {"ok": True, "name": target.name, "impact": describe_config_impact(target.name)})
                     return
 
                 self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"unknown endpoint: {path}"})
@@ -349,6 +438,7 @@ class ServerApp:
                     "path": f"config/{path.name}",
                     "size": stat.st_size,
                     "modified_at": stat.st_mtime,
+                    "impact": describe_config_impact(path.name),
                 }
             )
         return files

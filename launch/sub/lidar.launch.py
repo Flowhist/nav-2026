@@ -76,6 +76,18 @@ def _load_fusion(data, defaults):
     }
 
 
+def _resolve_project_dir(pkg_share):
+    repo_dir = os.environ.get("FINAV_REPO_DIR", "").strip()
+    if repo_dir and os.path.isdir(repo_dir):
+        return repo_dir
+    candidate = os.path.abspath(
+        os.path.join(pkg_share, "..", "..", "..", "..", "src", "finav")
+    )
+    if os.path.isdir(candidate):
+        return candidate
+    return pkg_share
+
+
 def _load_lidar_config():
     base = {
         "is_ethernet": True,
@@ -122,7 +134,9 @@ def _load_lidar_config():
         },
     }
 
-    config_path = os.path.join(get_package_share_directory("finav"), "config", "lidar.yaml")
+    pkg_share = get_package_share_directory("finav")
+    project_dir = _resolve_project_dir(pkg_share)
+    config_path = os.path.join(project_dir, "config", "lidar.yaml")
     data = _read_yaml(config_path)
     return {
         "left": _load_branch(data, "left", defaults["left"]),
@@ -158,7 +172,9 @@ def _driver_parameters(cfg, scanner_ip):
 def generate_launch_description():
     cfg = _load_lidar_config()
     pkg_share = get_package_share_directory("finav")
-    fastdds_path = os.path.join(pkg_share, "config", "fastdds_profiles.xml")
+    project_dir = _resolve_project_dir(pkg_share)
+    config_dir = os.path.join(project_dir, "config")
+    fastdds_path = os.path.join(config_dir, "fastdds_profiles.xml")
 
     left_scanner_ip_arg = DeclareLaunchArgument(
         "left_scanner_ip",

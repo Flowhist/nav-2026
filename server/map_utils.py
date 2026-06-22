@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import math
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -206,3 +207,61 @@ def load_map_locations(map_dir: Path, name: str) -> List[Dict[str, object]]:
     _flush()
     return results
 
+
+def _normalize_location_entries(locations: object) -> List[Dict[str, object]]:
+    if not isinstance(locations, list):
+        raise ValueError("locations must be a list")
+
+    normalized: List[Dict[str, object]] = []
+    seen = set()
+    for item in locations:
+        if not isinstance(item, dict):
+            raise ValueError("location entry must be an object")
+
+        loc_name = str(item.get("name", "")).strip()
+        if not loc_name:
+            raise ValueError("location name is required")
+        if "\n" in loc_name or ":" in loc_name:
+            raise ValueError(f"invalid location name: {loc_name}")
+        if loc_name in seen:
+            raise ValueError(f"duplicate location name: {loc_name}")
+
+        try:
+            x = float(item["x"])
+            y = float(item["y"])
+            yaw_deg = float(item.get("yaw_deg", 0.0))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"invalid coordinates for location: {loc_name}") from exc
+
+        if not all(math.isfinite(v) for v in (x, y, yaw_deg)):
+            raise ValueError(f"invalid coordinates for location: {loc_name}")
+
+        seen.add(loc_name)
+        normalized.append(
+            {
+                "name": loc_name,
+                "x": round(x, 3),
+                "y": round(y, 3),
+                "yaw_deg": round(yaw_deg, 1),
+            }
+        )
+    return normalized
+
+
+def save_map_locations(map_dir: Path, name: str, locations: object) -> List[Dict[str, object]]:
+    normalized = _normalize_location_entries(locations)
+    loc_path = map_dir / name / f"{name}.locations.yaml"
+    loc_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = ["locations:"]
+    for loc in normalized:
+        lines.extend(
+            [
+                f"  {loc['name']}:",
+                f"    x: {loc['x']:.3f}",
+                f"    y: {loc['y']:.3f}",
+                f"    yaw_deg: {loc['yaw_deg']:.1f}",
+            ]
+        )
+    loc_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return normalized

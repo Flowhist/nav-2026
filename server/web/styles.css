@@ -353,6 +353,35 @@ h3 {
   color: #76b56f;
 }
 
+.config-apply-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(61, 84, 64, 0.12);
+  border-radius: 16px;
+  background: rgba(238, 243, 235, 0.72);
+}
+
+.config-apply-panel strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--primary-strong);
+}
+
+.config-restart-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.config-restart-actions button {
+  white-space: nowrap;
+}
+
 .config-editor-actions {
   display: flex;
   align-items: center;
@@ -855,7 +884,7 @@ label {
   flex-direction: column;
   gap: 10px;
   margin-top: 16px;
-  max-height: calc(100vh - 290px);
+  max-height: calc(100vh - 520px);
   overflow: auto;
 }
 
@@ -873,6 +902,59 @@ label {
   margin-top: 5px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.location-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(61, 84, 64, 0.12);
+}
+
+.location-editor .panel-head {
+  align-items: baseline;
+}
+
+.location-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.location-actions.single {
+  grid-template-columns: 1fr;
+}
+
+#btnAddPreviewLocation.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+.location-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 80px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.location-item {
+  text-align: left;
+  padding: 11px 12px;
+}
+
+.location-item strong,
+.location-item span {
+  display: block;
+}
+
+.location-item span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .status-dock {
@@ -971,6 +1053,81 @@ label {
 .kv>div:nth-child(even) {
   min-width: 0;
   word-break: break-word;
+}
+
+.annotation-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(18, 34, 23, 0.34);
+  backdrop-filter: blur(10px);
+}
+
+.annotation-dialog.hidden {
+  display: none;
+}
+
+.annotation-card {
+  width: min(420px, 100%);
+  border-radius: 20px;
+  padding: 22px;
+  background: rgba(250, 252, 248, 0.97);
+  border: 1px solid rgba(61, 84, 64, 0.16);
+  box-shadow: 0 28px 64px rgba(16, 31, 20, 0.22);
+}
+
+.annotation-head h3 {
+  margin-bottom: 6px;
+}
+
+.annotation-name-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.annotation-name-field.hidden {
+  display: none;
+}
+
+.annotation-name-field span {
+  font-weight: 700;
+  color: var(--primary-strong);
+}
+
+.annotation-name-field input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(61, 84, 64, 0.18);
+  background: rgba(244, 248, 240, 0.95);
+  color: var(--text);
+  font: inherit;
+}
+
+.annotation-name-field input:focus {
+  outline: 2px solid rgba(37, 93, 77, 0.24);
+  border-color: var(--primary);
+}
+
+.annotation-message {
+  margin-top: 16px;
+  line-height: 1.6;
+}
+
+.annotation-message.error {
+  color: var(--danger);
+}
+
+.annotation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
 }
 
 .dock-log-panel {

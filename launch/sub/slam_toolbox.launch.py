@@ -32,8 +32,22 @@ def _resolve_default_maps_dir(pkg_share: str) -> str:
     return os.path.join(pkg_share, "maps")
 
 
+def _resolve_config_dir(pkg_share: str) -> str:
+    repo_dir = os.environ.get("FINAV_REPO_DIR", "").strip()
+    if repo_dir and os.path.isdir(repo_dir):
+        return os.path.join(repo_dir, "config")
+
+    candidate = os.path.abspath(
+        os.path.join(pkg_share, "..", "..", "..", "..", "src", "finav", "config")
+    )
+    if os.path.isdir(candidate):
+        return candidate
+    return os.path.join(pkg_share, "config")
+
+
 def generate_launch_description():
     pkg_share = get_package_share_directory("finav")
+    config_dir = _resolve_config_dir(pkg_share)
 
     # 地图目录（默认指向当前用户工作区）
     default_maps_dir = _resolve_default_maps_dir(pkg_share)
@@ -88,7 +102,7 @@ def generate_launch_description():
         output="screen",
         condition=IfCondition(PythonExpression(["'", mode, "' == 'mapping'"])),
         parameters=[
-            os.path.join(pkg_share, "config", "slam_toolbox_map.yaml"),
+            os.path.join(config_dir, "slam_toolbox_map.yaml"),
             {
                 "use_sim_time": use_sim_time,
             },
@@ -111,7 +125,7 @@ def generate_launch_description():
         output="screen",
         condition=IfCondition(PythonExpression(["'", mode, "' == 'localization'"])),
         parameters=[
-            os.path.join(pkg_share, "config", "slam_toolbox_nav.yaml"),
+            os.path.join(config_dir, "slam_toolbox_nav.yaml"),
             {
                 "use_sim_time": use_sim_time,
                 # 地图路径格式: <maps_dir>/<map_name>/<map_name>

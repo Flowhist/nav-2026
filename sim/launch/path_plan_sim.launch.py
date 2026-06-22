@@ -11,14 +11,30 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def _resolve_project_dir(pkg_share: str) -> str:
+    repo_dir = os.environ.get("FINAV_REPO_DIR", "").strip()
+    if repo_dir and os.path.isdir(repo_dir):
+        return repo_dir
+    candidate = os.path.abspath(
+        os.path.join(pkg_share, "..", "..", "..", "..", "src", "finav")
+    )
+    if os.path.isdir(candidate):
+        return candidate
+    return pkg_share
+
+
 def generate_launch_description():
     pkg_share = get_package_share_directory("finav")
-    default_map_yaml = os.path.join(pkg_share, "maps", "longcorridor", "longcorridor.yaml")
-    default_rviz = os.path.join(pkg_share, "sim", "rviz", "path_plan_sim.rviz")
-    path_plan_cfg = os.path.join(pkg_share, "config", "path_plan.yaml")
-    fake_pose_cfg = os.path.join(pkg_share, "sim", "config", "sim_fake_pose.yaml")
+    project_dir = _resolve_project_dir(pkg_share)
+    config_dir = os.path.join(project_dir, "config")
+    sim_dir = os.path.join(project_dir, "sim")
+    launch_dir = os.path.join(project_dir, "launch")
+    default_map_yaml = os.path.join(project_dir, "maps", "longcorridor", "longcorridor.yaml")
+    default_rviz = os.path.join(sim_dir, "rviz", "path_plan_sim.rviz")
+    path_plan_cfg = os.path.join(config_dir, "path_plan.yaml")
+    fake_pose_cfg = os.path.join(sim_dir, "config", "sim_fake_pose.yaml")
     plan_visualizer_cfg = os.path.join(
-        pkg_share, "sim", "config", "sim_plan_visualizer.yaml"
+        sim_dir, "config", "sim_plan_visualizer.yaml"
     )
 
     map_yaml_arg = DeclareLaunchArgument(
@@ -84,7 +100,7 @@ def generate_launch_description():
 
     robot_model_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_share, "launch", "sub", "robot_model.launch.py")
+            os.path.join(launch_dir, "sub", "robot_model.launch.py")
         )
     )
 

@@ -40,6 +40,18 @@ def _resolve_default_maps_dir(pkg_share: str) -> str:
     return os.path.join(pkg_share, "maps")
 
 
+def _resolve_project_dir(pkg_share: str) -> str:
+    repo_dir = os.environ.get("FINAV_REPO_DIR", "").strip()
+    if repo_dir and os.path.isdir(repo_dir):
+        return repo_dir
+    candidate = os.path.abspath(
+        os.path.join(pkg_share, "..", "..", "..", "..", "src", "finav")
+    )
+    if os.path.isdir(candidate):
+        return candidate
+    return pkg_share
+
+
 def _discover_maps(maps_dir: str):
     if not os.path.isdir(maps_dir):
         return []
@@ -107,21 +119,25 @@ def _resolve_sim_backend():
 
 def generate_launch_description():
     pkg_share = get_package_share_directory("finav")
+    project_dir = _resolve_project_dir(pkg_share)
+    config_dir = os.path.join(project_dir, "config")
+    sim_dir = os.path.join(project_dir, "sim")
+    launch_dir = os.path.join(project_dir, "launch")
     sim_backend = _resolve_sim_backend()
 
     default_world = os.path.join(
-        pkg_share, "sim", "gazebo", "worlds", "office_corridor_sketch.world"
+        sim_dir, "gazebo", "worlds", "office_corridor_sketch.world"
     )
-    default_rviz = os.path.join(pkg_share, "rviz", "navigation.rviz")
-    urdf_file = os.path.join(pkg_share, "urdf", "whillcar.urdf")
+    default_rviz = os.path.join(project_dir, "rviz", "navigation.rviz")
+    urdf_file = os.path.join(project_dir, "urdf", "whillcar.urdf")
     gz_model_file = os.path.join(
-        pkg_share, "sim", "gazebo", "models", "whillcar", "model.sdf"
+        sim_dir, "gazebo", "models", "whillcar", "model.sdf"
     )
-    nav_cfg = os.path.join(pkg_share, "config", "nav.yaml")
-    path_plan_cfg = os.path.join(pkg_share, "config", "path_plan.yaml")
-    relocate_cfg = os.path.join(pkg_share, "sim", "config", "relocate.yaml")
+    nav_cfg = os.path.join(config_dir, "nav.yaml")
+    path_plan_cfg = os.path.join(config_dir, "path_plan.yaml")
+    relocate_cfg = os.path.join(sim_dir, "config", "relocate.yaml")
     plan_visualizer_cfg = os.path.join(
-        pkg_share, "sim", "config", "sim_plan_visualizer.yaml"
+        sim_dir, "config", "sim_plan_visualizer.yaml"
     )
     default_maps_dir = _resolve_default_maps_dir(pkg_share)
     default_world_name = os.path.splitext(os.path.basename(default_world))[0]
@@ -182,7 +198,7 @@ def generate_launch_description():
     ros_scan_bridge_topic = "/scan_gz"
     gz_clock_topic = ["/world/", world_name, "/clock"]
     gz_set_pose_service = ["/world/", world_name, "/set_pose"]
-    gz_resource_path = os.path.join(pkg_share, "sim", "gazebo", "models")
+    gz_resource_path = os.path.join(sim_dir, "gazebo", "models")
 
     if sim_backend["backend"] == "ros_gz_sim":
         gz_resource_env = SetEnvironmentVariable(
@@ -332,7 +348,7 @@ def generate_launch_description():
 
     slam_toolbox_nav_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_share, "launch", "sub", "slam_toolbox.launch.py")
+            os.path.join(launch_dir, "sub", "slam_toolbox.launch.py")
         ),
         launch_arguments={
             "mode": "localization",

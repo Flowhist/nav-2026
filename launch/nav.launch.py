@@ -114,13 +114,15 @@ def _select_map_from_terminal(map_names):
 def generate_launch_description():
     pkg_share = get_package_share_directory("finav")
     repo_dir = _resolve_repo_dir(pkg_share)
+    config_dir = os.path.join(repo_dir, "config")
+    launch_dir = os.path.join(repo_dir, "launch")
     maps_dir = os.environ.get("FINAV_MAPS_DIR", "").strip() or os.path.join(
         repo_dir, "maps"
     )
     fastdds_path = os.path.join(repo_dir, "config", "fastdds_profiles.xml")
     if os.path.exists(fastdds_path):
         os.environ["FASTRTPS_DEFAULT_PROFILES_FILE"] = fastdds_path
-    lidar_cfg = _load_lidar_config(os.path.join(pkg_share, "config", "lidar.yaml"))
+    lidar_cfg = _load_lidar_config(os.path.join(config_dir, "lidar.yaml"))
 
     # 启动时地图选择（可被 launch 参数 map_file 覆盖）
     available_maps = _discover_maps(maps_dir)
@@ -170,7 +172,7 @@ def generate_launch_description():
     # 1. 雷达驱动
     lidar_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_share, "launch", "sub", "lidar.launch.py")
+            os.path.join(launch_dir, "sub", "lidar.launch.py")
         ),
         launch_arguments={
             "left_scanner_ip": left_lidar_ip,
@@ -181,7 +183,7 @@ def generate_launch_description():
     # 2. SLAM Toolbox纯定位模式
     slam_toolbox_nav_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_share, "launch", "sub", "slam_toolbox.launch.py")
+            os.path.join(launch_dir, "sub", "slam_toolbox.launch.py")
         ),
         launch_arguments={
             "mode": "localization",
@@ -194,14 +196,14 @@ def generate_launch_description():
     # 4. DM-IMU (外置IMU传感器)
     dm_imu_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_share, "launch", "sub", "dm_imu.launch.py")
+            os.path.join(launch_dir, "sub", "dm_imu.launch.py")
         ),
     )
 
     # 5. EKF融合 (融合编码器里程计和IMU)
     ekf_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_share, "launch", "sub", "ekf.launch.py")
+            os.path.join(launch_dir, "sub", "ekf.launch.py")
         ),
     )
 
@@ -223,7 +225,7 @@ def generate_launch_description():
         output="screen",
         condition=IfCondition(use_nav_bridge),
         parameters=[
-            os.path.join(pkg_share, "config", "nav.yaml"),
+            os.path.join(config_dir, "nav.yaml"),
             {"maps_dir": maps_dir, "map_file": map_file},
         ],
     )
@@ -234,7 +236,7 @@ def generate_launch_description():
         executable="nav_control.py",
         name="nav_control",
         output="screen",
-        parameters=[os.path.join(pkg_share, "config", "nav.yaml")],
+        parameters=[os.path.join(config_dir, "nav.yaml")],
     )
 
     # 10. 轻量路径规划：/map + TF + /goal_pose -> /plan
@@ -243,13 +245,13 @@ def generate_launch_description():
         executable="nav_path_plan.py",
         name="path_plan",
         output="screen",
-        parameters=[os.path.join(pkg_share, "config", "path_plan.yaml")],
+        parameters=[os.path.join(config_dir, "path_plan.yaml")],
     )
 
     # 11. 机器人模型发布
     robot_model_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_share, "launch", "sub", "robot_model.launch.py")
+            os.path.join(launch_dir, "sub", "robot_model.launch.py")
         ),
     )
 
