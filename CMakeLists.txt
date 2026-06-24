@@ -117,6 +117,7 @@ install(PROGRAMS
   scripts/control/nav_path_plan.py
   scripts/control/nav_control.py
   scripts/control/base_control.py
+  scripts/control/base_driver_worker.py
   scripts/control/base_control_router.py
   scripts/control/joy_control.py
   scripts/control/nav_relocate.py

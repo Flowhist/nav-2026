@@ -174,7 +174,6 @@ function setNavPlacementMode(mode) {
   appState.navPlacementMode = mode;
   $("btnArmInit").classList.toggle("active", mode === "initial");
   $("btnArmGoal").classList.toggle("active", mode === "goal");
-  $("navModeBadge").textContent = mode === "initial" ? "等待设置初始位姿" : mode === "goal" ? "等待设置目的地" : "当前未设置";
   updateSceneHints();
 }
 

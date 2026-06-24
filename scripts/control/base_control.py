@@ -12,18 +12,12 @@ WHILL 底盘驱动节点（omnilibs CAN 驱动版）
   - 急停旋钮触发的是电机 STO/fault，不按 CAN 断线处理。
 """
 
-import os
-import sys
 import math
-import time
 import threading
+import time
 from typing import Optional
 
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
-
-# omnilibs 安装路径
-sys.path.insert(0, "/home/embotic/DCCS/src/site-packages")
-from omnilibs.driver.driver import Driver, ONLINE, CAN
 
 import rclpy
 from rclpy.node import Node
@@ -32,7 +26,10 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, Float64MultiArray
 
+from base_driver_worker import DriverWorkerClient, DriverWorkerError
+
 PROJECT_ROOT = "/home/embotic/nav_workspace/src/finav"
+OMNILIBS_PATH = "/home/embotic/DCCS/src/site-packages"
 
 
 def select_wheel_acceleration(left_degps: float, right_degps: float, acceleration: int, acceleration_stop: int) -> int:
@@ -62,6 +59,10 @@ class WhillBaseDriver(Node):
         self.declare_parameter("acceleration", 100)
         self.declare_parameter("acceleration_stop", 100)
         self.declare_parameter("cmd_resend_interval", 0.5)
+        self.declare_parameter("driver_startup_timeout_s", 8.0)
+        self.declare_parameter("driver_request_timeout_s", 0.5)
+        self.declare_parameter("driver_terminate_timeout_s", 0.5)
+        self.declare_parameter("driver_restart_interval_s", 1.0)
 
         # ── 参数读取 ──
         self.wheel_radius = float(self.get_parameter("wheel_radius").value)
@@ -75,6 +76,18 @@ class WhillBaseDriver(Node):
         self.acceleration_stop = int(self.get_parameter("acceleration_stop").value)
         self.cmd_resend_interval = max(
             0.1, float(self.get_parameter("cmd_resend_interval").value)
+        )
+        self.driver_startup_timeout_s = max(
+            0.5, float(self.get_parameter("driver_startup_timeout_s").value)
+        )
+        self.driver_request_timeout_s = max(
+            0.1, float(self.get_parameter("driver_request_timeout_s").value)
+        )
+        self.driver_terminate_timeout_s = max(
+            0.1, float(self.get_parameter("driver_terminate_timeout_s").value)
+        )
+        self._driver_restart_interval_s = max(
+            0.2, float(self.get_parameter("driver_restart_interval_s").value)
         )
         sign = float(self.get_parameter("wheel_velocity_sign").value)
         self.wheel_velocity_sign = 1.0 if sign >= 0.0 else -1.0
@@ -114,7 +127,7 @@ class WhillBaseDriver(Node):
         # ── 驱动状态 ──
         self.whill = None
         self.running = True
-        self._driver_lock = threading.Lock()
+        self._last_driver_restart_try_mono = 0.0
 
         # ── 控制状态 ──
         self.last_cmd_time = self.get_clock().now()
@@ -170,7 +183,7 @@ class WhillBaseDriver(Node):
 
     @property
     def connected(self) -> bool:
-        return self.whill is not None
+        return self.whill is not None and self.whill.is_healthy
 
     @staticmethod
     def _cmd_nonzero(linear: float, angular: float) -> bool:
@@ -213,43 +226,61 @@ class WhillBaseDriver(Node):
         if now_mono - self._last_fault_stop_try_mono < 1.0:
             return
         self._last_fault_stop_try_mono = now_mono
-        with self._driver_lock:
-            if self.whill is None:
-                return
-            try:
-                self.whill.move_velocity(
-                    [self.left_motor_id, self.right_motor_id], 0.0, self.acceleration_stop
-                )
-            except Exception:
-                pass
+        if not self.connected:
+            return
+        try:
+            self.whill.set_velocity(
+                [self.left_motor_id, self.right_motor_id],
+                0.0,
+                0.0,
+                self.acceleration_stop,
+            )
+        except DriverWorkerError:
+            pass
 
     def _create_and_load_driver(self):
-        """创建 Driver 并加载 CANopen 配置；失败返回 None。"""
-        whill = Driver()
-        prev = os.getcwd()
+        """启动隔离驱动进程；初始化完成前会先下发零速。"""
+        worker = DriverWorkerClient(
+            {
+                "omnilibs_path": OMNILIBS_PATH,
+                "project_root": PROJECT_ROOT,
+                "can_channel": self.get_parameter("can_channel").value,
+                "can_baud_rate": self.get_parameter("can_baud_rate").value,
+                "motor_ids": [self.left_motor_id, self.right_motor_id],
+                "acceleration_stop": self.acceleration_stop,
+            },
+            startup_timeout_s=self.driver_startup_timeout_s,
+            request_timeout_s=self.driver_request_timeout_s,
+            terminate_timeout_s=self.driver_terminate_timeout_s,
+        )
         try:
-            os.chdir(PROJECT_ROOT)
-            whill.load(
-                "Whill",
-                mode=ONLINE,
-                parameters={
-                    CAN: {
-                        "channel_name": self.get_parameter("can_channel").value,
-                        "interface": "pcan",
-                        "baud_rate": self.get_parameter("can_baud_rate").value,
-                        "canopen": 1,
-                    }
-                },
-            )
-        finally:
-            os.chdir(prev)
+            worker.start()
+        except DriverWorkerError as exc:
+            self._motion_fault_latched = True
+            self._require_cmd_reset = True
+            self._publish_fault(True)
+            self.get_logger().error(f"底盘驱动进程启动失败，保持故障锁定: {exc}")
+        return worker
 
-        # 恢复后立即发一次零速，清空电机残留状态
+    def _try_restart_driver(self, now_mono: Optional[float] = None) -> bool:
+        now = time.monotonic() if now_mono is None else float(now_mono)
+        if self.connected:
+            return True
+        if now - self._last_driver_restart_try_mono < self._driver_restart_interval_s:
+            return False
+        self._last_driver_restart_try_mono = now
+
         try:
-            whill.move_velocity([self.left_motor_id, self.right_motor_id], 0.0, self.acceleration_stop)
-        except Exception:
-            pass
-        return whill
+            self.whill.restart()
+        except DriverWorkerError as exc:
+            self.get_logger().error(f"底盘驱动进程重启失败，继续保持停车锁定: {exc}")
+            return False
+
+        self._clear_cmd_cache(require_reset=True)
+        self._motion_fault_latched = True
+        self._publish_fault(True)
+        self.get_logger().info("底盘驱动进程已重启并下发零速；等待一次 0 速指令复位")
+        return True
 
     # ── cmd_vel 接收 ───────────────────────────────────────────────
 
@@ -325,7 +356,7 @@ class WhillBaseDriver(Node):
         else:
             self._last_sent_linear = 0.0
             self._last_sent_angular = 0.0
-            self._last_send_failed = False
+            self._last_send_failed = True
         return sent
 
     def _send_cmd(self):
@@ -372,30 +403,28 @@ class WhillBaseDriver(Node):
                 self._last_zero_keepalive_mono = now_mono
 
     def _send_wheel_velocity(self, left_degps: float, right_degps: float) -> bool:
-        error = None
-        with self._driver_lock:
-            if not self.connected or self.whill is None:
-                return False
-            try:
-                l = float(left_degps)
-                r = float(right_degps)
-                accel = select_wheel_acceleration(l, r, self.acceleration, self.acceleration_stop)
-                # if abs(l - r) < 1e-6:
-                #     self.whill.move_velocity(
-                #         [self.left_motor_id, self.right_motor_id], l, accel
-                #     )
-                # else:
-                self.whill.move_velocity([self.left_motor_id], l, accel)
-                self.whill.move_velocity([self.right_motor_id], r, accel)
-            except Exception as exc:
-                error = exc
-
-        if error is not None:
-            self.get_logger().error(f"下发轮速失败: {error}")
+        if not self.connected:
+            error = DriverWorkerError("driver worker is not connected")
             self._latch_motion_fault(error)
             return False
 
-        return True
+        try:
+            l = float(left_degps)
+            r = float(right_degps)
+            accel = select_wheel_acceleration(
+                l, r, self.acceleration, self.acceleration_stop
+            )
+            self.whill.set_velocity(
+                [self.left_motor_id, self.right_motor_id],
+                l,
+                r,
+                accel,
+            )
+            return True
+        except DriverWorkerError as exc:
+            self.get_logger().error(f"下发轮速失败: {exc}")
+            self._latch_motion_fault(exc)
+            return False
 
     # ── 里程计 ─────────────────────────────────────────────────────
 
@@ -410,16 +439,11 @@ class WhillBaseDriver(Node):
             return
         self.last_time = now
 
-        error = None
-        with self._driver_lock:
-            try:
-                vel = self.whill.get_velocity([self.left_motor_id, self.right_motor_id])
-            except Exception as exc:
-                error = exc
-
-        if error is not None:
-            self.get_logger().error(f"读取轮速失败: {error}")
-            self._latch_motion_fault(error)
+        try:
+            vel = self.whill.get_velocity([self.left_motor_id, self.right_motor_id])
+        except DriverWorkerError as exc:
+            self.get_logger().error(f"读取轮速失败: {exc}")
+            self._latch_motion_fault(exc)
             return
 
         wheel_msg = Float64MultiArray()
@@ -468,7 +492,10 @@ class WhillBaseDriver(Node):
 
     def _monitor_fault(self):
         """5Hz 轻量轮询：通过 TPDO 缓存检测电机故障，避免阻塞在 move_velocity。"""
-        if not self.connected or self.whill is None or self._motion_fault_latched:
+        if not self.connected:
+            self._try_restart_driver()
+            return
+        if self._motion_fault_latched:
             return
         if time.monotonic() < self._fault_monitor_cooldown_until:
             return
@@ -476,7 +503,9 @@ class WhillBaseDriver(Node):
             statuses = self.whill.get_fault_status(
                 [self.left_motor_id, self.right_motor_id]
             )
-        except Exception:
+        except DriverWorkerError as exc:
+            self.get_logger().error(f"读取底盘故障状态失败: {exc}")
+            self._latch_motion_fault(exc)
             return
         motor_ids = [self.left_motor_id, self.right_motor_id]
         for motor_id, status in zip(motor_ids, statuses):
@@ -490,22 +519,22 @@ class WhillBaseDriver(Node):
     def destroy_node(self):
         self.running = False
         self._stop_motion()
-        with self._driver_lock:
-            if self.whill:
-                try:
-                    self.whill.finalize()
-                except Exception:
-                    pass
+        if self.whill:
+            self.whill.stop()
         super().destroy_node()
 
     def _stop_motion(self):
-        with self._driver_lock:
-            if not self.connected or self.whill is None:
-                return
-            try:
-                self.whill.move_velocity([self.left_motor_id, self.right_motor_id], 0.0, self.acceleration_stop)
-            except Exception:
-                pass
+        if not self.connected:
+            return
+        try:
+            self.whill.set_velocity(
+                [self.left_motor_id, self.right_motor_id],
+                0.0,
+                0.0,
+                self.acceleration_stop,
+            )
+        except DriverWorkerError:
+            pass
 
 
 def main(args=None):
