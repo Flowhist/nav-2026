@@ -70,6 +70,7 @@ const stageMeta = [
   { label: "4档", desc: "高速", speed: 0.60 },
 ];
 let configSaveNoticeTimer = null;
+let toastTimer = null;
 
 function fmt(n, digits = 2) {
   if (n === null || n === undefined || Number.isNaN(Number(n))) return "--";
@@ -85,8 +86,36 @@ async function api(path, method = "GET", body = null, options = {}) {
   };
   if (body !== null && body !== undefined) opt.body = JSON.stringify(body);
   const res = await fetch(path, opt);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new Error(await readApiError(res));
   return res.json();
+}
+
+async function readApiError(res) {
+  try {
+    const data = await res.json();
+    if (data && data.error) return String(data.error);
+  } catch (_err) {
+    // fall through to HTTP status text
+  }
+  return `${res.status} ${res.statusText}`;
+}
+
+function showToast(message, kind = "ok") {
+  const node = $("toast");
+  if (!node) return;
+  if (toastTimer) window.clearTimeout(toastTimer);
+  node.textContent = message;
+  node.dataset.kind = kind;
+  node.classList.remove("hidden");
+  toastTimer = window.setTimeout(() => {
+    node.classList.add("hidden");
+    node.dataset.kind = "";
+  }, 3200);
+}
+
+function reportActionError(err, fallback = "操作失败") {
+  console.error(err);
+  showToast(err?.message || fallback, "error");
 }
 
 function setText(id, text) {

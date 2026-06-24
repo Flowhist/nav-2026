@@ -571,12 +571,27 @@ function toggleNavMapMenu(force) {
   $("navMapToggle").setAttribute("aria-expanded", String(shouldOpen));
 }
 
+function confirmPageSwitchStop(mode, page) {
+  const label = mode === "mapping" ? "建图" : "导航";
+  const target = { mapping: "建图", navigation: "导航", preview: "地图预览", configs: "配置文件" }[page] || page;
+  return showAnnotationConfirmDialog({
+    title: `结束${label}会话`,
+    message: `切换到“${target}”会先结束当前${label}会话，是否继续？`,
+    confirmText: "继续切换",
+    danger: true,
+  });
+}
+
 async function setPage(page) {
   if (page !== appState.page) {
     if (appState.page === "mapping" && page !== "mapping" && getRuntime("mapping").running) {
+      const confirmed = await confirmPageSwitchStop("mapping", page);
+      if (!confirmed) return;
       await stopRuntime("mapping", { showModal: true });
     }
     if (appState.page === "navigation" && page !== "navigation" && getRuntime("navigation").running) {
+      const confirmed = await confirmPageSwitchStop("navigation", page);
+      if (!confirmed) return;
       await stopRuntime("navigation", { showModal: true });
     }
   }
@@ -595,8 +610,7 @@ async function setPage(page) {
     showConfigOverview();
     loadConfigs().catch(console.error);
   }
-  renderLiveCanvases();
-  renderPreviewCanvas();
+  renderCurrentPageCanvases();
 }
 
 function bind() {
@@ -637,9 +651,14 @@ function bind() {
   $("btnStartNavigation").addEventListener("click", () => startRuntime("navigation").catch(console.error));
   $("btnStopNavigation").addEventListener("click", () => stopRuntime("navigation", { showModal: true }).catch(console.error));
   $("btnSaveMap").addEventListener("click", async () => {
-    const name = ($("mapName").value || "manual_map").trim();
-    await api("/api/map/save", "POST", { name });
-    window.setTimeout(() => loadSavedMaps().catch(console.error), 1800);
+    try {
+      const name = ($("mapName").value || "manual_map").trim();
+      await api("/api/map/save", "POST", { name });
+      window.setTimeout(() => loadSavedMaps().catch(console.error), 1800);
+      showToast("已请求保存地图", "ok");
+    } catch (err) {
+      reportActionError(err, "地图保存失败");
+    }
   });
 
   document.querySelectorAll(".teleop-btn").forEach((btn) => {
@@ -662,14 +681,18 @@ function bind() {
         renderRuntimeControls();
       }
     } catch (err) {
-      console.error(err);
+      reportActionError(err, "重定位失败");
     }
   });
   $("btnCancelNav").addEventListener("click", async () => {
-    setNavPlacementMode(null);
-    appState.navDrag = null;
-    await api("/api/nav/cancel", "POST", {});
-    renderLiveCanvases();
+    try {
+      setNavPlacementMode(null);
+      appState.navDrag = null;
+      await api("/api/nav/cancel", "POST", {});
+      renderLiveCanvases();
+    } catch (err) {
+      reportActionError(err, "导航取消失败");
+    }
   });
 
   const sendNavLocation = async () => {
@@ -679,7 +702,7 @@ function bind() {
     try {
       await api("/api/nav/location", "POST", { name });
     } catch (err) {
-      console.error(err);
+      reportActionError(err, "地点导航失败");
     }
   };
   $("btnNavLocation").addEventListener("click", () => sendNavLocation());
@@ -743,8 +766,7 @@ function bind() {
 
   window.addEventListener("keydown", handleKeyboardTeleop);
   window.addEventListener("resize", () => {
-    renderLiveCanvases();
-    renderPreviewCanvas();
+    renderCurrentPageCanvases();
   });
   window.addEventListener("blur", () => {
     if (appState.teleop.keyboardEnabled) stopTeleop(true);

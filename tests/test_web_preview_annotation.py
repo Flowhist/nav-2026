@@ -94,3 +94,78 @@ def test_preview_annotation_uses_themed_modal_instead_of_native_dialogs():
     assert 'id="annotationDialog"' in index_html
     assert "showAnnotationNameDialog" in app_js
     assert "showAnnotationConfirmDialog" in app_js
+
+
+def test_dynamic_cards_do_not_inject_names_with_inner_html():
+    app_pages = (ROOT / "server" / "web" / "app-pages.js").read_text(encoding="utf-8")
+
+    assert "createInfoButton" in app_pages
+    assert "btn.innerHTML = `<strong>${item.name}" not in app_pages
+    assert "card.innerHTML = `<strong>${file.name}" not in app_pages
+
+
+def test_scene_rendering_is_page_aware():
+    app_pages = (ROOT / "server" / "web" / "app-pages.js").read_text(encoding="utf-8")
+    app_js = (ROOT / "server" / "web" / "app.js").read_text(encoding="utf-8")
+
+    assert "getScenePollDelay" in app_pages
+    assert 'appState.page === "mapping"' in app_pages
+    assert 'appState.page === "navigation"' in app_pages
+    set_page_body = app_js.split("async function setPage", 1)[1].split("function bind", 1)[0]
+    assert "renderCurrentPageCanvases()" in set_page_body
+    assert "renderLiveCanvases();" not in set_page_body
+
+
+def test_user_actions_have_visible_error_toast():
+    index_html = (ROOT / "server" / "web" / "index.html").read_text(encoding="utf-8")
+    app_core = (ROOT / "server" / "web" / "app-core.js").read_text(encoding="utf-8")
+    app_pages = (ROOT / "server" / "web" / "app-pages.js").read_text(encoding="utf-8")
+
+    assert 'id="toast"' in index_html
+    assert "function showToast" in app_core
+    assert "function reportActionError" in app_core
+    assert "await readApiError" in app_core
+    assert "reportActionError(err" in app_pages
+
+
+def test_console_visual_style_uses_compact_workbench_tokens():
+    styles = (ROOT / "server" / "web" / "styles.css").read_text(encoding="utf-8")
+
+    assert "--radius: 12px" in styles
+    assert "--shadow: 0 10px 28px" in styles
+    assert "h1 {\n  font-size: 28px;" in styles
+    assert ".topbar {\n  position: sticky;" in styles
+    assert "padding: 16px 24px 14px;" in styles
+    assert "border-radius: 12px;" in styles
+
+
+def test_running_session_page_switch_uses_themed_confirmation():
+    app_js = (ROOT / "server" / "web" / "app.js").read_text(encoding="utf-8")
+    set_page_body = app_js.split("async function setPage", 1)[1].split("function bind", 1)[0]
+    helper_body = app_js.split("function confirmPageSwitchStop", 1)[1].split("async function setPage", 1)[0]
+
+    assert "confirmPageSwitchStop" in app_js
+    assert "showAnnotationConfirmDialog" in helper_body
+    assert "await confirmPageSwitchStop" in set_page_body
+    assert "return;" in set_page_body
+
+
+def test_map_delete_uses_themed_confirmation_not_native_confirm():
+    app_pages = (ROOT / "server" / "web" / "app-pages.js").read_text(encoding="utf-8")
+
+    assert "window.confirm" not in app_pages
+    assert "showAnnotationConfirmDialog" in app_pages
+    delete_body = app_pages.split("async function deleteSelectedPreviewMap", 1)[1].split("async function loadPreviewMap", 1)[0]
+    assert "确认删除地图" in delete_body
+
+
+def test_config_editor_has_line_numbers_and_client_validation():
+    index_html = (ROOT / "server" / "web" / "index.html").read_text(encoding="utf-8")
+    app_pages = (ROOT / "server" / "web" / "app-pages.js").read_text(encoding="utf-8")
+    styles = (ROOT / "server" / "web" / "styles.css").read_text(encoding="utf-8")
+
+    assert 'id="configLineNumbers"' in index_html
+    assert "renderConfigLineNumbers" in app_pages
+    assert "validateConfigYaml" in app_pages
+    assert "YAML 第" in app_pages
+    assert ".line-numbers" in styles

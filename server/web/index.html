@@ -262,12 +262,11 @@
               </div>
               <button id="btnRefreshConfigs">刷新</button>
             </div>
+            <div id="configCards" class="config-cards"></div>
             <div id="configApplyPanel" class="config-apply-panel hidden">
-              <strong>重启生效</strong>
               <div id="configRestartActions" class="config-restart-actions"></div>
               <span id="configRestartNotice" class="save-notice hidden"></span>
             </div>
-            <div id="configCards" class="config-cards"></div>
           </section>
         </div>
 
@@ -286,6 +285,7 @@
             </div>
             <div class="editor-wrap">
               <div class="code-editor">
+                <pre id="configLineNumbers" class="line-numbers" aria-hidden="true">1</pre>
                 <pre id="configHighlight" class="code-highlight" aria-hidden="true"></pre>
                 <textarea id="configEditor" spellcheck="false"></textarea>
               </div>
@@ -376,6 +376,8 @@
       </div>
     </div>
   </div>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script src="/app-core.js"></script>
   <script src="/app-dock.js"></script>

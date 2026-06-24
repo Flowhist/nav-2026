@@ -1,5 +1,6 @@
 async function pollScene() {
   try {
+    if (!isLivePage()) return;
     const payload = await api(`/api/scene?map_version=${appState.mapVersion}`);
     appState.mapVersion = payload.map_version ?? appState.mapVersion;
     if (payload.map) appState.scene.map = payload.map;
@@ -13,8 +14,16 @@ async function pollScene() {
   } catch (err) {
     console.error(err);
   } finally {
-    window.setTimeout(pollScene, 350);
+    window.setTimeout(pollScene, getScenePollDelay());
   }
+}
+
+function isLivePage() {
+  return appState.page === "mapping" || appState.page === "navigation";
+}
+
+function getScenePollDelay() {
+  return isLivePage() ? 350 : 1500;
 }
 
 function resetLiveScene() {
@@ -65,13 +74,17 @@ function renderLiveCanvases() {
     label: appState.navPlacementMode === "initial" ? "初始" : "目标",
   } : null;
 
-  drawScene($("mappingCanvas"), appState.scene.map, appState.scene, { prefix: "live", showTargets: false });
-  drawScene($("navigationCanvas"), appState.scene.map, appState.scene, {
-    prefix: "live",
-    showPlan: true,
-    showTargets: true,
-    dragPose,
-  });
+  if (appState.page === "mapping") {
+    drawScene($("mappingCanvas"), appState.scene.map, appState.scene, { prefix: "live", showTargets: false });
+  }
+  if (appState.page === "navigation") {
+    drawScene($("navigationCanvas"), appState.scene.map, appState.scene, {
+      prefix: "live",
+      showPlan: true,
+      showTargets: true,
+      dragPose,
+    });
+  }
 }
 
 function renderPreviewCanvas() {
@@ -89,6 +102,22 @@ function renderCanvasById(canvasId) {
   else renderLiveCanvases();
 }
 
+function renderCurrentPageCanvases() {
+  if (appState.page === "preview") renderPreviewCanvas();
+  else if (isLivePage()) renderLiveCanvases();
+}
+
+function createInfoButton(className, title, detail) {
+  const btn = document.createElement("button");
+  btn.className = className;
+  const strong = document.createElement("strong");
+  const span = document.createElement("span");
+  strong.textContent = title;
+  span.textContent = detail;
+  btn.append(strong, span);
+  return btn;
+}
+
 function renderMapList() {
   const box = $("mapList");
   box.innerHTML = "";
@@ -99,9 +128,11 @@ function renderMapList() {
   }
 
   appState.savedMaps.forEach((item) => {
-    const btn = document.createElement("button");
-    btn.className = "map-item" + (item.name === appState.previewMapName ? " active" : "");
-    btn.innerHTML = `<strong>${item.name}</strong><span>${item.width} × ${item.height} · ${fmt(item.resolution, 3)} m/px</span>`;
+    const btn = createInfoButton(
+      "map-item" + (item.name === appState.previewMapName ? " active" : ""),
+      item.name,
+      `${item.width} × ${item.height} · ${fmt(item.resolution, 3)} m/px`,
+    );
     btn.addEventListener("click", () => loadPreviewMap(item.name));
     box.appendChild(btn);
   });
@@ -128,10 +159,12 @@ function renderNavMapPicker() {
   $("btnStartNavigation").disabled = getRuntime("navigation").running || getRuntime("navigation").stopping || !appState.savedMaps.length;
 
   appState.savedMaps.forEach((item) => {
-    const btn = document.createElement("button");
-    btn.className = "stage-option map-option" + (item.name === appState.navMapName ? " active" : "");
+    const btn = createInfoButton(
+      "stage-option map-option" + (item.name === appState.navMapName ? " active" : ""),
+      item.name,
+      `${item.width} × ${item.height} · ${fmt(item.resolution, 3)} m/px`,
+    );
     btn.type = "button";
-    btn.innerHTML = `<strong>${item.name}</strong><span>${item.width} × ${item.height} · ${fmt(item.resolution, 3)} m/px</span>`;
     btn.addEventListener("click", () => {
       appState.navMapName = item.name;
       renderNavMapPicker();
@@ -317,14 +350,45 @@ function highlightYaml(text) {
 function syncConfigEditorScroll() {
   const editor = $("configEditor");
   const highlight = $("configHighlight");
+  const lineNumbers = $("configLineNumbers");
   highlight.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`;
+  if (lineNumbers) lineNumbers.style.transform = `translateY(${-editor.scrollTop}px)`;
+}
+
+function renderConfigLineNumbers() {
+  const editor = $("configEditor");
+  const lineNumbers = $("configLineNumbers");
+  if (!lineNumbers) return;
+  const count = Math.max(1, String(editor.value || "").split("\n").length);
+  lineNumbers.textContent = Array.from({ length: count }, (_item, index) => String(index + 1)).join("\n");
 }
 
 function renderConfigHighlight() {
   const editor = $("configEditor");
   const highlight = $("configHighlight");
   highlight.innerHTML = highlightYaml(editor.value);
+  renderConfigLineNumbers();
   syncConfigEditorScroll();
+}
+
+function validateConfigYaml(text) {
+  const stack = [];
+  const pairs = { "]": "[", "}": "{" };
+  const lines = String(text || "").split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\t+/.test(line)) return `YAML 第 ${i + 1} 行使用了 Tab 缩进，请改为空格。`;
+    const body = splitYamlComment(line)[0];
+    for (const ch of body) {
+      if (ch === "[" || ch === "{") stack.push({ ch, line: i + 1 });
+      if (ch === "]" || ch === "}") {
+        const prev = stack.pop();
+        if (!prev || prev.ch !== pairs[ch]) return `YAML 第 ${i + 1} 行括号不匹配。`;
+      }
+    }
+  }
+  if (stack.length) return `YAML 第 ${stack[stack.length - 1].line} 行括号未闭合。`;
+  return "";
 }
 
 function renderConfigRestartActions() {
@@ -350,6 +414,7 @@ function renderConfigRestartActions() {
   targets.forEach((target) => {
     const btn = document.createElement("button");
     btn.type = "button";
+    btn.className = "danger";
     btn.dataset.restartMode = target.mode;
     btn.textContent = `重启${target.label || target.mode}`;
     btn.addEventListener("click", () => restartRuntimeTarget(target.mode, btn).catch(console.error));
@@ -395,9 +460,10 @@ function renderConfigCards() {
   }
 
   appState.configs.forEach((file) => {
-    const card = document.createElement("button");
-    card.className = "config-card";
-    card.innerHTML = `<strong>${file.name}</strong><span>${file.path}</span><span>${formatFileSize(file.size)}</span>`;
+    const card = createInfoButton("config-card", file.name, file.path);
+    const size = document.createElement("span");
+    size.textContent = formatFileSize(file.size);
+    card.appendChild(size);
     card.addEventListener("click", () => openConfigEditor(file.name));
     box.appendChild(card);
   });
@@ -410,7 +476,7 @@ async function loadConfigs() {
     renderConfigRestartActions();
     renderConfigCards();
   } catch (err) {
-    console.error(err);
+    reportActionError(err, "配置列表加载失败");
   }
 }
 
@@ -441,13 +507,19 @@ async function openConfigEditor(name) {
     setConfigSaveNotice("");
     showConfigEditor();
   } catch (err) {
-    console.error(err);
+    reportActionError(err, "配置打开失败");
   }
 }
 
 async function saveConfigEditor() {
   if (!appState.configEditor.name) return;
   const content = $("configEditor").value;
+  const validationError = validateConfigYaml(content);
+  if (validationError) {
+    setConfigSaveNotice("校验失败", "error");
+    showToast(validationError, "error");
+    return;
+  }
   try {
     const data = await api(`/api/configs/${encodeURIComponent(appState.configEditor.name)}`, "POST", { content });
     appState.configEditor.content = content;
@@ -458,7 +530,7 @@ async function saveConfigEditor() {
     }
     setConfigSaveNotice("保存成功", "ok");
   } catch (err) {
-    console.error(err);
+    reportActionError(err, "配置保存失败");
     setConfigSaveNotice("保存失败", "error");
   }
 }
@@ -476,7 +548,7 @@ async function restartRuntimeTarget(mode, button) {
     }
     setConfigRestartNotice("已请求重启", "ok");
   } catch (err) {
-    console.error(err);
+    reportActionError(err, "重启失败");
     setConfigRestartNotice("重启失败", "error");
   } finally {
     button.disabled = false;
@@ -497,7 +569,7 @@ async function startRuntime(mode) {
       renderRuntimeControls();
     }
   } catch (err) {
-    console.error(err);
+    reportActionError(err, "运行启动失败");
   }
 }
 
@@ -513,7 +585,7 @@ async function stopRuntime(mode, options = {}) {
       renderLiveCanvases();
       updateSceneHints();
     } catch (err) {
-      console.error(err);
+      reportActionError(err, "运行停止失败");
     }
   };
   if (options.showModal) await withBlockingModal(run);
@@ -550,14 +622,20 @@ async function loadSavedMaps() {
       await loadPreviewMap(appState.previewMapName, false);
     }
   } catch (err) {
-    console.error(err);
+    reportActionError(err, "地图列表加载失败");
   }
 }
 
 async function deleteSelectedPreviewMap() {
   const name = appState.previewMapName;
   if (!name) return;
-  if (!window.confirm(`确认删除地图“${name}”吗？该目录及其全部文件会被删除。`)) return;
+  const confirmed = await showAnnotationConfirmDialog({
+    title: "删除地图",
+    message: `确认删除地图“${name}”吗？该目录及其全部文件会被删除。`,
+    confirmText: "删除",
+    danger: true,
+  });
+  if (!confirmed) return;
   try {
     await api(`/api/maps/${encodeURIComponent(name)}/delete`, "POST", {});
     if (appState.navMapName === name) appState.navMapName = "";
@@ -571,7 +649,7 @@ async function deleteSelectedPreviewMap() {
     }
     await loadSavedMaps();
   } catch (err) {
-    console.error(err);
+    reportActionError(err, "地图删除失败");
   }
 }
 
@@ -652,7 +730,7 @@ async function savePreviewLocations() {
       loadNavLocations(true).catch(console.error);
     }
   } catch (err) {
-    console.error(err);
+    reportActionError(err, "地点保存失败");
   } finally {
     renderPreviewLocationList();
     renderPreviewCanvas();

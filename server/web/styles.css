@@ -15,8 +15,8 @@
   --map-unknown: #cfd7cf;
   --map-occupied: #34463d;
   --robot: #c46a2b;
-  --shadow: 0 22px 48px rgba(17, 34, 22, 0.09);
-  --radius: 22px;
+  --shadow: 0 10px 28px rgba(17, 34, 22, 0.08);
+  --radius: 12px;
 }
 
 * {
@@ -35,10 +35,8 @@ body {
   color: var(--text);
   font-family: "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   background:
-    radial-gradient(circle at top left, rgba(203, 218, 198, 0.9), transparent 32%),
-    radial-gradient(circle at top right, rgba(231, 220, 197, 0.8), transparent 28%),
-    linear-gradient(180deg, #eef4eb 0%, #f7f7f0 52%, #edf1eb 100%);
-  background-attachment: fixed, fixed, fixed;
+    linear-gradient(180deg, #edf3ea 0%, #f7f8f2 52%, #edf1eb 100%);
+  background-attachment: fixed;
   background-repeat: no-repeat;
 }
 
@@ -49,8 +47,8 @@ input {
 
 button {
   border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 12px 16px;
+  border-radius: 10px;
+  padding: 10px 14px;
   background: rgba(255, 255, 255, 0.72);
   color: var(--text);
   cursor: pointer;
@@ -99,8 +97,8 @@ input {
   width: 100%;
   margin-top: 8px;
   border: 1px solid rgba(79, 99, 80, 0.18);
-  border-radius: 14px;
-  padding: 12px 14px;
+  border-radius: 10px;
+  padding: 10px 12px;
   background: rgba(255, 255, 255, 0.82);
   color: var(--text);
 }
@@ -125,7 +123,7 @@ input:disabled {
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  padding: 24px 28px 20px;
+  padding: 16px 24px 14px;
   backdrop-filter: blur(18px);
   background: rgba(244, 247, 241, 0.85);
   border-bottom: 1px solid rgba(84, 105, 89, 0.12);
@@ -146,7 +144,7 @@ h3 {
 }
 
 h1 {
-  font-size: 34px;
+  font-size: 28px;
   font-weight: 700;
 }
 
@@ -178,14 +176,14 @@ h3 {
 }
 
 .tab {
-  min-width: 118px;
-  border-radius: 999px;
+  min-width: 108px;
+  border-radius: 10px;
   border-color: rgba(70, 93, 75, 0.16);
   background: rgba(255, 255, 255, 0.58);
 }
 
 .workspace {
-  padding: 24px 28px 0;
+  padding: 20px 24px 0;
 }
 
 .page {
@@ -199,14 +197,14 @@ h3 {
 .page-layout {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
-  gap: 22px;
+  gap: 18px;
   min-height: calc(100vh - 210px);
 }
 
 .preview-layout {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
-  gap: 22px;
+  gap: 18px;
   min-height: calc(100vh - 170px);
 }
 
@@ -222,15 +220,15 @@ h3 {
 .config-cards {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 18px;
+  gap: 14px;
   margin-top: 20px;
 }
 
 .config-card {
   text-align: left;
-  min-height: 148px;
-  padding: 18px;
-  border-radius: 20px;
+  min-height: 118px;
+  padding: 16px;
+  border-radius: 8px;
 }
 
 .config-card strong,
@@ -283,7 +281,7 @@ h3 {
   width: 100%;
   min-height: 62vh;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 22px;
+  border-radius: 12px;
   background: #0e1116;
   overflow: hidden;
 }
@@ -293,12 +291,32 @@ h3 {
   width: 100%;
   min-height: 62vh;
   margin: 0;
-  padding: 22px 24px;
+  padding: 18px 20px 18px 72px;
   font-family: Consolas, "Courier New", monospace;
   font-size: 14px;
   line-height: 1.6;
   white-space: pre;
   tab-size: 2;
+}
+
+.line-numbers {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 52px;
+  min-height: 100%;
+  margin: 0;
+  padding: 18px 10px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  color: #6e7f92;
+  background: rgba(255, 255, 255, 0.03);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  text-align: right;
+  user-select: none;
+  pointer-events: none;
+  will-change: transform;
 }
 
 .code-highlight {
@@ -356,13 +374,10 @@ h3 {
 .config-apply-panel {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  margin-top: 16px;
-  padding: 14px 16px;
-  border: 1px solid rgba(61, 84, 64, 0.12);
-  border-radius: 16px;
-  background: rgba(238, 243, 235, 0.72);
+  justify-content: center;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 0;
 }
 
 .config-apply-panel strong {
@@ -373,7 +388,7 @@ h3 {
 
 .config-restart-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
   flex-wrap: wrap;
   gap: 10px;
 }
@@ -479,8 +494,8 @@ h3 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
+  width: 38px;
+  height: 38px;
   padding: 0;
   border-radius: 999px;
 }
@@ -511,7 +526,7 @@ h3 {
   min-height: 420px;
   margin-top: 20px;
   overflow: hidden;
-  border-radius: 20px;
+  border-radius: 12px;
   background:
     linear-gradient(180deg, rgba(224, 233, 221, 0.95), rgba(237, 242, 233, 0.92)),
     linear-gradient(90deg, rgba(46, 70, 53, 0.06) 1px, transparent 1px),
@@ -1270,6 +1285,28 @@ label {
 .blocking-card p {
   margin: 14px 0 0;
   font-size: 16px;
+}
+
+.toast {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 90;
+  max-width: min(420px, calc(100vw - 44px));
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(61, 84, 64, 0.14);
+  background: rgba(250, 252, 248, 0.96);
+  box-shadow: 0 18px 42px rgba(16, 31, 20, 0.18);
+  color: var(--primary-strong);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.toast[data-kind="error"] {
+  color: #fff6f3;
+  background: rgba(178, 58, 49, 0.96);
+  border-color: rgba(178, 58, 49, 0.28);
 }
 
 .blocking-spinner {

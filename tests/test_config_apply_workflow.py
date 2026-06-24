@@ -115,6 +115,7 @@ def test_web_runtime_commands_use_source_launch_and_source_config():
 def test_config_overview_exposes_restart_actions_outside_editor():
     index_html = (ROOT / "server" / "web" / "index.html").read_text(encoding="utf-8")
     app_pages = (ROOT / "server" / "web" / "app-pages.js").read_text(encoding="utf-8")
+    styles = (ROOT / "server" / "web" / "styles.css").read_text(encoding="utf-8")
 
     assert 'id="configApplyPanel"' in index_html
     assert 'id="configRestartActions"' in index_html
@@ -122,7 +123,10 @@ def test_config_overview_exposes_restart_actions_outside_editor():
     editor = index_html.split('id="configEditorView"', 1)[1]
     assert 'id="configApplyPanel"' in overview
     assert 'id="configApplyPanel"' not in editor
+    assert overview.index('id="configCards"') < overview.index('id="configApplyPanel"')
     assert "renderConfigRestartActions" in app_pages
     assert "renderConfigApplyPanel" not in app_pages
     assert "restartRuntimeTarget" in app_pages
+    assert 'btn.className = "danger"' in app_pages
+    assert "justify-content: center;" in styles.split(".config-restart-actions", 1)[1].split("}", 1)[0]
     assert "/api/runtime/" in app_pages and "/restart" in app_pages
