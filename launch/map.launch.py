@@ -81,6 +81,18 @@ def generate_launch_description():
     )
     left_lidar_ip = LaunchConfiguration("left_lidar_ip")
     right_lidar_ip = LaunchConfiguration("right_lidar_ip")
+    map_file_arg = DeclareLaunchArgument(
+        "map_file",
+        default_value="",
+        description="已有地图名；非空时加载 posegraph 进入继续建图定位阶段",
+    )
+    maps_dir_arg = DeclareLaunchArgument(
+        "maps_dir",
+        default_value=os.path.join(repo_dir, "maps"),
+        description="地图根目录",
+    )
+    map_file = LaunchConfiguration("map_file")
+    maps_dir = LaunchConfiguration("maps_dir")
 
     # 1. 雷达驱动
     lidar_launch = IncludeLaunchDescription(
@@ -102,6 +114,8 @@ def generate_launch_description():
             "mode": "mapping",
             "use_sim_time": "false",
             "scan_topic": "/scan",
+            "map_file": map_file,
+            "maps_dir": maps_dir,
         }.items(),
     )
 
@@ -130,6 +144,8 @@ def generate_launch_description():
         [
             left_lidar_ip_arg,
             right_lidar_ip_arg,
+            map_file_arg,
+            maps_dir_arg,
             lidar_launch,
             dm_imu_launch,
             ekf_launch,

@@ -46,7 +46,7 @@
                     </svg>
                   </button>
                   <div id="mappingHelp" class="map-help hidden">
-                    滚轮缩放，左键拖拽平移，右键拖拽旋转查看局部细节。
+                    滚轮缩放，左键拖拽平移，右键拖拽旋转查看局部细节。点击按钮后，在地图上拖拽方向来设置初始位姿或目标点。
                   </div>
                 </div>
               </div>
@@ -63,8 +63,32 @@
                 <h3>建图会话</h3>
                 <span id="mappingRunState" class="run-state idle">未启动</span>
               </div>
-              <div class="runtime-actions">
+              <div class="mapping-session-section">
+                <h4>新建地图</h4>
                 <button id="btnStartMapping" class="primary wide">开始建图</button>
+              </div>
+              <div class="mapping-session-section">
+                <h4>继续建图</h4>
+                <div id="mappingMapPanel" class="stage-panel map-picker">
+                  <button id="mappingMapToggle" class="speed-stage" type="button" aria-expanded="false">
+                    <span>地图列表</span>
+                    <strong id="mappingMapLabel">未发现可继续地图</strong>
+                  </button>
+                  <div id="mappingMapMenu" class="stage-menu map-stage-menu">
+                    <div id="mappingMapOptions" class="map-stage-options">
+                      <div class="subtle">等待地图列表...</div>
+                    </div>
+                  </div>
+                </div>
+                <button id="btnStartContinueMapping" class="primary wide">继续建图</button>
+                <div class="mapping-relocate-actions">
+                  <button id="btnMappingAutoRelocate" class="wide">自动重定位</button>
+                  <button id="btnMappingManualRelocate" class="wide">手动重定位</button>
+                </div>
+              </div>
+              <div class="mapping-session-section">
+                <h4>保存地图</h4>
+                <button id="btnSaveMap" class="primary wide">保存地图</button>
                 <button id="btnStopMapping" class="danger wide">结束建图</button>
               </div>
             </section>
@@ -112,15 +136,6 @@
               </div>
             </section>
 
-            <section class="glass panel">
-              <h3>地图保存</h3>
-              <div class="save-map-stack">
-                <label>地图名称
-                  <input id="mapName" type="text" value="manual_map" />
-                </label>
-                <button id="btnSaveMap" class="primary wide">保存当前地图</button>
-              </div>
-            </section>
           </aside>
         </div>
       </section>
@@ -131,9 +146,14 @@
             <div class="pane-head">
               <div>
                 <h2>导航工作区</h2>
-                <p class="subtle">点击按钮后，在地图上拖拽方向来设置初始位姿或目标点</p>
+                <p class="subtle">显示 `/map` 与 `/scan`，机器人位置会叠加在地图上</p>
               </div>
               <div class="pane-tools">
+                <div class="legend">
+                  <span><i class="legend-map"></i>地图</span>
+                  <span><i class="legend-scan"></i>雷达</span>
+                  <span><i class="legend-robot"></i>机器人</span>
+                </div>
                 <div class="help-wrap">
                   <button class="hint-toggle hint-icon" data-help="navigationHelp" type="button" aria-label="查看地图操作提示">
                     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -143,7 +163,8 @@
                     </svg>
                   </button>
                   <div id="navigationHelp" class="map-help hidden">
-                    普通模式下可滚轮缩放、左键平移、右键旋转。进入设置模式后，左键拖拽用于设置位姿方向。
+                    滚轮缩放，左键拖拽平移，右键拖拽旋转查看局部细节。
+                    点击按钮后，在地图上拖拽方向来设置初始位姿或目标点。
                   </div>
                 </div>
               </div>
@@ -162,7 +183,7 @@
               </div>
               <div id="navMapPanel" class="stage-panel map-picker">
                 <button id="navMapToggle" class="speed-stage" type="button" aria-expanded="false">
-                  <span>导航地图</span>
+                  <span>地图列表</span>
                   <strong id="navMapLabel">未发现地图</strong>
                 </button>
                 <div id="navMapMenu" class="stage-menu map-stage-menu">
@@ -176,7 +197,8 @@
                 <button id="btnStopNavigation" class="danger wide">结束导航</button>
               </div>
               <div class="nav-location">
-                <label for="navLocationInput">按地名导航</label>
+                <h4>按地名导航</h4>
+                <!-- <label for="navLocationInput">按地名导航</label> -->
                 <div class="nav-location-row">
                   <input id="navLocationInput" type="text" list="navLocationList" placeholder="输入地名，如 spot1" autocomplete="off" />
                   <button id="btnNavLocation" class="primary" type="button">前往</button>
@@ -189,12 +211,12 @@
             <section class="glass panel">
               <h3>导航指令</h3>
               <div class="stack">
-                <button id="btnArmInit" class="wide">设置初始位姿</button>
-                <button id="btnArmGoal" class="wide">设置目的地</button>
-                <button id="btnRelocate" class="wide">重定位</button>
-                <button id="btnCancelNav" class="danger wide">停止 / 清空</button>
+                <button id="btnRelocate" class="wide">自动重定位</button>
+                <button id="btnArmInit" class="wide">手动重定位</button>
+                <button id="btnArmGoal" class="wide">手动设置目的地</button>
+                <button id="btnCancelNav" class="danger wide">停止导航</button>
               </div>
-              <p class="subtle">进入设置模式后，在地图上按下并拖出方向，松开后立即发布。重定位会根据当前地图与雷达自动估计位姿。</p>
+              <p class="subtle">自动重定位会根据当前地图与雷达估计位姿；手动模式下在地图上拖拽设置方向。</p>
             </section>
           </aside>
         </div>

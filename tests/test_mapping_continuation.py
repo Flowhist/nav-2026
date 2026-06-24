@@ -56,3 +56,21 @@ def test_navigation_buttons_use_requested_names_and_order():
     ]
     positions = [html.index(label) for label in labels]
     assert positions == sorted(positions)
+
+
+def test_continued_mapping_uses_localize_then_mapping_node():
+    map_launch = (ROOT / "launch" / "map.launch.py").read_text(encoding="utf-8")
+    slam_launch = (
+        ROOT / "launch" / "sub" / "slam_toolbox.launch.py"
+    ).read_text(encoding="utf-8")
+    manager = (ROOT / "server" / "process_manager.py").read_text(encoding="utf-8")
+    relocate = (
+        ROOT / "scripts" / "control" / "nav_relocate.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"map_file": map_file' in map_launch
+    assert 'executable="map_and_localization_slam_toolbox_node"' in slam_launch
+    assert '"localization_on_configure": True' in slam_launch
+    assert "activate_continued_mapping" in manager
+    assert '"nav_relocate.py": "nav_relocate.yaml"' in manager
+    assert "raise SystemExit(2)" in relocate

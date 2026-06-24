@@ -199,15 +199,33 @@ class RuntimeManager:
         self._stop_relocate()
         return self.snapshot()
 
-    def run_relocate(self, params: Dict[str, object] | None = None) -> Dict[str, object]:
+    def run_relocate(
+        self,
+        params: Dict[str, object] | None = None,
+        *,
+        resume_mapping: bool = False,
+    ) -> Dict[str, object]:
         """Run a one-shot global relocation (ros2 run finav nav_relocate.py).
 
         Relocate is not a long-running stack: nav_relocate.py auto-detects the
         running map, samples /scan, publishes /initialpose, then exits on its own.
-        It therefore requires the navigation stack to be up.
+        It can run while navigation is active, or while continued mapping is
+        waiting in localization mode. In the latter case a successful match
+        switches slam_toolbox back to mapping mode.
         """
         nav = self._status_for("navigation")
-        if not nav["running"] or nav["stopping"]:
+        mapping = self._status_for("mapping")
+        mapping_args = mapping.get("launch_args", {})
+        continued_mapping = bool(
+            mapping["running"]
+            and not mapping["stopping"]
+            and isinstance(mapping_args, dict)
+            and str(mapping_args.get("map_file", "")).strip()
+        )
+        if resume_mapping:
+            if not continued_mapping:
+                raise RuntimeError("continued mapping must be running before relocate")
+        elif not nav["running"] or nav["stopping"]:
             raise RuntimeError("navigation must be running before relocate")
 
         with self._lock:
@@ -233,6 +251,7 @@ class RuntimeManager:
                 "pid": proc.pid,
                 "log_path": str(log_path),
                 "params": dict(params or {}),
+                "resume_mapping": bool(resume_mapping),
                 "log_handle": log_handle,
             }
             self._sync_status()
@@ -245,6 +264,58 @@ class RuntimeManager:
         watcher = threading.Thread(target=self._watch, args=("relocate", proc), daemon=True)
         watcher.start()
         return self.snapshot()
+
+    def activate_continued_mapping(self, delay_s: float = 0.0) -> bool:
+        if delay_s > 0.0:
+            timer = threading.Timer(
+                delay_s,
+                self.activate_continued_mapping,
+                kwargs={"delay_s": 0.0},
+            )
+            timer.daemon = True
+            timer.start()
+            return True
+
+        mapping = self._status_for("mapping")
+        launch_args = mapping.get("launch_args", {})
+        if (
+            not mapping["running"]
+            or mapping["stopping"]
+            or not isinstance(launch_args, dict)
+            or not str(launch_args.get("map_file", "")).strip()
+        ):
+            return False
+
+        parts = self._build_ros_env_parts()
+        parts.append(
+            "ros2 service call /slam_toolbox/set_localization_mode "
+            "std_srvs/srv/SetBool \"{data: false}\""
+        )
+        try:
+            result = subprocess.run(
+                ["bash", "-lc", " && ".join(parts)],
+                cwd=str(self.repo_dir),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+            )
+        except Exception as exc:
+            self.state_store.add_event(
+                "error", "continued mapping activation failed", {"detail": str(exc)}
+            )
+            return False
+
+        normalized = (result.stdout + result.stderr).replace(" ", "").lower()
+        success = result.returncode == 0 and (
+            "success=true" in normalized or "success:true" in normalized
+        )
+        self.state_store.add_event(
+            "info" if success else "error",
+            "continued mapping activated" if success else "continued mapping activation failed",
+            {"detail": (result.stdout or result.stderr).strip()[-500:]},
+        )
+        return success
 
     def _stop_relocate(self) -> None:
         proc = None
@@ -354,8 +425,13 @@ class RuntimeManager:
         run_cmd = ["ros2", "run", "finav", executable]
         ros_args: list[str] = []
         params = dict(params or {})
-        if executable in {"base_control.py", "base_control_router.py"}:
-            ros_args.extend(["--params-file", str(self.repo_dir / "config" / "base_control.yaml")])
+        params_file = {
+            "base_control.py": "base_control.yaml",
+            "base_control_router.py": "base_control.yaml",
+            "nav_relocate.py": "nav_relocate.yaml",
+        }.get(executable)
+        if params_file:
+            ros_args.extend(["--params-file", str(self.repo_dir / "config" / params_file)])
         for key, value in (params or {}).items():
             if value is None:
                 continue
@@ -447,12 +523,14 @@ class RuntimeManager:
 
     def _watch(self, mode: str, proc: subprocess.Popen) -> None:
         code = proc.wait()
+        completed_meta: Dict[str, object] = {}
         with self._lock:
             current = self._procs.get(mode)
             if current is not proc:
                 self._close_log_handle(mode)
                 return
             stopping = bool(self._meta.get(mode, {}).get("stopping", False))
+            completed_meta = dict(self._meta.get(mode, {}))
             self._close_log_handle(mode)
             self._procs.pop(mode, None)
             meta = self._meta.setdefault(mode, {})
@@ -463,6 +541,13 @@ class RuntimeManager:
         level = "info" if stopping or code == 0 else "warn"
         message = f"{mode} process exited"
         self.state_store.add_event(level, message, {"code": code})
+        if (
+            mode == "relocate"
+            and code == 0
+            and not stopping
+            and completed_meta.get("resume_mapping")
+        ):
+            self.activate_continued_mapping(delay_s=0.8)
 
     def _terminate_process_group(self, proc: subprocess.Popen) -> None:
         try:

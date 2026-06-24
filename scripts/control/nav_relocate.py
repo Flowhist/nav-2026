@@ -648,6 +648,8 @@ def main() -> None:
             rclpy.spin_once(node, timeout_sec=0.1)
         if node.accepted:
             time.sleep(0.2)
+        else:
+            raise SystemExit(2)
     except KeyboardInterrupt:
         pass
     except Exception as exc:

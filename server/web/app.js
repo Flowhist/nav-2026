@@ -174,6 +174,10 @@ function setNavPlacementMode(mode) {
   appState.navPlacementMode = mode;
   $("btnArmInit").classList.toggle("active", mode === "initial");
   $("btnArmGoal").classList.toggle("active", mode === "goal");
+  $("btnMappingManualRelocate").classList.toggle(
+    "active",
+    appState.page === "mapping" && mode === "initial",
+  );
   updateSceneHints();
 }
 
@@ -261,6 +265,13 @@ async function finishNavDrag(event) {
   const yawDeg = Math.hypot(dx, dy) < 0.03 ? 0 : Math.atan2(dy, dx) * 180 / Math.PI;
   const body = { x: drag.start.x, y: drag.start.y, yaw_deg: yawDeg };
   const endpoint = appState.navPlacementMode === "initial" ? "/api/nav/initialpose" : "/api/nav/goal";
+  if (
+    endpoint === "/api/nav/initialpose"
+    && appState.page === "mapping"
+    && getRuntime("mapping").launch_args?.map_file
+  ) {
+    body.resume_mapping = true;
+  }
 
   appState.navDrag = null;
   if (canvas.releasePointerCapture) {
@@ -410,6 +421,24 @@ function showAnnotationNameDialog({ x, y, yawDeg }) {
     validate: (value) => {
       if (!value) return "地点名称不能为空。";
       if (value.includes(":")) return "地点名称不能包含冒号。";
+      return "";
+    },
+  });
+}
+
+function showMapSaveDialog(initialValue) {
+  return showAnnotationDialog({
+    mode: "name",
+    title: "保存地图",
+    meta: "保存栅格地图和可继续建图的 posegraph 数据",
+    initialValue: initialValue || "manual_map",
+    message: "输入地图名称；使用已有名称会覆盖对应地图文件。",
+    confirmText: "保存",
+    validate: (value) => {
+      if (!value) return "地图名称不能为空。";
+      if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+        return "地图名称只能包含字母、数字、下划线和连字符。";
+      }
       return "";
     },
   });
@@ -570,6 +599,13 @@ function toggleNavMapMenu(force) {
   $("navMapToggle").setAttribute("aria-expanded", String(shouldOpen));
 }
 
+function toggleMappingMapMenu(force) {
+  const panel = $("mappingMapPanel");
+  const shouldOpen = typeof force === "boolean" ? force : !panel.classList.contains("open");
+  panel.classList.toggle("open", shouldOpen);
+  $("mappingMapToggle").setAttribute("aria-expanded", String(shouldOpen));
+}
+
 function confirmPageSwitchStop(mode, page) {
   const label = mode === "mapping" ? "建图" : "导航";
   const target = { mapping: "建图", navigation: "导航", preview: "地图预览", configs: "配置文件" }[page] || page;
@@ -626,6 +662,10 @@ function bind() {
     loadSavedMaps().catch(console.error);
     toggleNavMapMenu();
   });
+  $("mappingMapToggle").addEventListener("click", () => {
+    loadSavedMaps().catch(console.error);
+    toggleMappingMapMenu();
+  });
   document.querySelectorAll(".stage-option").forEach((btn) => {
     btn.addEventListener("click", () => {
       appState.teleop.stageIndex = Number(btn.dataset.stage);
@@ -642,16 +682,22 @@ function bind() {
     document.querySelectorAll(".map-help").forEach((panel) => panel.classList.add("hidden"));
     if (!event.target.closest("#stagePanel")) toggleStageMenu(false);
     if (!event.target.closest("#navMapPanel")) toggleNavMapMenu(false);
+    if (!event.target.closest("#mappingMapPanel")) toggleMappingMapMenu(false);
   });
 
   $("teleopToggle").addEventListener("click", () => setKeyboardTeleop(!appState.teleop.keyboardEnabled));
   $("btnStartMapping").addEventListener("click", () => startRuntime("mapping").catch(console.error));
+  $("btnStartContinueMapping").addEventListener("click", () => {
+    startRuntime("mapping", { mapFile: appState.mappingMapName }).catch(console.error);
+  });
   $("btnStopMapping").addEventListener("click", () => stopRuntime("mapping", { showModal: true }).catch(console.error));
   $("btnStartNavigation").addEventListener("click", () => startRuntime("navigation").catch(console.error));
   $("btnStopNavigation").addEventListener("click", () => stopRuntime("navigation", { showModal: true }).catch(console.error));
   $("btnSaveMap").addEventListener("click", async () => {
     try {
-      const name = ($("mapName").value || "manual_map").trim();
+      const mapping = getRuntime("mapping");
+      const name = await showMapSaveDialog(mapping.launch_args?.map_file || "manual_map");
+      if (!name) return;
       await api("/api/map/save", "POST", { name });
       window.setTimeout(() => loadSavedMaps().catch(console.error), 1800);
       showToast("已请求保存地图", "ok");
@@ -682,6 +728,25 @@ function bind() {
     } catch (err) {
       reportActionError(err, "重定位失败");
     }
+  });
+  $("btnMappingAutoRelocate").addEventListener("click", async () => {
+    setNavPlacementMode(null);
+    appState.navDrag = null;
+    try {
+      const data = await api("/api/nav/relocate", "POST", {
+        map_file: appState.mappingMapName,
+        resume_mapping: true,
+      });
+      if (data.runtime) {
+        appState.status = { ...(appState.status || {}), runtime: data.runtime };
+        renderRuntimeControls();
+      }
+    } catch (err) {
+      reportActionError(err, "自动重定位失败");
+    }
+  });
+  $("btnMappingManualRelocate").addEventListener("click", () => {
+    setNavPlacementMode(appState.navPlacementMode === "initial" ? null : "initial");
   });
   $("btnCancelNav").addEventListener("click", async () => {
     try {
@@ -741,7 +806,7 @@ function bind() {
   });
   $("configEditor").addEventListener("scroll", syncConfigEditorScroll);
 
-  bindCanvasInteractions("mappingCanvas");
+  bindCanvasInteractions("mappingCanvas", { allowPlacement: true });
   bindCanvasInteractions("navigationCanvas", { allowPlacement: true });
   bindCanvasInteractions("previewCanvas", { allowPreviewAnnotation: true });
 

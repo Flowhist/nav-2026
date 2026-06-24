@@ -24,6 +24,7 @@ const appState = {
   previewAnnotationMode: false,
   previewAnnotationDraft: null,
   navMapName: "",
+  mappingMapName: "",
   navLocations: [],
   navLocationsFor: "",
   dockView: "events",

@@ -141,6 +141,10 @@ def list_saved_maps(map_dir: Path) -> List[Dict[str, object]]:
                 "width": width,
                 "height": height,
                 "resolution": float(meta.get("resolution", 0.05)),
+                "continuable": (
+                    (child / f"{name}.posegraph").exists()
+                    and (child / f"{name}.data").exists()
+                ),
             }
         )
 

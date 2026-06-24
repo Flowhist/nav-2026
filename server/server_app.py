@@ -219,6 +219,8 @@ class ServerApp:
                             "yaw_deg": body.get("yaw_deg", 0.0),
                         }
                     )
+                    if body.get("resume_mapping"):
+                        app.runtime.activate_continued_mapping(delay_s=0.8)
                     self._json(HTTPStatus.OK, {"ok": True})
                     return
 
@@ -230,8 +232,12 @@ class ServerApp:
                 if path == "/api/nav/relocate":
                     map_file = body.get("map_file", "")
                     params = {"map_file": map_file} if isinstance(map_file, str) and map_file.strip() else {}
+                    resume_mapping = bool(body.get("resume_mapping"))
                     try:
-                        runtime = app.runtime.run_relocate(params=params)
+                        runtime = app.runtime.run_relocate(
+                            params=params,
+                            resume_mapping=resume_mapping,
+                        )
                     except RuntimeError as exc:
                         self._json(HTTPStatus.CONFLICT, {"ok": False, "error": str(exc)})
                         return
@@ -303,7 +309,36 @@ class ServerApp:
                     self._json(HTTPStatus.OK, {"ok": True, "name": name})
                     return
                 if path == "/api/runtime/mapping/start":
-                    self._json(HTTPStatus.OK, {"ok": True, "runtime": app.runtime.start("mapping")})
+                    map_file = body.get("map_file", "")
+                    launch_args = {}
+                    if isinstance(map_file, str) and map_file.strip():
+                        name = map_file.strip()
+                        target = app._resolve_map_dir(name)
+                        if target is None or not target.exists():
+                            self._json(
+                                HTTPStatus.NOT_FOUND,
+                                {"ok": False, "error": f"map not found: {name}"},
+                            )
+                            return
+                        if not (
+                            (target / f"{name}.posegraph").exists()
+                            and (target / f"{name}.data").exists()
+                        ):
+                            self._json(
+                                HTTPStatus.CONFLICT,
+                                {"ok": False, "error": f"map cannot be continued: {name}"},
+                            )
+                            return
+                        launch_args["map_file"] = name
+                    self._json(
+                        HTTPStatus.OK,
+                        {
+                            "ok": True,
+                            "runtime": app.runtime.start(
+                                "mapping", launch_args=launch_args
+                            ),
+                        },
+                    )
                     return
                 if path == "/api/runtime/mapping/stop":
                     self._json(HTTPStatus.OK, {"ok": True, "runtime": app.runtime.stop("mapping")})

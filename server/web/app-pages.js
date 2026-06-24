@@ -43,14 +43,16 @@ function updateSceneHints() {
   const map = appState.scene.map;
   const hasMap = !!map;
   const cameraHint = "滚轮缩放｜左键平移｜右键旋转";
-  $("mappingHint").textContent = hasMap
-    ? `${cameraHint}｜地图 ${map.width} × ${map.height}｜雷达点 ${appState.scene.scan?.points?.length || 0}`
-    : "等待 `/map` 数据...";
+  $("mappingHint").textContent = appState.page === "mapping" && appState.navPlacementMode === "initial"
+    ? "手动重定位中：在地图上拖拽设置车体位置和朝向。"
+    : hasMap
+      ? `${cameraHint}｜地图 ${map.width} × ${map.height}｜雷达点 ${appState.scene.scan?.points?.length || 0}`
+      : "等待 `/map` 数据...";
 
   if (appState.navPlacementMode === "initial") {
-    $("navigationHint").textContent = "设置初始位姿中：左键拖拽方向，右键仍可旋转视图。";
+    $("navigationHint").textContent = "手动重定位中：左键拖拽方向，右键仍可旋转视图。";
   } else if (appState.navPlacementMode === "goal") {
-    $("navigationHint").textContent = "设置目的地中：左键拖拽方向，右键仍可旋转视图。";
+    $("navigationHint").textContent = "手动设置目的地中：左键拖拽方向，右键仍可旋转视图。";
   } else {
     $("navigationHint").textContent = hasMap
       ? `${cameraHint}｜路径点 ${appState.scene.plan?.points || 0}｜雷达点 ${appState.scene.scan?.points?.length || 0}`
@@ -75,7 +77,11 @@ function renderLiveCanvases() {
   } : null;
 
   if (appState.page === "mapping") {
-    drawScene($("mappingCanvas"), appState.scene.map, appState.scene, { prefix: "live", showTargets: false });
+    drawScene($("mappingCanvas"), appState.scene.map, appState.scene, {
+      prefix: "live",
+      showTargets: false,
+      dragPose,
+    });
   }
   if (appState.page === "navigation") {
     drawScene($("navigationCanvas"), appState.scene.map, appState.scene, {
@@ -175,6 +181,40 @@ function renderNavMapPicker() {
   });
 }
 
+function renderMappingMapPicker() {
+  const box = $("mappingMapOptions");
+  if (!box) return;
+  box.innerHTML = "";
+  const maps = appState.savedMaps.filter((item) => item.continuable);
+
+  if (!maps.length) {
+    appState.mappingMapName = "";
+    $("mappingMapLabel").textContent = "未发现可继续地图";
+    box.innerHTML = `<div class="subtle">地图需要包含 posegraph/data 文件</div>`;
+    return;
+  }
+
+  if (!appState.mappingMapName || !maps.some((item) => item.name === appState.mappingMapName)) {
+    appState.mappingMapName = maps[0].name;
+  }
+  $("mappingMapLabel").textContent = appState.mappingMapName;
+
+  maps.forEach((item) => {
+    const btn = createInfoButton(
+      "stage-option map-option" + (item.name === appState.mappingMapName ? " active" : ""),
+      item.name,
+      `${item.width} × ${item.height} · 可继续建图`,
+    );
+    btn.type = "button";
+    btn.addEventListener("click", () => {
+      appState.mappingMapName = item.name;
+      renderMappingMapPicker();
+      toggleMappingMapMenu(false);
+    });
+    box.appendChild(btn);
+  });
+}
+
 async function loadNavLocations(force = false) {
   const map = appState.navMapName;
   if (!map) {
@@ -251,9 +291,15 @@ function renderRuntimeControls() {
   applyRunState("navigationRunState", navigation, "运行中");
 
   $("btnStartMapping").disabled = mappingBusy;
+  $("btnStartContinueMapping").disabled = mappingBusy || !appState.mappingMapName;
   $("btnStopMapping").disabled = !mappingBusy;
   $("btnSaveMap").disabled = !mapping.running || mapping.stopping;
-  $("mapName").disabled = !mapping.running || mapping.stopping;
+  $("mappingMapToggle").disabled = mappingBusy || !appState.mappingMapName;
+  const continuedMapping = Boolean(
+    mapping.running && mapping.launch_args && mapping.launch_args.map_file
+  );
+  $("btnMappingAutoRelocate").disabled = !continuedMapping;
+  $("btnMappingManualRelocate").disabled = !continuedMapping;
   $("btnStartNavigation").disabled = navigationBusy || !appState.savedMaps.length;
   $("btnStopNavigation").disabled = !navigationBusy;
   $("navMapToggle").disabled = navigationBusy || !appState.savedMaps.length;
@@ -263,12 +309,16 @@ function renderRuntimeControls() {
 
   const relocate = getRuntime("relocate");
   const relocateBusy = relocate.running || relocate.stopping;
+  $("btnMappingAutoRelocate").disabled = !continuedMapping || relocateBusy;
+  $("btnMappingManualRelocate").disabled = !continuedMapping || relocateBusy;
   const btnRelocate = $("btnRelocate");
   if (btnRelocate) {
     btnRelocate.disabled = !navCommandsEnabled || relocateBusy;
-    btnRelocate.textContent = relocateBusy ? "重定位中…" : "重定位";
+    btnRelocate.textContent = relocateBusy ? "自动重定位中…" : "自动重定位";
     btnRelocate.classList.toggle("active", relocateBusy);
   }
+  $("btnMappingAutoRelocate").textContent = relocateBusy ? "自动重定位中…" : "自动重定位";
+  $("btnMappingAutoRelocate").classList.toggle("active", relocateBusy);
   if (!navCommandsEnabled && appState.navPlacementMode && typeof setNavPlacementMode === "function") {
     setNavPlacementMode(null);
   }
@@ -556,13 +606,18 @@ async function restartRuntimeTarget(mode, button) {
   }
 }
 
-async function startRuntime(mode) {
+async function startRuntime(mode, options = {}) {
   try {
     if (mode === "navigation" && !appState.savedMaps.length) {
       await loadSavedMaps();
       if (!appState.savedMaps.length) return;
     }
-    const body = mode === "navigation" && appState.navMapName ? { map_file: appState.navMapName } : {};
+    let body = {};
+    if (mode === "navigation" && appState.navMapName) {
+      body = { map_file: appState.navMapName };
+    } else if (mode === "mapping" && options.mapFile) {
+      body = { map_file: options.mapFile };
+    }
     const data = await api(`/api/runtime/${mode}/start`, "POST", body);
     if (data.runtime) {
       appState.status = { ...(appState.status || {}), runtime: data.runtime };
@@ -604,11 +659,13 @@ async function loadSavedMaps() {
       appState.previewAnnotationMode = false;
       appState.previewAnnotationDraft = null;
       appState.navMapName = "";
+      appState.mappingMapName = "";
       $("previewTitle").textContent = "地图预览";
       $("previewMeta").textContent = "从 `maps/` 目录读取 `.pgm` 与 `.yaml`";
       renderMapList();
       renderPreviewLocationList();
       renderNavMapPicker();
+      renderMappingMapPicker();
       renderPreviewCanvas();
       return;
     }
@@ -617,6 +674,7 @@ async function loadSavedMaps() {
     }
     renderMapList();
     renderNavMapPicker();
+    renderMappingMapPicker();
     loadNavLocations().catch(console.error);
     if (appState.previewMapName) {
       await loadPreviewMap(appState.previewMapName, false);
@@ -639,6 +697,7 @@ async function deleteSelectedPreviewMap() {
   try {
     await api(`/api/maps/${encodeURIComponent(name)}/delete`, "POST", {});
     if (appState.navMapName === name) appState.navMapName = "";
+    if (appState.mappingMapName === name) appState.mappingMapName = "";
     if (appState.previewMapName === name) {
       appState.previewMapName = "";
       appState.previewMap = null;

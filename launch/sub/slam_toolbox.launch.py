@@ -62,8 +62,8 @@ def generate_launch_description():
     # 声明地图文件名参数（不带扩展名，用于定位模式）
     map_file_arg = DeclareLaunchArgument(
         "map_file",
-        default_value="map_test",
-        description="地图文件名（不带扩展名），用于纯定位模式",
+        default_value="",
+        description="地图文件名（不带扩展名），用于定位或继续建图",
     )
 
     # 地图目录参数（可覆盖）
@@ -100,11 +100,47 @@ def generate_launch_description():
         executable="sync_slam_toolbox_node",
         name="slam_toolbox",
         output="screen",
-        condition=IfCondition(PythonExpression(["'", mode, "' == 'mapping'"])),
+        condition=IfCondition(
+            PythonExpression(
+                ["'", mode, "' == 'mapping' and '", map_file, "' == ''"]
+            )
+        ),
         parameters=[
             os.path.join(config_dir, "slam_toolbox_map.yaml"),
             {
                 "use_sim_time": use_sim_time,
+            },
+        ],
+        remappings=[
+            ("scan", scan_topic),
+            ("odom", "/odom"),
+            ("imu", "/imu"),
+        ],
+    )
+
+    continued_mapping_node = Node(
+        package="slam_toolbox",
+        executable="map_and_localization_slam_toolbox_node",
+        name="slam_toolbox",
+        output="screen",
+        condition=IfCondition(
+            PythonExpression(
+                ["'", mode, "' == 'mapping' and '", map_file, "' != ''"]
+            )
+        ),
+        parameters=[
+            os.path.join(config_dir, "slam_toolbox_map.yaml"),
+            {
+                "use_sim_time": use_sim_time,
+                "localization_on_configure": True,
+                "map_file_name": [
+                    maps_dir,
+                    "/",
+                    map_file,
+                    "/",
+                    map_file,
+                ],
+                "map_start_pose": [0.0, 0.0, 0.0],
             },
         ],
         remappings=[
@@ -171,6 +207,7 @@ def generate_launch_description():
             localization_info,
             # 延迟启动SLAM，等EKF发布odom->base_link TF（双雷达+无IMU需更长时间）
             TimerAction(period=2.0, actions=[slam_toolbox_node]),
+            TimerAction(period=2.0, actions=[continued_mapping_node]),
             TimerAction(period=2.0, actions=[localization_slam_toolbox_node]),
         ]
     )

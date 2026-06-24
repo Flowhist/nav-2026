@@ -572,6 +572,25 @@ canvas {
   gap: 12px;
 }
 
+.mapping-session-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(61, 84, 64, 0.12);
+}
+
+.mapping-session-section h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.mapping-relocate-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .nav-location {
   display: flex;
   flex-direction: column;
@@ -642,6 +661,17 @@ label {
 .teleop-panel {
   position: relative;
   overflow: hidden;
+  padding: 14px;
+}
+
+.teleop-panel .panel-head {
+  margin-bottom: 2px;
+}
+
+.teleop-panel .subtle {
+  margin: 4px 0;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .teleop-panel.teleop-locked > *:not(.teleop-blocker) {
@@ -680,16 +710,18 @@ label {
   font-size: 13px;
 }
 
-.dpad {
+.teleop-panel .dpad {
   display: grid;
-  grid-template-columns: repeat(3, minmax(72px, 1fr));
-  grid-template-rows: repeat(3, 76px);
-  gap: 10px;
-  margin-top: 18px;
+  grid-template-columns: repeat(3, minmax(52px, 1fr));
+  grid-template-rows: repeat(3, 54px);
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .teleop-btn {
-  font-size: 17px;
+  min-height: 0;
+  padding: 8px;
+  font-size: 14px;
   font-weight: 700;
   transition:
     transform 0.14s ease,
@@ -697,6 +729,15 @@ label {
     background 0.18s ease,
     border-color 0.18s ease,
     color 0.18s ease;
+}
+
+.teleop-panel .stage-panel {
+  margin-top: 8px;
+}
+
+.teleop-panel .speed-stage {
+  min-height: 44px;
+  padding: 9px 12px;
 }
 
 .teleop-btn:hover {
