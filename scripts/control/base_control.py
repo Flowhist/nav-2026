@@ -528,7 +528,7 @@ class WhillBaseDriver(Node):
                 ):
                     self._last_fault_reset_try_mono = now
                     try:
-                        self.whill.recover_fault(
+                        self.whill.reset_fault_status(
                             [self.left_motor_id, self.right_motor_id]
                         )
                     except DriverWorkerBusy:

@@ -18,12 +18,10 @@ joy_control:
     angular_direction: -1.0
 
     # 输入轴归一化后的死区和饱和区，范围通常为 0.0 ~ 1.0。
-    dead_zone: 0.05
+    # 连续控制下适当放大死区，降低摇杆中心轻微抖动带来的干扰。
+    dead_zone: 0.10
     sat_zone: 1.0
 
-    # true: 四区离散控制，同一时间只输出前/后/左/右之一。
-    # false: 连续控制，斜推时 linear.x 和 angular.z 可以同时非零。
-    discrete_motion_enable: true
-
-    # 两档速度分界线：归一化输出小于该值走慢速档，大于等于走快速档。
-    speed_split: 0.65
+    # 摇杆目标速度变化率限制，用于抑制指令突变造成的车身抖动。
+    linear_slew_rate: 1.5     # m/s^2
+    angular_slew_rate: 180.0  # deg/s^2

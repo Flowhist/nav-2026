@@ -7,7 +7,7 @@ relocate:
     # 扫描采集：收集多帧后合并，点数越多越稳但越慢
     collect_scan_count: 5
     max_wait_scan_s: 12.0
-    max_scan_points: 360
+    max_scan_points: 540
     # 扫描点有效量程
     min_range_m: 0.10
     max_range_m: 12.0

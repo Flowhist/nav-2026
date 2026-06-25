@@ -104,7 +104,7 @@ def test_reported_motor_fault_does_not_terminate_healthy_worker():
         worker.terminate()
 
 
-def test_fault_recovery_only_resets_fault_without_power_on(monkeypatch):
+def test_fault_reset_uses_reset_operation_without_power_on(monkeypatch):
     monkeypatch.setattr(
         base_driver_worker,
         "_create_driver",
@@ -118,7 +118,7 @@ def test_fault_recovery_only_resets_fault_without_power_on(monkeypatch):
     )
     worker.start()
     try:
-        assert worker.recover_fault([1, 2]) == [
+        assert worker.reset_fault_status([1, 2]) == [
             ("reset_fault_status", (1, 2)),
         ]
         assert worker.is_healthy is True

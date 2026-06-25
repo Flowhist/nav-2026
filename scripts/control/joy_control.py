@@ -36,11 +36,7 @@ class JoyMappingConfig:
         angular_direction=1.0,
         dead_zone=0.05,
         sat_zone=1.0,
-        speed_split=0.5,
-        discrete_motion_enable=True,
-        linear_speed_low=0.2,
         linear_speed_high=0.4,
-        angular_speed_low=math.radians(10.0),
         angular_speed_high=math.radians(25.0),
     ):
         self.linear_axis = int(linear_axis)
@@ -49,11 +45,7 @@ class JoyMappingConfig:
         self.angular_direction = float(angular_direction)
         self.dead_zone = max(0.0, float(dead_zone))
         self.sat_zone = max(self.dead_zone + 1e-6, float(sat_zone))
-        self.speed_split = min(1.0, max(0.0, float(speed_split)))
-        self.discrete_motion_enable = bool(discrete_motion_enable)
-        self.linear_speed_low = float(linear_speed_low)
         self.linear_speed_high = float(linear_speed_high)
-        self.angular_speed_low = float(angular_speed_low)
         self.angular_speed_high = float(angular_speed_high)
 
 
@@ -73,12 +65,42 @@ def _axis_value(axes, index: int) -> float:
     return float(axes[index])
 
 
-def _tiered_speed(value: float, low_speed: float, high_speed: float, split: float) -> float:
-    mag = abs(value)
-    if mag <= 0.0:
-        return 0.0
-    speed = low_speed if mag < split else high_speed
-    return math.copysign(speed, value)
+def _continuous_speed(value: float, max_speed: float) -> float:
+    return float(value) * float(max_speed)
+
+
+def _limit_delta(current: float, target: float, max_delta: float) -> float:
+    delta = float(target) - float(current)
+    max_delta = max(0.0, float(max_delta))
+    if abs(delta) <= max_delta:
+        return float(target)
+    return float(current) + math.copysign(max_delta, delta)
+
+
+def slew_limited_twist(
+    current: Twist,
+    target: Twist,
+    dt: float,
+    linear_slew_rate: float,
+    angular_slew_rate: float,
+) -> Twist:
+    msg = Twist()
+    if dt <= 0.0:
+        msg.linear.x = float(current.linear.x)
+        msg.angular.z = float(current.angular.z)
+        return msg
+
+    msg.linear.x = _limit_delta(
+        current.linear.x,
+        target.linear.x,
+        abs(float(linear_slew_rate)) * float(dt),
+    )
+    msg.angular.z = _limit_delta(
+        current.angular.z,
+        target.angular.z,
+        abs(float(angular_slew_rate)) * float(dt),
+    )
+    return msg
 
 
 def joy_axes_to_twist(axes, cfg: JoyMappingConfig) -> Twist:
@@ -95,14 +117,10 @@ def joy_axes_to_twist(axes, cfg: JoyMappingConfig) -> Twist:
         cfg.dead_zone,
         cfg.sat_zone,
     )
-    # discrete_motion_enable now means each active axis snaps to a speed tier.
-    # Both axes may remain active, giving 8-way manual control.
-    msg.linear.x = _tiered_speed(
-        linear, cfg.linear_speed_low, cfg.linear_speed_high, cfg.speed_split
-    )
-    msg.angular.z = _tiered_speed(
-        angular, cfg.angular_speed_low, cfg.angular_speed_high, cfg.speed_split
-    )
+
+    msg.linear.x = _continuous_speed(linear, cfg.linear_speed_high)
+    msg.angular.z = _continuous_speed(angular, cfg.angular_speed_high)
+
     # Backward diagonals are named from the driver's perspective:
     # stick left while reversing should command rear-left, not rear-right.
     if msg.linear.x < 0.0 and msg.angular.z != 0.0:
@@ -194,17 +212,21 @@ class JoyControl(Node):
         self.declare_parameter("angular_direction", 1.0)
         self.declare_parameter("dead_zone", 0.05)
         self.declare_parameter("sat_zone", 1.0)
-        self.declare_parameter("speed_split", 0.5)
-        self.declare_parameter("discrete_motion_enable", True)
-        self.declare_parameter("js_vel_low", 0.2)
         self.declare_parameter("js_vel_high", 0.4)
-        self.declare_parameter("js_rot_low", 10.0)
         self.declare_parameter("js_rot_high", 25.0)
+        self.declare_parameter("linear_slew_rate", 1.5)
+        self.declare_parameter("angular_slew_rate", 180.0)
 
         self.enabled = bool(self.get_parameter("enabled").value)
         self.device_path = str(self.get_parameter("dev").value)
         self.reconnect_interval = max(
             0.2, float(self.get_parameter("reconnect_interval").value)
+        )
+        self.linear_slew_rate = max(
+            0.01, float(self.get_parameter("linear_slew_rate").value)
+        )
+        self.angular_slew_rate = math.radians(
+            max(1.0, float(self.get_parameter("angular_slew_rate").value))
         )
         self.cfg = JoyMappingConfig(
             linear_axis=self.get_parameter("linear_axis").value,
@@ -213,11 +235,7 @@ class JoyControl(Node):
             angular_direction=self.get_parameter("angular_direction").value,
             dead_zone=self.get_parameter("dead_zone").value,
             sat_zone=self.get_parameter("sat_zone").value,
-            speed_split=self.get_parameter("speed_split").value,
-            discrete_motion_enable=self.get_parameter("discrete_motion_enable").value,
-            linear_speed_low=self.get_parameter("js_vel_low").value,
             linear_speed_high=self.get_parameter("js_vel_high").value,
-            angular_speed_low=math.radians(float(self.get_parameter("js_rot_low").value)),
             angular_speed_high=math.radians(float(self.get_parameter("js_rot_high").value)),
         )
 
@@ -226,6 +244,7 @@ class JoyControl(Node):
         self._reported_ready = False
         self._reported_missing = False
         self._last_twist = Twist()
+        self._last_publish_mono = monotonic()
         cmd_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
             history=QoSHistoryPolicy.KEEP_LAST,
@@ -280,10 +299,21 @@ class JoyControl(Node):
         self._joy_pub.publish(msg)
 
     def _publish(self):
+        now = monotonic()
+        dt = now - self._last_publish_mono
+        self._last_publish_mono = now
+
         active = self._ensure_open()
         if active:
             self.reader.read_available()
-            self._last_twist = joy_axes_to_twist(self.reader.axes, self.cfg)
+            target_twist = joy_axes_to_twist(self.reader.axes, self.cfg)
+            self._last_twist = slew_limited_twist(
+                self._last_twist,
+                target_twist,
+                dt,
+                self.linear_slew_rate,
+                self.angular_slew_rate,
+            )
             self._publish_joy()
         else:
             self._last_twist = Twist()
