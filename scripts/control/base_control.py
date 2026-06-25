@@ -26,7 +26,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, Float64MultiArray
 
-from base_driver_worker import DriverWorkerClient, DriverWorkerError
+from base_driver_worker import DriverWorkerBusy, DriverWorkerClient, DriverWorkerError
 
 PROJECT_ROOT = "/home/embotic/nav_workspace/src/finav"
 OMNILIBS_PATH = "/home/embotic/DCCS/src/site-packages"
@@ -36,6 +36,22 @@ def select_wheel_acceleration(left_degps: float, right_degps: float, acceleratio
     if abs(float(left_degps)) < 1e-6 and abs(float(right_degps)) < 1e-6:
         return int(acceleration_stop)
     return int(acceleration)
+
+
+def advance_fault_clear_count(count: int, statuses, required: int = 3):
+    if any(status.get("fault", 0) != 0 for status in statuses):
+        return 0, False
+    count = int(count) + 1
+    return count, count >= required
+
+
+def should_reset_fault(statuses) -> bool:
+    estop_faults = {0x5441, 0x8313}
+    return any(
+        status.get("fault", 0) in estop_faults
+        and status.get("emergency", 0) == 0
+        for status in statuses
+    )
 
 
 class WhillBaseDriver(Node):
@@ -142,9 +158,9 @@ class WhillBaseDriver(Node):
         self._last_send_failed = False
         self._require_cmd_reset = True
         self._motion_fault_latched = False
+        self._fault_clear_count = 0
+        self._last_fault_reset_try_mono = 0.0
         self._last_fault_log_mono = 0.0
-        self._last_fault_stop_try_mono = 0.0
-        self._fault_monitor_cooldown_until = 0.0
 
         # ── 订阅 ──
         cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
@@ -207,9 +223,12 @@ class WhillBaseDriver(Node):
             self._require_cmd_reset = bool(require_reset)
 
     def _latch_motion_fault(self, error):
+        was_latched = self._motion_fault_latched
         self._motion_fault_latched = True
-        self._clear_cmd_cache(require_reset=True)
-        self._publish_fault(True)
+        self._fault_clear_count = 0
+        if not was_latched:
+            self._clear_cmd_cache(require_reset=True)
+            self._publish_fault(True)
 
         now = time.monotonic()
         if now - self._last_fault_log_mono >= 1.0:
@@ -219,24 +238,6 @@ class WhillBaseDriver(Node):
             else:
                 self.get_logger().error(f"检测到底盘控制故障，已清空控制指令: {error}")
             self._last_fault_log_mono = now
-
-        self._try_stop_after_fault(now)
-
-    def _try_stop_after_fault(self, now_mono: float):
-        if now_mono - self._last_fault_stop_try_mono < 1.0:
-            return
-        self._last_fault_stop_try_mono = now_mono
-        if not self.connected:
-            return
-        try:
-            self.whill.set_velocity(
-                [self.left_motor_id, self.right_motor_id],
-                0.0,
-                0.0,
-                self.acceleration_stop,
-            )
-        except DriverWorkerError:
-            pass
 
     def _create_and_load_driver(self):
         """启动隔离驱动进程；初始化完成前会先下发零速。"""
@@ -290,6 +291,11 @@ class WhillBaseDriver(Node):
         now_mono = time.monotonic()
 
         with self._cmd_lock:
+            if self._motion_fault_latched:
+                self._latest_cmd_linear = 0.0
+                self._latest_cmd_angular = 0.0
+                self._latest_cmd_mono = None
+                return
             if self._require_cmd_reset:
                 if self._cmd_nonzero(linear, angular):
                     if now_mono - self._last_fault_log_mono >= 1.0:
@@ -301,10 +307,6 @@ class WhillBaseDriver(Node):
                     return
 
                 self._require_cmd_reset = False
-                if self._motion_fault_latched:
-                    self._motion_fault_latched = False
-                    self._fault_monitor_cooldown_until = time.monotonic() + 2.0
-                    self._publish_fault(False)
                 self.get_logger().info("控制指令已复位，允许新的非零 /cmd_vel")
 
             self._latest_cmd_linear = linear
@@ -360,6 +362,8 @@ class WhillBaseDriver(Node):
         return sent
 
     def _send_cmd(self):
+        if self._motion_fault_latched:
+            return
         with self._cmd_lock:
             linear = self._latest_cmd_linear
             angular = self._latest_cmd_angular
@@ -421,6 +425,8 @@ class WhillBaseDriver(Node):
                 accel,
             )
             return True
+        except DriverWorkerBusy:
+            return False
         except DriverWorkerError as exc:
             self.get_logger().error(f"下发轮速失败: {exc}")
             self._latch_motion_fault(exc)
@@ -429,7 +435,7 @@ class WhillBaseDriver(Node):
     # ── 里程计 ─────────────────────────────────────────────────────
 
     def _update_odom(self):
-        if not self.connected or self.whill is None:
+        if not self.connected or self.whill is None or self._motion_fault_latched:
             return
 
         now = self.get_clock().now()
@@ -441,6 +447,8 @@ class WhillBaseDriver(Node):
 
         try:
             vel = self.whill.get_velocity([self.left_motor_id, self.right_motor_id])
+        except DriverWorkerBusy:
+            return
         except DriverWorkerError as exc:
             self.get_logger().error(f"读取轮速失败: {exc}")
             self._latch_motion_fault(exc)
@@ -495,24 +503,48 @@ class WhillBaseDriver(Node):
         if not self.connected:
             self._try_restart_driver()
             return
-        if self._motion_fault_latched:
-            return
-        if time.monotonic() < self._fault_monitor_cooldown_until:
-            return
         try:
             statuses = self.whill.get_fault_status(
                 [self.left_motor_id, self.right_motor_id]
             )
+        except DriverWorkerBusy:
+            return
         except DriverWorkerError as exc:
             self.get_logger().error(f"读取底盘故障状态失败: {exc}")
             self._latch_motion_fault(exc)
             return
-        motor_ids = [self.left_motor_id, self.right_motor_id]
-        for motor_id, status in zip(motor_ids, statuses):
+
+        for motor_id, status in zip(
+            [self.left_motor_id, self.right_motor_id], statuses
+        ):
             if status.get("fault", 0) != 0:
-                error_msg = status.get("msg") or f"Motor{motor_id} fault"
-                self._latch_motion_fault(RuntimeError(error_msg))
+                self._latch_motion_fault(
+                    RuntimeError(status.get("msg") or f"Motor{motor_id} fault")
+                )
+                now = time.monotonic()
+                if (
+                    should_reset_fault(statuses)
+                    and now - self._last_fault_reset_try_mono >= 0.5
+                ):
+                    self._last_fault_reset_try_mono = now
+                    try:
+                        self.whill.reset_fault_status(
+                            [self.left_motor_id, self.right_motor_id]
+                        )
+                    except DriverWorkerBusy:
+                        pass
+                    except DriverWorkerError as exc:
+                        self.get_logger().warn(f"急停释放后复位故障失败: {exc}")
                 return
+
+        self._fault_clear_count, recovered = advance_fault_clear_count(
+            self._fault_clear_count, statuses
+        )
+        if self._motion_fault_latched and recovered:
+            self._motion_fault_latched = False
+            self._fault_clear_count = 0
+            self._publish_fault(False)
+            self.get_logger().info("底盘故障状态已稳定清除，等待一次 0 速指令复位")
 
     # ── 清理 ───────────────────────────────────────────────────────
 

@@ -24,7 +24,7 @@ base_control:
     cmd_vel_topic: '/cmd_vel'
     max_linear_speed: 0.6                # 线速硬限（m/s）
     max_angular_speed: 0.5               # 角速硬限（rad/s）
-    acceleration: 350                    # 普通速度指令加速度（deg/s²）
+    acceleration: 250                    # 普通速度指令加速度（deg/s²）
     acceleration_stop: 350               # 归零/急停速度指令加速度（deg/s²）
     # omnilibs 隔离进程：调用卡死时强制回收，重启后必须先收到一次 0 速复位
     driver_startup_timeout_s: 8.0        # 驱动加载与首次零速的最长等待时间
@@ -35,7 +35,7 @@ base_control:
 # 摇杆速度档位配置
 joy_control:
   ros__parameters:
-    js_vel_low: 0.3       # 摇杆控制直行速度 低档（m/s）
+    js_vel_low: 0.2       # 摇杆控制直行速度 低档（m/s）
     js_vel_high: 0.75      # 摇杆控制直行速度 高档（m/s）
     js_rot_low: 50.0      # 摇杆控制旋转速度 低档（deg/s）
     js_rot_high: 70.0     # 摇杆控制旋转速度 高档（deg/s）

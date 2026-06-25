@@ -17,6 +17,10 @@ class DriverWorkerTimeout(DriverWorkerError):
     pass
 
 
+class DriverWorkerBusy(DriverWorkerTimeout):
+    pass
+
+
 def _create_driver(config):
     sys.path.insert(0, str(config["omnilibs_path"]))
     from omnilibs.driver.driver import CAN, ONLINE, Driver
@@ -70,6 +74,8 @@ def driver_worker_main(connection, config):
                     result = list(driver.get_velocity(list(request["motor_ids"])))
                 elif operation == "get_fault_status":
                     result = list(driver.get_fault_status(list(request["motor_ids"])))
+                elif operation == "reset_fault_status":
+                    result = driver.reset_fault_status(list(request["motor_ids"]))
                 elif operation == "shutdown":
                     motor_ids = list(config["motor_ids"])
                     driver.move_velocity(
@@ -246,8 +252,7 @@ class DriverWorkerClient:
         timeout = self.request_timeout_s if timeout_s is None else max(0.05, timeout_s)
         deadline = time.monotonic() + timeout
         if not self._request_lock.acquire(timeout=timeout):
-            self.terminate()
-            raise DriverWorkerTimeout(
+            raise DriverWorkerBusy(
                 f"driver worker busy for more than {timeout:.2f}s"
             )
 
@@ -286,7 +291,6 @@ class DriverWorkerClient:
                     f"driver worker response mismatch: {response!r}"
                 )
             if not response.get("ok"):
-                self.terminate()
                 raise DriverWorkerError(
                     response.get("error", f"driver operation {operation} failed")
                 )
@@ -308,3 +312,6 @@ class DriverWorkerClient:
 
     def get_fault_status(self, motor_ids):
         return self._request("get_fault_status", motor_ids=list(motor_ids))
+
+    def reset_fault_status(self, motor_ids):
+        return self._request("reset_fault_status", motor_ids=list(motor_ids))

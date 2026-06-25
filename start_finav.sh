@@ -71,6 +71,12 @@ force_stop_pid() {
     kill -TERM "$pid" 2>/dev/null || true
 }
 
+force_stop_group() {
+    local pid="$1"
+    [[ -n "$pid" ]] || return 0
+    kill -TERM -- "-$pid" 2>/dev/null || force_stop_pid "$pid"
+}
+
 wait_pid_exit() {
     local pid="$1"
     local elapsed=0
@@ -86,9 +92,9 @@ wait_pid_exit() {
 }
 
 stop_control_stack() {
-    force_stop_pid "$ROUTER_PID"
-    force_stop_pid "$JOY_PID"
-    force_stop_pid "$DRIVER_PID"
+    force_stop_group "$ROUTER_PID"
+    force_stop_group "$JOY_PID"
+    force_stop_group "$DRIVER_PID"
     wait_pid_exit "$ROUTER_PID"
     wait_pid_exit "$JOY_PID"
     wait_pid_exit "$DRIVER_PID"
@@ -121,7 +127,7 @@ handle_interrupt() {
 
 handle_control_restart() {
     RESTART_REQUESTED=1
-    force_stop_pid "$ROUTER_PID"
+    force_stop_group "$ROUTER_PID"
 }
 
 trap cleanup EXIT
@@ -166,18 +172,18 @@ CONTROL_PARAMS="$REPO_DIR/config/base_control.yaml"
 
 start_control_stack() {
     printf '▶ 启动 base_control\n'
-    ros2 run finav base_control.py \
+    setsid ros2 run finav base_control.py \
         --ros-args --params-file "$CONTROL_PARAMS" \
         > /dev/null 2>&1 &
     DRIVER_PID=$!
 
     printf '▶ 启动 HID joystick\n'
-    ros2 launch finav joy.launch.py "joy_dev:=$JOY_DEV" \
+    setsid ros2 launch finav joy.launch.py "joy_dev:=$JOY_DEV" \
         > /dev/null 2>&1 &
     JOY_PID=$!
 
     printf '▶ 启动 base_control_router\n'
-    ros2 run finav base_control_router.py \
+    setsid ros2 run finav base_control_router.py \
         --ros-args --params-file "$CONTROL_PARAMS" \
         > /dev/null 2>&1 &
     ROUTER_PID=$!

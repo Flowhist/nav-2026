@@ -11,6 +11,19 @@ from typing import Dict
 from state_store import StateStore
 
 
+def _cmdline_references_script(args: list[str], cwd: Path, script: Path) -> bool:
+    target = script.resolve()
+    for arg in args:
+        if not arg.endswith(".sh"):
+            continue
+        candidate = Path(arg)
+        if not candidate.is_absolute():
+            candidate = cwd / candidate
+        if candidate.resolve() == target:
+            return True
+    return False
+
+
 class RuntimeManager:
     def __init__(self, repo_dir: Path, state_store: StateStore) -> None:
         self.repo_dir = repo_dir
@@ -211,7 +224,7 @@ class RuntimeManager:
         return self.snapshot()
 
     def _find_start_finav_pid(self) -> int | None:
-        script = str((self.repo_dir / "start_finav.sh").resolve())
+        script = (self.repo_dir / "start_finav.sh").resolve()
         proc_root = Path("/proc")
         for entry in proc_root.iterdir():
             if not entry.name.isdigit():
@@ -219,9 +232,10 @@ class RuntimeManager:
             try:
                 parts = (entry / "cmdline").read_bytes().split(b"\0")
                 args = [part.decode("utf-8", errors="replace") for part in parts if part]
-            except (OSError, PermissionError):
+                cwd = (entry / "cwd").resolve()
+            except OSError:
                 continue
-            if script in args:
+            if _cmdline_references_script(args, cwd, script):
                 return int(entry.name)
         return None
 
