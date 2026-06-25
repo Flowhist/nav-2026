@@ -17,7 +17,7 @@ from state_store import StateStore
 
 
 RESTART_TARGETS = {
-    "base_drive": "底盘驱动",
+    "base_drive": "底盘控制",
 }
 
 CONFIG_IMPACTS: Dict[str, Dict[str, object]] = {
@@ -26,7 +26,7 @@ CONFIG_IMPACTS: Dict[str, Dict[str, object]] = {
         "restart_targets": ["base_drive"],
     },
     "joy.yaml": {
-        "message": "保存后需要重启底盘驱动。",
+        "message": "保存后需要重启底盘控制。",
         "restart_targets": ["base_drive"],
     },
     "slam_toolbox_map.yaml": {
@@ -211,6 +211,13 @@ class ServerApp:
                     return
 
                 if path == "/api/nav/initialpose":
+                    resume_mapping = bool(body.get("resume_mapping"))
+                    if resume_mapping and not app.runtime.set_continued_mapping_localization(True):
+                        self._json(
+                            HTTPStatus.CONFLICT,
+                            {"ok": False, "error": "failed to enter localization mode"},
+                        )
+                        return
                     app.bridge.command(
                         {
                             "type": "set_initialpose",
@@ -219,7 +226,7 @@ class ServerApp:
                             "yaw_deg": body.get("yaw_deg", 0.0),
                         }
                     )
-                    if body.get("resume_mapping"):
+                    if resume_mapping:
                         app.runtime.activate_continued_mapping(delay_s=0.8)
                     self._json(HTTPStatus.OK, {"ok": True})
                     return

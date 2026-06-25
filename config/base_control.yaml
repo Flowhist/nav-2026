@@ -35,7 +35,7 @@ base_control:
 # 摇杆速度档位配置
 joy_control:
   ros__parameters:
-    js_vel_low: 0.4       # 摇杆控制直行速度 低档（m/s）
+    js_vel_low: 0.3       # 摇杆控制直行速度 低档（m/s）
     js_vel_high: 0.75      # 摇杆控制直行速度 高档（m/s）
     js_rot_low: 50.0      # 摇杆控制旋转速度 低档（deg/s）
     js_rot_high: 70.0     # 摇杆控制旋转速度 高档（deg/s）

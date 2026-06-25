@@ -70,7 +70,12 @@ def test_continued_mapping_uses_localize_then_mapping_node():
 
     assert '"map_file": map_file' in map_launch
     assert 'executable="map_and_localization_slam_toolbox_node"' in slam_launch
-    assert '"localization_on_configure": True' in slam_launch
+    server_app = (ROOT / "server" / "server_app.py").read_text(encoding="utf-8")
+    pages = (ROOT / "server" / "web" / "app-pages.js").read_text(encoding="utf-8")
+
+    assert "set_continued_mapping_localization(True)" in manager
     assert "activate_continued_mapping" in manager
+    assert "set_continued_mapping_localization(True)" in server_app
+    assert "!navCommandsEnabled && !continuedMapping" in pages
     assert '"nav_relocate.py": "nav_relocate.yaml"' in manager
     assert "raise SystemExit(2)" in relocate

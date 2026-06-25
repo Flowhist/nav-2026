@@ -5,7 +5,7 @@ relocate:
     initialpose_topic: /initialpose
     map_frame: map
     # 扫描采集：收集多帧后合并，点数越多越稳但越慢
-    collect_scan_count: 4
+    collect_scan_count: 5
     max_wait_scan_s: 12.0
     max_scan_points: 360
     # 扫描点有效量程

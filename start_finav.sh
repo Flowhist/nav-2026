@@ -44,6 +44,7 @@ ROUTER_PID=""
 START_CHECKS=6
 START_INTERVAL=0.1
 CLEANING_UP=0
+RESTART_REQUESTED=0
 STOP_TIMEOUT=1.0
 MAP_CLEAN_SCRIPT="$REPO_DIR/scripts/map_process/clean_map.sh"
 NAV_CLEAN_SCRIPT="$REPO_DIR/scripts/tool/clean_nav.sh"
@@ -59,6 +60,7 @@ wait_all_stable() {
         kill -0 "$DRIVER_PID" 2>/dev/null || fail "base_control 启动失败"
         kill -0 "$JOY_PID" 2>/dev/null || fail "joy.launch.py 启动失败"
         kill -0 "$SERVER_PID" 2>/dev/null || fail "web server 启动失败"
+        kill -0 "$ROUTER_PID" 2>/dev/null || fail "base_control_router 启动失败"
         sleep "$START_INTERVAL"
     done
 }
@@ -83,22 +85,30 @@ wait_pid_exit() {
     done
 }
 
+stop_control_stack() {
+    force_stop_pid "$ROUTER_PID"
+    force_stop_pid "$JOY_PID"
+    force_stop_pid "$DRIVER_PID"
+    wait_pid_exit "$ROUTER_PID"
+    wait_pid_exit "$JOY_PID"
+    wait_pid_exit "$DRIVER_PID"
+    wait "$ROUTER_PID" "$JOY_PID" "$DRIVER_PID" 2>/dev/null || true
+    ROUTER_PID=""
+    JOY_PID=""
+    DRIVER_PID=""
+}
+
 cleanup() {
     [[ "$CLEANING_UP" -eq 1 ]] && return
     CLEANING_UP=1
     trap - EXIT INT TERM
     printf '\n\n\n正在停止节点...\n'
-    force_stop_pid "$ROUTER_PID"
     force_stop_pid "$SERVER_PID"
-    force_stop_pid "$JOY_PID"
-    force_stop_pid "$DRIVER_PID"
+    stop_control_stack
     pkill -TERM -f "web_control_server" 2>/dev/null || true
-    wait_pid_exit "$ROUTER_PID"
     wait_pid_exit "$SERVER_PID"
-    wait_pid_exit "$JOY_PID"
-    wait_pid_exit "$DRIVER_PID"
     pkill -KILL -f "web_control_server" 2>/dev/null || true
-    wait "$ROUTER_PID" "$SERVER_PID" "$JOY_PID" "$DRIVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
     [[ -f "$MAP_CLEAN_SCRIPT" ]] && bash "$MAP_CLEAN_SCRIPT" >/dev/null 2>&1 || true
     [[ -f "$NAV_CLEAN_SCRIPT" ]] && bash "$NAV_CLEAN_SCRIPT" >/dev/null 2>&1 || true
     printf '已停止。\n'
@@ -109,8 +119,14 @@ handle_interrupt() {
     exit 130
 }
 
+handle_control_restart() {
+    RESTART_REQUESTED=1
+    force_stop_pid "$ROUTER_PID"
+}
+
 trap cleanup EXIT
 trap handle_interrupt INT TERM
+trap handle_control_restart USR1
 
 ROS_SETUP="/opt/ros/humble/setup.bash"
 WORKSPACE_SETUP_LOCAL="$WORKSPACE_DIR/install/local_setup.bash"
@@ -148,20 +164,30 @@ sleep 0.2
 CONTROL_PARAMS="$REPO_DIR/config/base_control.yaml"
 [[ -f "$CONTROL_PARAMS" ]] || fail "未找到参数文件: $CONTROL_PARAMS"
 
-printf '▶ 启动 base_control\n'
-ros2 run finav base_control.py \
-    --ros-args --params-file "$CONTROL_PARAMS" \
-    > /dev/null 2>&1 &
-DRIVER_PID=$!
+start_control_stack() {
+    printf '▶ 启动 base_control\n'
+    ros2 run finav base_control.py \
+        --ros-args --params-file "$CONTROL_PARAMS" \
+        > /dev/null 2>&1 &
+    DRIVER_PID=$!
 
-printf '▶ 启动 HID joystick\n'
-ros2 launch finav joy.launch.py "joy_dev:=$JOY_DEV" \
-    > /dev/null 2>&1 &
-JOY_PID=$!
+    printf '▶ 启动 HID joystick\n'
+    ros2 launch finav joy.launch.py "joy_dev:=$JOY_DEV" \
+        > /dev/null 2>&1 &
+    JOY_PID=$!
+
+    printf '▶ 启动 base_control_router\n'
+    ros2 run finav base_control_router.py \
+        --ros-args --params-file "$CONTROL_PARAMS" \
+        > /dev/null 2>&1 &
+    ROUTER_PID=$!
+}
 
 printf '▶ 启动 web server\n'
 python3 "$REPO_DIR/server/run_server.py" --host "$SERVER_HOST" --port "$SERVER_PORT" &
 SERVER_PID=$!
+
+start_control_stack
 
 printf '等待关键进程稳定...\n'
 wait_all_stable
@@ -171,7 +197,16 @@ printf '  摇杆设备: %s\n' "$JOY_DEV"
 printf '  Web 地址: http://%s:%s\n' "$SERVER_HOST" "$SERVER_PORT"
 printf '  F=键盘开关  │  Ctrl-C 退出\n\n'
 
-ros2 run finav base_control_router.py \
-    --ros-args --params-file "$CONTROL_PARAMS" &
-ROUTER_PID=$!
-wait "$ROUTER_PID" || true
+while true; do
+    wait "$ROUTER_PID" || true
+    if [[ "$RESTART_REQUESTED" -eq 1 ]]; then
+        printf '\n▶ 收到 Web 重启请求，重启底盘控制三节点...\n'
+        stop_control_stack
+        RESTART_REQUESTED=0
+        start_control_stack
+        wait_all_stable
+        printf '\033[32m✓ 底盘控制重启完成，Web 服务保持运行\033[0m\n'
+        continue
+    fi
+    break
+done

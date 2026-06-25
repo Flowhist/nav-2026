@@ -24,7 +24,7 @@ path_plan:
     # 未知区域是否按障碍处理：true更安全，false更激进
     treat_unknown_as_occupied: true
     # 障碍额外安全边界(米)：减小一点，提高窄通道通过率
-    inflation_radius_m: 0.6
+    inflation_radius_m: 0.8
     # 搜索扩展上限：越大越不易失败，但最坏耗时更长
     max_search_expansions: 200000
     # 单次规划最大耗时，防止坏目标长期占住单线程节点

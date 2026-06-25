@@ -319,7 +319,7 @@ function renderRuntimeControls() {
   }
   $("btnMappingAutoRelocate").textContent = relocateBusy ? "自动重定位中…" : "自动重定位";
   $("btnMappingAutoRelocate").classList.toggle("active", relocateBusy);
-  if (!navCommandsEnabled && appState.navPlacementMode && typeof setNavPlacementMode === "function") {
+  if (!navCommandsEnabled && !continuedMapping && appState.navPlacementMode && typeof setNavPlacementMode === "function") {
     setNavPlacementMode(null);
   }
 

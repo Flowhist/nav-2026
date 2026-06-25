@@ -132,7 +132,6 @@ def generate_launch_description():
             os.path.join(config_dir, "slam_toolbox_map.yaml"),
             {
                 "use_sim_time": use_sim_time,
-                "localization_on_configure": True,
                 "map_file_name": [
                     maps_dir,
                     "/",

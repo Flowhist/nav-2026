@@ -116,6 +116,8 @@ class RuntimeManager:
         )
         watcher = threading.Thread(target=self._watch, args=(mode, proc), daemon=True)
         watcher.start()
+        if mode == "mapping" and str((launch_args or {}).get("map_file", "")).strip():
+            self.set_continued_mapping_localization(True, delay_s=0.5)
         return self.snapshot()
 
     def stop(self, mode: str) -> Dict[str, object]:
@@ -185,6 +187,15 @@ class RuntimeManager:
 
     def restart(self, mode: str, launch_args: Dict[str, object] | None = None) -> Dict[str, object]:
         if mode == "base_drive":
+            supervisor_pid = self._find_start_finav_pid()
+            if supervisor_pid is not None:
+                os.kill(supervisor_pid, signal.SIGUSR1)
+                self.state_store.add_event(
+                    "info",
+                    "base drive restart requested",
+                    {"supervisor_pid": supervisor_pid},
+                )
+                return self.snapshot()
             for control_mode in ("base_drive", "router", "joy", "base"):
                 self.stop(control_mode)
             return self.start("base_drive", launch_args=launch_args)
@@ -198,6 +209,21 @@ class RuntimeManager:
             self.stop(mode)
         self._stop_relocate()
         return self.snapshot()
+
+    def _find_start_finav_pid(self) -> int | None:
+        script = str((self.repo_dir / "start_finav.sh").resolve())
+        proc_root = Path("/proc")
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                parts = (entry / "cmdline").read_bytes().split(b"\0")
+                args = [part.decode("utf-8", errors="replace") for part in parts if part]
+            except (OSError, PermissionError):
+                continue
+            if script in args:
+                return int(entry.name)
+        return None
 
     def run_relocate(
         self,
@@ -225,6 +251,8 @@ class RuntimeManager:
         if resume_mapping:
             if not continued_mapping:
                 raise RuntimeError("continued mapping must be running before relocate")
+            if not self.set_continued_mapping_localization(True):
+                raise RuntimeError("failed to switch continued mapping to localization mode")
         elif not nav["running"] or nav["stopping"]:
             raise RuntimeError("navigation must be running before relocate")
 
@@ -265,12 +293,14 @@ class RuntimeManager:
         watcher.start()
         return self.snapshot()
 
-    def activate_continued_mapping(self, delay_s: float = 0.0) -> bool:
+    def set_continued_mapping_localization(
+        self, enabled: bool, delay_s: float = 0.0
+    ) -> bool:
         if delay_s > 0.0:
             timer = threading.Timer(
                 delay_s,
-                self.activate_continued_mapping,
-                kwargs={"delay_s": 0.0},
+                self.set_continued_mapping_localization,
+                kwargs={"enabled": enabled},
             )
             timer.daemon = True
             timer.start()
@@ -289,7 +319,7 @@ class RuntimeManager:
         parts = self._build_ros_env_parts()
         parts.append(
             "ros2 service call /slam_toolbox/set_localization_mode "
-            "std_srvs/srv/SetBool \"{data: false}\""
+            f"std_srvs/srv/SetBool \"{{data: {'true' if enabled else 'false'}}}\""
         )
         try:
             result = subprocess.run(
@@ -302,7 +332,7 @@ class RuntimeManager:
             )
         except Exception as exc:
             self.state_store.add_event(
-                "error", "continued mapping activation failed", {"detail": str(exc)}
+                "error", "continued mapping mode switch failed", {"detail": str(exc)}
             )
             return False
 
@@ -312,10 +342,22 @@ class RuntimeManager:
         )
         self.state_store.add_event(
             "info" if success else "error",
-            "continued mapping activated" if success else "continued mapping activation failed",
-            {"detail": (result.stdout or result.stderr).strip()[-500:]},
+            (
+                "continued mapping localization enabled"
+                if enabled
+                else "continued mapping activated"
+            )
+            if success
+            else "continued mapping mode switch failed",
+            {
+                "localization": enabled,
+                "detail": (result.stdout or result.stderr).strip()[-500:],
+            },
         )
         return success
+
+    def activate_continued_mapping(self, delay_s: float = 0.0) -> bool:
+        return self.set_continued_mapping_localization(False, delay_s=delay_s)
 
     def _stop_relocate(self) -> None:
         proc = None
