@@ -77,12 +77,22 @@ def _limit_delta(current: float, target: float, max_delta: float) -> float:
     return float(current) + math.copysign(max_delta, delta)
 
 
+def _slew_rate_for_axis(current: float, target: float, accel_rate: float, decel_rate: float) -> float:
+    current = float(current)
+    target = float(target)
+    if abs(current) > 1e-6 and (current * target < 0.0 or abs(target) < abs(current)):
+        return abs(float(decel_rate))
+    return abs(float(accel_rate))
+
+
 def slew_limited_twist(
     current: Twist,
     target: Twist,
     dt: float,
-    linear_slew_rate: float,
-    angular_slew_rate: float,
+    linear_accel_slew_rate: float,
+    linear_decel_slew_rate: float,
+    angular_accel_slew_rate: float,
+    angular_decel_slew_rate: float,
 ) -> Twist:
     msg = Twist()
     if dt <= 0.0:
@@ -90,15 +100,27 @@ def slew_limited_twist(
         msg.angular.z = float(current.angular.z)
         return msg
 
+    linear_rate = _slew_rate_for_axis(
+        current.linear.x,
+        target.linear.x,
+        linear_accel_slew_rate,
+        linear_decel_slew_rate,
+    )
+    angular_rate = _slew_rate_for_axis(
+        current.angular.z,
+        target.angular.z,
+        angular_accel_slew_rate,
+        angular_decel_slew_rate,
+    )
     msg.linear.x = _limit_delta(
         current.linear.x,
         target.linear.x,
-        abs(float(linear_slew_rate)) * float(dt),
+        linear_rate * float(dt),
     )
     msg.angular.z = _limit_delta(
         current.angular.z,
         target.angular.z,
-        abs(float(angular_slew_rate)) * float(dt),
+        angular_rate * float(dt),
     )
     return msg
 
@@ -214,19 +236,27 @@ class JoyControl(Node):
         self.declare_parameter("sat_zone", 1.0)
         self.declare_parameter("js_vel_high", 0.4)
         self.declare_parameter("js_rot_high", 25.0)
-        self.declare_parameter("linear_slew_rate", 1.5)
-        self.declare_parameter("angular_slew_rate", 180.0)
+        self.declare_parameter("linear_accel_slew_rate", 1.5)
+        self.declare_parameter("linear_decel_slew_rate", 4.0)
+        self.declare_parameter("angular_accel_slew_rate", 180.0)
+        self.declare_parameter("angular_decel_slew_rate", 360.0)
 
         self.enabled = bool(self.get_parameter("enabled").value)
         self.device_path = str(self.get_parameter("dev").value)
         self.reconnect_interval = max(
             0.2, float(self.get_parameter("reconnect_interval").value)
         )
-        self.linear_slew_rate = max(
-            0.01, float(self.get_parameter("linear_slew_rate").value)
+        self.linear_accel_slew_rate = max(
+            0.01, float(self.get_parameter("linear_accel_slew_rate").value)
         )
-        self.angular_slew_rate = math.radians(
-            max(1.0, float(self.get_parameter("angular_slew_rate").value))
+        self.linear_decel_slew_rate = max(
+            0.01, float(self.get_parameter("linear_decel_slew_rate").value)
+        )
+        self.angular_accel_slew_rate = math.radians(
+            max(1.0, float(self.get_parameter("angular_accel_slew_rate").value))
+        )
+        self.angular_decel_slew_rate = math.radians(
+            max(1.0, float(self.get_parameter("angular_decel_slew_rate").value))
         )
         self.cfg = JoyMappingConfig(
             linear_axis=self.get_parameter("linear_axis").value,
@@ -311,8 +341,10 @@ class JoyControl(Node):
                 self._last_twist,
                 target_twist,
                 dt,
-                self.linear_slew_rate,
-                self.angular_slew_rate,
+                self.linear_accel_slew_rate,
+                self.linear_decel_slew_rate,
+                self.angular_accel_slew_rate,
+                self.angular_decel_slew_rate,
             )
             self._publish_joy()
         else:

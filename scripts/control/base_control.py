@@ -32,8 +32,13 @@ PROJECT_ROOT = "/home/embotic/nav_workspace/src/finav"
 OMNILIBS_PATH = "/home/embotic/DCCS/src/site-packages"
 
 
-def select_wheel_acceleration(left_degps: float, right_degps: float, acceleration: int, acceleration_stop: int) -> int:
-    if abs(float(left_degps)) < 1e-6 and abs(float(right_degps)) < 1e-6:
+def select_wheel_acceleration(
+    left_degps: float,
+    right_degps: float,
+    acceleration: int,
+    acceleration_stop: int,
+) -> int:
+    if abs(float(left_degps)) <= 1e-6 and abs(float(right_degps)) <= 1e-6:
         return int(acceleration_stop)
     return int(acceleration)
 
@@ -345,7 +350,6 @@ class WhillBaseDriver(Node):
 
         v_left = linear - angular * self.wheel_separation * 0.5
         v_right = linear + angular * self.wheel_separation * 0.5
-
         left_degps = self.wheel_velocity_sign * (v_left / self.wheel_radius) * (180.0 / math.pi)
         right_degps = self.wheel_velocity_sign * (v_right / self.wheel_radius) * (180.0 / math.pi)
 
@@ -406,7 +410,11 @@ class WhillBaseDriver(Node):
             if self._apply_twist(0.0, 0.0):
                 self._last_zero_keepalive_mono = now_mono
 
-    def _send_wheel_velocity(self, left_degps: float, right_degps: float) -> bool:
+    def _send_wheel_velocity(
+        self,
+        left_degps: float,
+        right_degps: float,
+    ) -> bool:
         if not self.connected:
             error = DriverWorkerError("driver worker is not connected")
             self._latch_motion_fault(error)
@@ -416,7 +424,10 @@ class WhillBaseDriver(Node):
             l = float(left_degps)
             r = float(right_degps)
             accel = select_wheel_acceleration(
-                l, r, self.acceleration, self.acceleration_stop
+                l,
+                r,
+                self.acceleration,
+                self.acceleration_stop,
             )
             self.whill.set_velocity(
                 [self.left_motor_id, self.right_motor_id],

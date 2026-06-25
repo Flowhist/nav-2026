@@ -19,9 +19,11 @@ joy_control:
 
     # 输入轴归一化后的死区和饱和区，范围通常为 0.0 ~ 1.0。
     # 连续控制下适当放大死区，降低摇杆中心轻微抖动带来的干扰。
-    dead_zone: 0.10
+    dead_zone: 0.05
     sat_zone: 1.0
 
-    # 摇杆目标速度变化率限制，用于抑制指令突变造成的车身抖动。
-    linear_slew_rate: 1.5     # m/s^2
-    angular_slew_rate: 180.0  # deg/s^2
+    # 摇杆目标速度变化率限制：推杆用 accel，回位/换向用 decel。
+    linear_accel_slew_rate: 1.5     # m/s^2
+    linear_decel_slew_rate: 6.0     # m/s^2
+    angular_accel_slew_rate: 180.0  # deg/s^2
+    angular_decel_slew_rate: 360.0  # deg/s^2

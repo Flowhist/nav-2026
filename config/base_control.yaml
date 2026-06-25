@@ -24,8 +24,8 @@ base_control:
     cmd_vel_topic: '/cmd_vel'
     max_linear_speed: 0.6                # 线速硬限（m/s）
     max_angular_speed: 0.5               # 角速硬限（rad/s）
-    acceleration: 350                    # 普通速度指令加速度（deg/s²）
-    acceleration_stop: 350               # 归零/急停速度指令加速度（deg/s²）
+    acceleration: 150                    # 非零速度指令使用的加速度（deg/s²）
+    acceleration_stop: 400               # 目标双轮归零时使用的特殊加速度（deg/s²）
     # omnilibs 隔离进程：调用卡死时强制回收，重启后必须先收到一次 0 速复位
     driver_startup_timeout_s: 8.0        # 驱动加载与首次零速的最长等待时间
     driver_request_timeout_s: 0.5        # 单次 CAN 操作最长等待时间

@@ -61,12 +61,44 @@ def test_slew_limiter_caps_single_publish_step():
         _twist(0.0, 0.0),
         _twist(0.75, math.radians(70.0)),
         dt=0.02,
-        linear_slew_rate=1.5,
-        angular_slew_rate=math.radians(180.0),
+        linear_accel_slew_rate=1.5,
+        linear_decel_slew_rate=4.0,
+        angular_accel_slew_rate=math.radians(180.0),
+        angular_decel_slew_rate=math.radians(360.0),
     )
 
     assert msg.linear.x == pytest.approx(0.03)
     assert msg.angular.z == pytest.approx(math.radians(3.6))
+
+
+def test_slew_limiter_uses_decel_rate_when_returning_to_zero():
+    msg = slew_limited_twist(
+        _twist(0.6, math.radians(40.0)),
+        _twist(0.0, 0.0),
+        dt=0.1,
+        linear_accel_slew_rate=1.5,
+        linear_decel_slew_rate=4.0,
+        angular_accel_slew_rate=math.radians(180.0),
+        angular_decel_slew_rate=math.radians(360.0),
+    )
+
+    assert msg.linear.x == pytest.approx(0.2)
+    assert msg.angular.z == pytest.approx(math.radians(4.0))
+
+
+def test_slew_limiter_uses_decel_rate_when_reversing_direction():
+    msg = slew_limited_twist(
+        _twist(0.2, 0.2),
+        _twist(-0.2, -0.2),
+        dt=0.05,
+        linear_accel_slew_rate=1.0,
+        linear_decel_slew_rate=3.0,
+        angular_accel_slew_rate=1.0,
+        angular_decel_slew_rate=3.0,
+    )
+
+    assert msg.linear.x == pytest.approx(0.05)
+    assert msg.angular.z == pytest.approx(0.05)
 
 
 def test_slew_limiter_reaches_target_without_overshoot():
@@ -78,8 +110,10 @@ def test_slew_limiter_reaches_target_without_overshoot():
             current,
             target,
             dt=0.05,
-            linear_slew_rate=1.0,
-            angular_slew_rate=1.0,
+            linear_accel_slew_rate=1.0,
+            linear_decel_slew_rate=3.0,
+            angular_accel_slew_rate=1.0,
+            angular_decel_slew_rate=3.0,
         )
 
     assert current.linear.x == pytest.approx(target.linear.x)
