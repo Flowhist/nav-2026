@@ -1,4 +1,5 @@
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,21 @@ def _error_worker(connection, _config):
             "id": request["id"],
             "ok": False,
             "error": "RuntimeError: Motor STO fault",
+        }
+    )
+    connection.recv()
+
+
+def _slow_recovery_worker(connection, _config):
+    connection.send({"kind": "ready"})
+    request = connection.recv()
+    time.sleep(0.7)
+    connection.send(
+        {
+            "kind": "response",
+            "id": request["id"],
+            "ok": True,
+            "result": None,
         }
     )
     connection.recv()
@@ -81,6 +97,21 @@ def test_reported_motor_fault_does_not_terminate_healthy_worker():
     try:
         with pytest.raises(DriverWorkerError, match="STO"):
             worker._request("set_velocity")
+        assert worker.is_healthy is True
+    finally:
+        worker.terminate()
+
+
+def test_fault_recovery_has_its_own_longer_timeout():
+    worker = DriverWorkerClient(
+        {},
+        worker_target=_slow_recovery_worker,
+        context_name="fork",
+        request_timeout_s=0.2,
+    )
+    worker.start()
+    try:
+        worker.recover_fault([1, 2])
         assert worker.is_healthy is True
     finally:
         worker.terminate()
