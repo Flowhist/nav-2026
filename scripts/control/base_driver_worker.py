@@ -76,8 +76,7 @@ def driver_worker_main(connection, config):
                     result = list(driver.get_fault_status(list(request["motor_ids"])))
                 elif operation == "recover_fault":
                     motor_ids = list(request["motor_ids"])
-                    driver.reset_fault_status(motor_ids)
-                    result = driver.power_on(motor_ids)
+                    result = driver.reset_fault_status(motor_ids)
                 elif operation == "shutdown":
                     motor_ids = list(config["motor_ids"])
                     driver.move_velocity(
@@ -318,6 +317,6 @@ class DriverWorkerClient:
     def recover_fault(self, motor_ids):
         return self._request(
             "recover_fault",
-            timeout_s=max(2.0, self.request_timeout_s),
+            timeout_s=max(3.5, self.request_timeout_s),
             motor_ids=list(motor_ids),
         )

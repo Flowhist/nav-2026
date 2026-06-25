@@ -1,5 +1,4 @@
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -9,10 +8,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "control"))
 
 from base_control import advance_fault_clear_count, should_reset_fault  # noqa: E402
+import base_driver_worker  # noqa: E402
 from base_driver_worker import (  # noqa: E402
     DriverWorkerError,
     DriverWorkerBusy,
     DriverWorkerClient,
+    driver_worker_main,
 )
 
 
@@ -30,19 +31,20 @@ def _error_worker(connection, _config):
     connection.recv()
 
 
-def _slow_recovery_worker(connection, _config):
-    connection.send({"kind": "ready"})
-    request = connection.recv()
-    time.sleep(0.7)
-    connection.send(
-        {
-            "kind": "response",
-            "id": request["id"],
-            "ok": True,
-            "result": None,
-        }
-    )
-    connection.recv()
+class _TrackingDriver:
+    def __init__(self):
+        self.calls = []
+
+    def reset_fault_status(self, motor_ids):
+        self.calls.append(("reset_fault_status", tuple(motor_ids)))
+        return list(self.calls)
+
+    def power_on(self, motor_ids):
+        self.calls.append(("power_on", tuple(motor_ids)))
+        return list(self.calls)
+
+    def finalize(self):
+        pass
 
 
 def test_fault_requires_three_consecutive_clear_samples():
@@ -102,16 +104,23 @@ def test_reported_motor_fault_does_not_terminate_healthy_worker():
         worker.terminate()
 
 
-def test_fault_recovery_has_its_own_longer_timeout():
+def test_fault_recovery_only_resets_fault_without_power_on(monkeypatch):
+    monkeypatch.setattr(
+        base_driver_worker,
+        "_create_driver",
+        lambda _config: _TrackingDriver(),
+    )
     worker = DriverWorkerClient(
         {},
-        worker_target=_slow_recovery_worker,
+        worker_target=driver_worker_main,
         context_name="fork",
         request_timeout_s=0.2,
     )
     worker.start()
     try:
-        worker.recover_fault([1, 2])
+        assert worker.recover_fault([1, 2]) == [
+            ("reset_fault_status", (1, 2)),
+        ]
         assert worker.is_healthy is True
     finally:
         worker.terminate()
