@@ -31,15 +31,24 @@ def test_saved_map_list_marks_posegraph_maps_as_continuable(tmp_path):
     assert maps["image_only"]["continuable"] is False
 
 
-def test_mapping_page_contains_continue_flow_and_compact_controls():
+def test_mapping_page_removes_continue_flow_but_keeps_core_controls():
     html = (ROOT / "server" / "web" / "index.html").read_text(encoding="utf-8")
     css = (ROOT / "server" / "web" / "styles.css").read_text(encoding="utf-8")
     app_js = (ROOT / "server" / "web" / "app.js").read_text(encoding="utf-8")
+    pages_js = (ROOT / "server" / "web" / "app-pages.js").read_text(encoding="utf-8")
+    core_js = (ROOT / "server" / "web" / "app-core.js").read_text(encoding="utf-8")
 
-    assert 'id="mappingMapToggle"' in html
-    assert 'id="btnStartContinueMapping"' in html
-    assert 'id="btnMappingAutoRelocate"' in html
-    assert 'id="btnMappingManualRelocate"' in html
+    assert "继续建图" not in html
+    assert "mappingMap" not in html
+    assert "btnStartContinueMapping" not in html
+    assert "btnMappingAutoRelocate" not in html
+    assert "btnMappingManualRelocate" not in html
+    assert "resume_mapping" not in app_js
+    assert "mappingMapName" not in core_js
+    assert "renderMappingMapPicker" not in pages_js
+    assert 'id="btnStartMapping"' in html
+    assert 'id="btnSaveMap"' in html
+    assert 'id="btnStopMapping"' in html
     assert 'id="mapName"' not in html
     assert "showMapSaveDialog" in app_js
     assert ".teleop-panel .dpad" in css
@@ -58,7 +67,7 @@ def test_navigation_buttons_use_requested_names_and_order():
     assert positions == sorted(positions)
 
 
-def test_continued_mapping_uses_localize_then_mapping_node():
+def test_web_runtime_no_longer_exposes_continue_mapping_entrypoint():
     map_launch = (ROOT / "launch" / "map.launch.py").read_text(encoding="utf-8")
     slam_launch = (
         ROOT / "launch" / "sub" / "slam_toolbox.launch.py"
@@ -73,9 +82,9 @@ def test_continued_mapping_uses_localize_then_mapping_node():
     server_app = (ROOT / "server" / "server_app.py").read_text(encoding="utf-8")
     pages = (ROOT / "server" / "web" / "app-pages.js").read_text(encoding="utf-8")
 
-    assert "set_continued_mapping_localization(True)" in manager
-    assert "activate_continued_mapping" in manager
-    assert "set_continued_mapping_localization(True)" in server_app
-    assert "!navCommandsEnabled && !continuedMapping" in pages
+    assert "resume_mapping" not in server_app
+    assert "resume_mapping" not in pages
+    assert "map cannot be continued" not in server_app
+    assert '"map_file"] = name' not in server_app
     assert '"nav_relocate.py": "nav_relocate.yaml"' in manager
     assert "raise SystemExit(2)" in relocate

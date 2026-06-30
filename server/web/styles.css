@@ -585,12 +585,6 @@ canvas {
   font-size: 14px;
 }
 
-.mapping-relocate-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
 .nav-location {
   display: flex;
   flex-direction: column;

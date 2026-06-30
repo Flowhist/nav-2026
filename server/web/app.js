@@ -174,10 +174,6 @@ function setNavPlacementMode(mode) {
   appState.navPlacementMode = mode;
   $("btnArmInit").classList.toggle("active", mode === "initial");
   $("btnArmGoal").classList.toggle("active", mode === "goal");
-  $("btnMappingManualRelocate").classList.toggle(
-    "active",
-    appState.page === "mapping" && mode === "initial",
-  );
   updateSceneHints();
 }
 
@@ -265,13 +261,6 @@ async function finishNavDrag(event) {
   const yawDeg = Math.hypot(dx, dy) < 0.03 ? 0 : Math.atan2(dy, dx) * 180 / Math.PI;
   const body = { x: drag.start.x, y: drag.start.y, yaw_deg: yawDeg };
   const endpoint = appState.navPlacementMode === "initial" ? "/api/nav/initialpose" : "/api/nav/goal";
-  if (
-    endpoint === "/api/nav/initialpose"
-    && appState.page === "mapping"
-    && getRuntime("mapping").launch_args?.map_file
-  ) {
-    body.resume_mapping = true;
-  }
 
   appState.navDrag = null;
   if (canvas.releasePointerCapture) {
@@ -599,13 +588,6 @@ function toggleNavMapMenu(force) {
   $("navMapToggle").setAttribute("aria-expanded", String(shouldOpen));
 }
 
-function toggleMappingMapMenu(force) {
-  const panel = $("mappingMapPanel");
-  const shouldOpen = typeof force === "boolean" ? force : !panel.classList.contains("open");
-  panel.classList.toggle("open", shouldOpen);
-  $("mappingMapToggle").setAttribute("aria-expanded", String(shouldOpen));
-}
-
 function confirmPageSwitchStop(mode, page) {
   const label = mode === "mapping" ? "建图" : "导航";
   const target = { mapping: "建图", navigation: "导航", preview: "地图预览", configs: "配置文件" }[page] || page;
@@ -662,10 +644,6 @@ function bind() {
     loadSavedMaps().catch(console.error);
     toggleNavMapMenu();
   });
-  $("mappingMapToggle").addEventListener("click", () => {
-    loadSavedMaps().catch(console.error);
-    toggleMappingMapMenu();
-  });
   document.querySelectorAll(".stage-option").forEach((btn) => {
     btn.addEventListener("click", () => {
       appState.teleop.stageIndex = Number(btn.dataset.stage);
@@ -682,14 +660,10 @@ function bind() {
     document.querySelectorAll(".map-help").forEach((panel) => panel.classList.add("hidden"));
     if (!event.target.closest("#stagePanel")) toggleStageMenu(false);
     if (!event.target.closest("#navMapPanel")) toggleNavMapMenu(false);
-    if (!event.target.closest("#mappingMapPanel")) toggleMappingMapMenu(false);
   });
 
   $("teleopToggle").addEventListener("click", () => setKeyboardTeleop(!appState.teleop.keyboardEnabled));
   $("btnStartMapping").addEventListener("click", () => startRuntime("mapping").catch(console.error));
-  $("btnStartContinueMapping").addEventListener("click", () => {
-    startRuntime("mapping", { mapFile: appState.mappingMapName }).catch(console.error);
-  });
   $("btnStopMapping").addEventListener("click", () => stopRuntime("mapping", { showModal: true }).catch(console.error));
   $("btnStartNavigation").addEventListener("click", () => startRuntime("navigation").catch(console.error));
   $("btnStopNavigation").addEventListener("click", () => stopRuntime("navigation", { showModal: true }).catch(console.error));
@@ -728,25 +702,6 @@ function bind() {
     } catch (err) {
       reportActionError(err, "重定位失败");
     }
-  });
-  $("btnMappingAutoRelocate").addEventListener("click", async () => {
-    setNavPlacementMode(null);
-    appState.navDrag = null;
-    try {
-      const data = await api("/api/nav/relocate", "POST", {
-        map_file: appState.mappingMapName,
-        resume_mapping: true,
-      });
-      if (data.runtime) {
-        appState.status = { ...(appState.status || {}), runtime: data.runtime };
-        renderRuntimeControls();
-      }
-    } catch (err) {
-      reportActionError(err, "自动重定位失败");
-    }
-  });
-  $("btnMappingManualRelocate").addEventListener("click", () => {
-    setNavPlacementMode(appState.navPlacementMode === "initial" ? null : "initial");
   });
   $("btnCancelNav").addEventListener("click", async () => {
     try {
