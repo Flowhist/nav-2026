@@ -119,7 +119,7 @@ install(PROGRAMS
   scripts/control/base_control.py
   scripts/control/base_driver_worker.py
   scripts/control/base_control_router.py
-  scripts/control/joy_control.py
+  scripts/control/handle_control.py
   scripts/control/nav_relocate.py
   scripts/imu/dm_imu_publisher.py
   scripts/tool/TF.sh
@@ -140,6 +140,12 @@ install(PROGRAMS
   sim/scripts/sim_send_goal.py
   sim/scripts/gz_topic_adapter.py
   start_finav.sh
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(FILES
+  scripts/control/handle_modbus.py
+  scripts/control/handle_protocol.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

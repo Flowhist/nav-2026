@@ -67,7 +67,11 @@ class RuntimeManager:
             return self._snapshot_unlocked()
 
     def start(self, mode: str, launch_args: Dict[str, object] | None = None) -> Dict[str, object]:
-        launch_file = {"mapping": "map.launch.py", "navigation": "nav.launch.py", "joy": "joy.launch.py"}.get(mode)
+        launch_file = {
+            "mapping": "map.launch.py",
+            "navigation": "nav.launch.py",
+            "handle": "handle.launch.py",
+        }.get(mode)
         executable = {"base": "base_control.py", "router": "base_control_router.py"}.get(mode)
         base_drive = mode == "base_drive"
         if not launch_file and not executable and not base_drive:
@@ -77,7 +81,7 @@ class RuntimeManager:
             other = "navigation" if mode == "mapping" else "mapping"
             self.stop(other)
         elif mode == "base_drive":
-            for control_mode in ("router", "joy", "base"):
+            for control_mode in ("router", "handle", "base"):
                 self.stop(control_mode)
 
         with self._lock:
@@ -134,7 +138,7 @@ class RuntimeManager:
         return self.snapshot()
 
     def stop(self, mode: str) -> Dict[str, object]:
-        if mode not in {"mapping", "navigation", "base", "joy", "router", "base_drive"}:
+        if mode not in {"mapping", "navigation", "base", "handle", "router", "base_drive"}:
             raise ValueError(f"unsupported runtime mode: {mode}")
 
         if mode == "navigation":
@@ -152,7 +156,7 @@ class RuntimeManager:
                 meta["stopping"] = False
                 meta["pid"] = None
                 self._sync_status()
-                if mode in {"base", "joy", "router", "base_drive"}:
+                if mode in {"base", "handle", "router", "base_drive"}:
                     self._cleanup_control_runtime(mode)
                 return self._snapshot_unlocked()
             meta["stopping"] = True
@@ -162,7 +166,7 @@ class RuntimeManager:
         script = self.tool_dir / ("clean_map.sh" if mode == "mapping" else "clean_nav.sh")
         errors = []
 
-        if mode in {"base", "joy", "router", "base_drive"}:
+        if mode in {"base", "handle", "router", "base_drive"}:
             self._cleanup_control_runtime(mode)
         elif script.exists():
             try:
@@ -209,7 +213,7 @@ class RuntimeManager:
                     {"supervisor_pid": supervisor_pid},
                 )
                 return self.snapshot()
-            for control_mode in ("base_drive", "router", "joy", "base"):
+            for control_mode in ("base_drive", "router", "handle", "base"):
                 self.stop(control_mode)
             return self.start("base_drive", launch_args=launch_args)
         self.stop(mode)
@@ -218,7 +222,7 @@ class RuntimeManager:
     def stop_all(self) -> Dict[str, object]:
         self.stop("mapping")
         self.stop("navigation")
-        for mode in ("base_drive", "router", "joy", "base"):
+        for mode in ("base_drive", "router", "handle", "base"):
             self.stop(mode)
         self._stop_relocate()
         return self.snapshot()
@@ -400,7 +404,7 @@ class RuntimeManager:
             self._sync_status()
 
     def read_log(self, mode: str, tail: int = 300) -> Dict[str, object]:
-        if mode not in {"mapping", "navigation", "relocate", "base", "joy", "router", "base_drive"}:
+        if mode not in {"mapping", "navigation", "relocate", "base", "handle", "router", "base_drive"}:
             raise ValueError(f"unsupported runtime mode: {mode}")
 
         log_path = self.runtime_dir / f"{mode}.log"
@@ -434,7 +438,7 @@ class RuntimeManager:
         return {"mode": mode, "lines": lines, "path": str(log_path), "updated_at": stat.st_mtime}
 
     def clear_log(self, mode: str) -> Dict[str, object]:
-        if mode not in {"mapping", "navigation", "relocate", "base", "joy", "router", "base_drive"}:
+        if mode not in {"mapping", "navigation", "relocate", "base", "handle", "router", "base_drive"}:
             raise ValueError(f"unsupported runtime mode: {mode}")
 
         log_path = self.runtime_dir / f"{mode}.log"
@@ -502,18 +506,23 @@ class RuntimeManager:
         parts = self._build_ros_env_parts()
         run_cmd = ["bash", str(self.repo_dir / "base_drive.sh")]
         params = dict(params or {})
-        joy_dev = params.get("joy_dev")
-        if joy_dev:
-            run_cmd.extend(["--joy-dev", str(joy_dev)])
+        handle_port = params.get("handle_port")
+        if handle_port:
+            run_cmd.extend(["--handle-port", str(handle_port)])
         parts.append("exec " + " ".join(shlex.quote(part) for part in run_cmd))
         return " && ".join(parts)
 
     def _cleanup_control_runtime(self, mode: str) -> None:
         patterns = {
             "base": ["base_control.py"],
-            "joy": ["joy_control.py", "joy_node"],
+            "handle": ["handle_control.py"],
             "router": ["base_control_router.py"],
-            "base_drive": ["base_drive.sh", "base_control.py", "joy_control.py", "joy_node", "base_control_router.py"],
+            "base_drive": [
+                "base_drive.sh",
+                "base_control.py",
+                "handle_control.py",
+                "base_control_router.py",
+            ],
         }.get(mode, [])
         for pattern in patterns:
             try:
@@ -546,7 +555,7 @@ class RuntimeManager:
         navigation = self._status_for("navigation")
         relocate = self._status_for("relocate")
         base = self._status_for("base")
-        joy = self._status_for("joy")
+        handle = self._status_for("handle")
         router = self._status_for("router")
         base_drive = self._status_for("base_drive")
         self.state_store.update_status(
@@ -556,7 +565,7 @@ class RuntimeManager:
                     "navigation": navigation,
                     "relocate": relocate,
                     "base": base,
-                    "joy": joy,
+                    "handle": handle,
                     "router": router,
                     "base_drive": base_drive,
                     "busy": bool(mapping["stopping"] or navigation["stopping"]),
@@ -570,7 +579,7 @@ class RuntimeManager:
             "navigation": self._status_for("navigation"),
             "relocate": self._status_for("relocate"),
             "base": self._status_for("base"),
-            "joy": self._status_for("joy"),
+            "handle": self._status_for("handle"),
             "router": self._status_for("router"),
             "base_drive": self._status_for("base_drive"),
         }

@@ -32,13 +32,7 @@ base_control:
     driver_terminate_timeout_s: 0.5      # 终止卡死子进程的等待时间
     driver_restart_interval_s: 1.0       # 自动重启最小间隔
 
-# 摇杆连续控制速度上限
-joy_control:
-  ros__parameters:
-    js_vel_high: 0.75     # 连续摇杆最大直行速度（m/s）
-    js_rot_high: 70.0     # 连续摇杆最大旋转速度（deg/s）
-
-# 控制仲裁（键盘 / 摇杆 / Web / 导航）
+# 控制仲裁（键盘 / 手柄 / Web / 导航）
 base_control_router:
   ros__parameters:
     keyboard_angular_speed: 0.5                 # 键盘统一旋转速度（rad/s）

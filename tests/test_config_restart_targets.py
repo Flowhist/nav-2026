@@ -25,7 +25,7 @@ def test_config_restart_targets_restart_control_stack_together():
     impacts = _assignment_value(module, "CONFIG_IMPACTS")
 
     assert impacts["base_control.yaml"]["restart_targets"] == ["base_drive"]
-    assert impacts["joy.yaml"]["restart_targets"] == ["base_drive"]
+    assert impacts["handle.yaml"]["restart_targets"] == ["base_drive"]
     assert targets == {"base_drive": "底盘控制"}
 
 

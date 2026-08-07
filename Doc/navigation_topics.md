@@ -50,8 +50,11 @@ RViz / nav_voice_bridge
 
 | 话题 | 类型 | 主要数据 | 发布者 | 订阅者 | 频率/触发时机 |
 | --- | --- | --- | --- | --- | --- |
-| `/js_state` | `std_msgs/msg/Bool` | 摇杆在线状态，`true` 表示 HID 摇杆连接/可用 | `joy_control.py` | `base_control_router.py` | 配置 `publish_rate=25.0Hz` |
-| `/js_cmd_vel` | `geometry_msgs/msg/Twist` | 摇杆速度指令，主要使用 `linear.x` 和 `angular.z` | `joy_control.py` | `base_control_router.py` | 配置 `publish_rate=25.0Hz`；摇杆回中时发布零速 |
+| `/js_state` | `std_msgs/msg/Bool` | 手柄通信状态；档位非法或 Modbus 通信异常时为 `false` | `handle_control.py` | `base_control_router.py` | 配置 `poll_rate=50.0Hz` |
+| `/js_cmd_vel` | `geometry_msgs/msg/Twist` | STM32 摇杆速度指令；五档同时按 20% 递增缩放线速度和角速度 | `handle_control.py` | `base_control_router.py` | 配置 `poll_rate=50.0Hz`；异常或摇杆回中时发布零速 |
+| `/handle/gear` | `std_msgs/msg/UInt16` | STM32 当前档位，合法范围 1～5 | `handle_control.py` | 调试/上层状态显示 | 每次成功读取寄存器后发布 |
+| `/handle/buttons` | `std_msgs/msg/UInt16` | `0x0006` 的七位按键状态码 | `handle_control.py` | 调试/上层业务 | 每次成功读取寄存器后发布 |
+| `/handle/navigation_button` | `std_msgs/msg/Empty` | 导航键按下沿事件；当前不直接触发导航 | `handle_control.py` | 预留上层业务 | 导航键由释放变为按下时发布 |
 | `/web_cmd_vel` | `geometry_msgs/msg/Twist` | Web 控制速度指令 | Web/ROS bridge 侧 | `base_control_router.py` | Web 控制事件触发或按其发送周期发布；router 侧超时参数 `web_cmd_timeout=0.4s` |
 | `/base_status` | `std_msgs/msg/String` | CAN 连接状态 JSON，字段包括 `connected`、`reconnecting`、`can_errors`、`can_lost_at`、`can_recovered_at` | `CanConnectionManager`，嵌入 `base_control.py` | 调试/上层状态显示 | 看门狗 `1Hz` 周期发布；连接、断开、shutdown 时也会发布 |
 

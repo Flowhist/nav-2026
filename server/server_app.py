@@ -25,7 +25,7 @@ CONFIG_IMPACTS: Dict[str, Dict[str, object]] = {
         "message": "保存后需要重启底盘驱动，运行中的节点不会自动读取新速度参数。",
         "restart_targets": ["base_drive"],
     },
-    "joy.yaml": {
+    "handle.yaml": {
         "message": "保存后需要重启底盘控制。",
         "restart_targets": ["base_drive"],
     },

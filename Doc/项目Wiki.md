@@ -61,16 +61,16 @@ server/ros_bridge.py 订阅 ROS 状态并提供 Web 页面调试、建图、导�
 - 加载 ROS 2 和工作区环境。
 - 设置 `FASTRTPS_DEFAULT_PROFILES_FILE`、`FINAV_REPO_DIR`、`FINAV_MAPS_DIR`。
 - 启动底盘驱动 `base_control.py`。
-- 启动 HID 摇杆链路 `launch/sub/joy.launch.py`。
+- 启动 STM32 手柄链路 `launch/sub/handle.launch.py`。
 - 启动 Web 后台 `server/run_server.py`。
-- 启动键盘/摇杆路由 `base_control_router.py`。
+- 启动键盘/手柄路由 `base_control_router.py`。
 - 退出时清理建图/导航相关进程。
 
 典型用法：
 
 ```bash
 bash start_finav.sh
-bash start_finav.sh --joy-dev /dev/input/js0 --host 0.0.0.0 --port 8010
+bash start_finav.sh --handle-port /dev/ttyUSB0 --host 0.0.0.0 --port 8010
 ```
 
 ### 2.2 仅启动底盘与遥控
@@ -79,7 +79,7 @@ bash start_finav.sh --joy-dev /dev/input/js0 --host 0.0.0.0 --port 8010
 
 作用：
 
-- 启动 `base_control.py` 和 HID 摇杆链路。
+- 启动 `base_control.py`、STM32 手柄链路和控制仲裁器。
 - 前台运行 `base_control_router.py`，用于键盘接管、档位切换和急停。
 - 适合底盘联调，不启动 Web 和 SLAM。
 
@@ -147,10 +147,12 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 相关文件：
 
 - `scripts/control/base_control.py`
-- `scripts/control/joy_control.py`
+- `scripts/control/handle_control.py`
+- `scripts/control/handle_modbus.py`
+- `scripts/control/handle_protocol.py`
 - `scripts/control/base_control_router.py`
 - `config/base_control.yaml`
-- `config/joy.yaml`
+- `config/handle.yaml`
 - `base_drive.sh`
 - `start_finav.sh`
 
@@ -160,8 +162,9 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - 订阅 `/cmd_vel`，将线速度和角速度换算为左右轮角速度，下发到底盘。
 - 读取左右轮反馈，积分发布 `/odom_encoder`。
 - 不直接发布 `odom -> base_link` TF，TF 由 EKF 输出，避免多个节点重复发布同一变换。
-- `joy_control.py` 订阅 `joy_node` 发布的 `/joy`，按 `config/joy.yaml` 的轴向、死区、饱和区和两档分界线，以及 `config/base_control.yaml` 中的摇杆速度档位，转换为 `/js_cmd_vel`，并发布 `/js_state`。
-- `base_control_router.py` 负责摇杆/键盘/Web 控制仲裁，最终发布 `/cmd_vel`。
+- `handle_control.py` 通过 Modbus-RTU 读取 STM32 的档位、摇杆和按键寄存器，转换为 `/js_cmd_vel`、`/js_state` 和手柄状态话题，并将 `/odom_encoder` 的实际线速度写回显示寄存器。
+- STM32 档位按 20%、40%、60%、80%、100% 同步缩放线速度和角速度；档位非法或通信异常时发布零速并标记离线。
+- `base_control_router.py` 负责手柄/键盘/Web 控制仲裁，最终发布 `/cmd_vel`。
 
 #### 故障检测与急停处理
 
@@ -192,8 +195,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - 改底盘速度上限、轮距、CAN 通道：`config/base_control.yaml`。
 - 改底盘驱动和里程计逻辑：`scripts/control/base_control.py`。
 - 改故障检测频率或冷却期：`scripts/control/base_control.py` 中 `_monitor_fault` 定时器周期和 `_fault_monitor_cooldown_until`。
-- 改 HID 摇杆轴向、死区和档位分界线：`config/joy.yaml`。
-- 改 HID 摇杆速度档位：`config/base_control.yaml`。
+- 改 STM32 串口、摇杆标定、方向和五档最高速度：`config/handle.yaml`。
 - 改键盘/Web 仲裁：`scripts/control/base_control_router.py`。
 
 ### 3.2 FREE 雷达模块
@@ -457,8 +459,8 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 ## 4. 配置文件索引
 
-- `config/base_control.yaml`：底盘、键盘和 HID 摇杆速度档位参数。
-- `config/joy.yaml`：HID 摇杆设备、轴向、死区、饱和区和两档分界线。
+- `config/base_control.yaml`：底盘和键盘控制参数。
+- `config/handle.yaml`：STM32 手柄串口、Modbus、摇杆标定、方向和五档速度参数。
 - `config/lidar.yaml`：左右 FREE 雷达 IP、角度、频率、滤波、时间戳策略和融合参数。
 - `config/imu.yaml`：DM-IMU 串口、零偏、发布参数。
 - `config/ekf.yaml`：robot_localization EKF 融合参数。
@@ -603,7 +605,7 @@ ros2 run tf2_ros tf2_echo map base_link
 | EKF | `launch/sub/ekf.launch.py`, `config/ekf.yaml` |
 | 机器人模型 | `urdf/whillcar.urdf`, `launch/sub/robot_model.launch.py` |
 | 底盘控制 | `scripts/control/base_control.py`, `config/base_control.yaml` | 故障检测 `/base_fault` |
-| 摇杆/键盘 | `scripts/control/joy_control.py`, `launch/sub/joy.launch.py`, `config/joy.yaml`, `config/base_control.yaml`, `scripts/control/base_control_router.py` |
+| 手柄/键盘 | `scripts/control/handle_control.py`, `scripts/control/handle_modbus.py`, `scripts/control/handle_protocol.py`, `launch/sub/handle.launch.py`, `config/handle.yaml`, `scripts/control/base_control_router.py` |
 | 路径规划 | `scripts/control/nav_path_plan.py`, `config/path_plan.yaml` |
 | 路径跟踪 | `scripts/control/nav_control.py`, `config/nav.yaml` |
 | Web 后台 | `server/`, `server/web/` |

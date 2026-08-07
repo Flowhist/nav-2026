@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # start_finav.sh
-# 启动底盘驱动、摇杆控制、网页后台与本地键盘路由
+# 启动底盘驱动、STM32 手柄、网页后台与本地键盘路由
 #
 # 用法：
 #   bash start_finav.sh
-#   bash start_finav.sh --joy-dev /dev/input/js0 --host 0.0.0.0 --port 8010
+#   bash start_finav.sh --handle-port /dev/ttyUSB0 --host 0.0.0.0 --port 8010
 
 set -euo pipefail
 
@@ -12,14 +12,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$SCRIPT_DIR"
 WORKSPACE_DIR="$(cd "$REPO_DIR/../.." && pwd)"
 
-JOY_DEV="/dev/input/js0"
+HANDLE_PORT="/dev/ttyUSB0"
 SERVER_HOST="0.0.0.0"
 SERVER_PORT="8010"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --joy-dev)
-            JOY_DEV="$2"
+        --handle-port)
+            HANDLE_PORT="$2"
             shift 2
             ;;
         --host)
@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 DRIVER_PID=""
-JOY_PID=""
+HANDLE_PID=""
 SERVER_PID=""
 ROUTER_PID=""
 START_CHECKS=6
@@ -58,7 +58,7 @@ wait_all_stable() {
     local i
     for ((i = 0; i < START_CHECKS; ++i)); do
         kill -0 "$DRIVER_PID" 2>/dev/null || fail "base_control 启动失败"
-        kill -0 "$JOY_PID" 2>/dev/null || fail "joy.launch.py 启动失败"
+        kill -0 "$HANDLE_PID" 2>/dev/null || fail "handle.launch.py 启动失败"
         kill -0 "$SERVER_PID" 2>/dev/null || fail "web server 启动失败"
         kill -0 "$ROUTER_PID" 2>/dev/null || fail "base_control_router 启动失败"
         sleep "$START_INTERVAL"
@@ -93,14 +93,14 @@ wait_pid_exit() {
 
 stop_control_stack() {
     force_stop_group "$ROUTER_PID"
-    force_stop_group "$JOY_PID"
+    force_stop_group "$HANDLE_PID"
     force_stop_group "$DRIVER_PID"
     wait_pid_exit "$ROUTER_PID"
-    wait_pid_exit "$JOY_PID"
+    wait_pid_exit "$HANDLE_PID"
     wait_pid_exit "$DRIVER_PID"
-    wait "$ROUTER_PID" "$JOY_PID" "$DRIVER_PID" 2>/dev/null || true
+    wait "$ROUTER_PID" "$HANDLE_PID" "$DRIVER_PID" 2>/dev/null || true
     ROUTER_PID=""
-    JOY_PID=""
+    HANDLE_PID=""
     DRIVER_PID=""
 }
 
@@ -161,8 +161,7 @@ export FINAV_MAPS_DIR="$REPO_DIR/maps"
 
 printf '清理旧进程...\n'
 pkill -9 -f "base_control.py" 2>/dev/null || true
-pkill -9 -f "joy_control.py" 2>/dev/null || true
-pkill -9 -f "joy_node" 2>/dev/null || true
+pkill -9 -f "handle_control.py" 2>/dev/null || true
 pkill -9 -f "base_control_router.py" 2>/dev/null || true
 pkill -9 -f "server/run_server.py" 2>/dev/null || true
 sleep 0.2
@@ -177,10 +176,10 @@ start_control_stack() {
         > /dev/null 2>&1 &
     DRIVER_PID=$!
 
-    printf '▶ 启动 HID joystick\n'
-    setsid ros2 launch finav joy.launch.py "joy_dev:=$JOY_DEV" \
+    printf '▶ 启动 STM32 手柄\n'
+    setsid ros2 launch finav handle.launch.py "handle_port:=$HANDLE_PORT" \
         > /dev/null 2>&1 &
-    JOY_PID=$!
+    HANDLE_PID=$!
 
     printf '▶ 启动 base_control_router\n'
     setsid ros2 run finav base_control_router.py \
@@ -198,8 +197,8 @@ start_control_stack
 printf '等待关键进程稳定...\n'
 wait_all_stable
 
-printf '\033[32m✓ 底盘、摇杆与 Web 后台均已启动\033[0m\n'
-printf '  摇杆设备: %s\n' "$JOY_DEV"
+printf '\033[32m✓ 底盘、STM32 手柄与 Web 后台均已启动\033[0m\n'
+printf '  手柄串口: %s\n' "$HANDLE_PORT"
 printf '  Web 地址: http://%s:%s\n' "$SERVER_HOST" "$SERVER_PORT"
 printf '  F=键盘开关  │  Ctrl-C 退出\n\n'
 

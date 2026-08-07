@@ -1,0 +1,32 @@
+# STM32 手柄通信配置。建议实车部署时将 port 改为稳定的 /dev/serial/by-id/... 路径。
+
+handle_control:
+  ros__parameters:
+    enabled: true
+    port: "/dev/ttyUSB0"
+    baudrate: 115200
+    slave_id: 1
+    serial_timeout: 0.05
+    poll_rate: 50.0
+    speed_write_rate: 10.0
+    reconnect_interval: 1.0
+
+    # 摇杆 ADC 标定值。方向相反时只修改对应 direction 的正负号。
+    axis_minimum: 0
+    axis_center: 2048
+    axis_maximum: 4095
+    dead_zone: 50
+    linear_direction: -1.0
+    angular_direction: -1.0
+
+    # 五档同时缩放线速度与角速度：20%、40%、60%、80%、100%。
+    max_linear_speed: 0.6
+    max_angular_speed: 0.5
+
+    joy_topic: "/joy"
+    state_topic: "/js_state"
+    cmd_vel_topic: "/js_cmd_vel"
+    buttons_topic: "/handle/buttons"
+    gear_topic: "/handle/gear"
+    navigation_button_topic: "/handle/navigation_button"
+    odometry_topic: "/odom_encoder"
