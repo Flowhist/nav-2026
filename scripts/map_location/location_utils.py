@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-共享地图工具：maps 目录解析、地图发现、地点读写、运行地图检测。
+共享地图工具：maps 目录解析、地点读取、运行地图检测。
 
-被 annotate_tool / annotate_visualizer / nav_voice_bridge / relocate 共用。
+被 location_visualizer / nav_voice_bridge / relocate 共用。
 """
 
 import os
-import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import yaml
 
@@ -40,22 +39,6 @@ def resolve_maps_dir() -> str:
         if share_maps.is_dir():
             return str(share_maps)
     return ""
-
-
-def discover_maps(maps_dir: str) -> List[str]:
-    """列出 maps_dir 下所有有效地图名（含 .yaml + .pgm）。"""
-    names = []
-    if not maps_dir or not os.path.isdir(maps_dir):
-        return names
-    for name in sorted(os.listdir(maps_dir)):
-        d = os.path.join(maps_dir, name)
-        if not os.path.isdir(d):
-            continue
-        yml = os.path.join(d, f"{name}.yaml")
-        pgm = os.path.join(d, f"{name}.pgm")
-        if os.path.exists(yml) and os.path.exists(pgm):
-            names.append(name)
-    return names
 
 
 def discover_maps_with_locations(maps_dir: str) -> List[str]:
@@ -95,16 +78,6 @@ def load_locations(path: Path) -> Dict[str, Dict[str, float]]:
     return result
 
 
-def save_locations(path: Path, locations: Dict[str, Dict[str, float]]) -> None:
-    """写入 .locations.yaml。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    out = {"locations": locations}
-    path.write_text(
-        yaml.dump(out, allow_unicode=True, default_flow_style=False),
-        encoding="utf-8",
-    )
-
-
 def detect_running_map_file(maps_dir: str, require_locations: bool = True) -> str:
     """尝试从当前运行的 ROS 节点参数中自动检测 map_file。"""
     import subprocess as _sp
@@ -136,8 +109,8 @@ def detect_running_map_file(maps_dir: str, require_locations: bool = True) -> st
             text = text.split(marker, 1)[1].strip()
         return text.strip().strip("'\"")
 
-    # 优先查 nav_voice_bridge / annotate_visualizer 自身的 map_file 参数
-    for node_name in ("/nav_voice_bridge", "/annotate_visualizer"):
+    # 优先查 nav_voice_bridge / location_visualizer 自身的 map_file 参数
+    for node_name in ("/nav_voice_bridge", "/location_visualizer"):
         mf = _ros2_param_get(node_name, "map_file")
         if mf and _map_file_exists(mf):
             return mf

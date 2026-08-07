@@ -66,7 +66,7 @@ RViz / nav_voice_bridge
 | --- | --- | --- | --- | --- | --- |
 | `/nav_voice_bridge/voice_command` | `std_msgs/msg/String` | 地点名称文本，例如 `.locations.yaml` 中的 key | 语音/上层业务 | `nav_voice_bridge.py` | 事件触发；仅 `nav.launch.py use_nav_bridge:=true` 时启用 |
 | `/nav_voice_bridge/status` | `std_msgs/msg/String` | 地点指令处理结果，例如 unknown location、navigating to xxx；不代表完整导航成功/失败 | `nav_voice_bridge.py` | 上层业务/调试终端 | 事件触发：收到地点指令并处理后发布 |
-| `/locations` | `visualization_msgs/msg/MarkerArray` | 地图地点标记、箭头和文字标签 | `annotate_visualizer.py` | RViz | 节点启动加载 `.locations.yaml` 后发布一次；marker lifetime 为 0，RViz 中持续显示 |
+| `/locations` | `visualization_msgs/msg/MarkerArray` | 地图地点标记、箭头和文字标签 | `location_visualizer.py` | RViz | 节点启动加载 `.locations.yaml` 后发布一次；marker lifetime 为 0，RViz 中持续显示 |
 
 ## 6. 关键节点关系
 

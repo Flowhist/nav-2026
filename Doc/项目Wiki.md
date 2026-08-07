@@ -147,9 +147,9 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 相关文件：
 
 - `scripts/control/base_control.py`
-- `scripts/control/handle_control.py`
-- `scripts/control/handle_modbus.py`
-- `scripts/control/handle_protocol.py`
+- `scripts/handle/handle_control.py`
+- `scripts/handle/handle_modbus.py`
+- `scripts/handle/handle_protocol.py`
 - `scripts/control/base_control_router.py`
 - `config/base_control.yaml`
 - `config/handle.yaml`
@@ -605,7 +605,7 @@ ros2 run tf2_ros tf2_echo map base_link
 | EKF | `launch/sub/ekf.launch.py`, `config/ekf.yaml` |
 | 机器人模型 | `urdf/whillcar.urdf`, `launch/sub/robot_model.launch.py` |
 | 底盘控制 | `scripts/control/base_control.py`, `config/base_control.yaml` | 故障检测 `/base_fault` |
-| 手柄/键盘 | `scripts/control/handle_control.py`, `scripts/control/handle_modbus.py`, `scripts/control/handle_protocol.py`, `launch/sub/handle.launch.py`, `config/handle.yaml`, `scripts/control/base_control_router.py` |
+| 手柄/键盘 | `scripts/handle/handle_control.py`, `scripts/handle/handle_modbus.py`, `scripts/handle/handle_protocol.py`, `launch/sub/handle.launch.py`, `config/handle.yaml`, `scripts/control/base_control_router.py` |
 | 路径规划 | `scripts/control/nav_path_plan.py`, `config/path_plan.yaml` |
 | 路径跟踪 | `scripts/control/nav_control.py`, `config/nav.yaml` |
 | Web 后台 | `server/`, `server/web/` |

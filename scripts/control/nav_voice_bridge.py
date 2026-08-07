@@ -20,11 +20,11 @@ from std_srvs.srv import Trigger
 CONTROL_DIR = Path(__file__).resolve().parent
 if str(CONTROL_DIR) not in sys.path:
     sys.path.insert(0, str(CONTROL_DIR))
-MAP_ANNOTATE_DIR = Path(__file__).resolve().parents[1] / "map_annotate"
-if str(MAP_ANNOTATE_DIR) not in sys.path:
-    sys.path.insert(0, str(MAP_ANNOTATE_DIR))
+MAP_LOCATION_DIR = Path(__file__).resolve().parents[1] / "map_location"
+if str(MAP_LOCATION_DIR) not in sys.path:
+    sys.path.insert(0, str(MAP_LOCATION_DIR))
 
-from map_utils import detect_running_map_file, load_locations, resolve_maps_dir
+from location_utils import detect_running_map_file, load_locations, resolve_maps_dir
 
 
 def set_yaw_orientation(orientation, yaw_rad: float) -> None:

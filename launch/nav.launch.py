@@ -210,8 +210,8 @@ def generate_launch_description():
     # 6. 地点可视化：发布 MarkerArray 到 RViz
     location_viz_node = Node(
         package="finav",
-        executable="annotate_visualizer.py",
-        name="annotate_visualizer",
+        executable="location_visualizer.py",
+        name="location_visualizer",
         output="screen",
         condition=IfCondition(show_locations),
         parameters=[{"map_file": map_file}],

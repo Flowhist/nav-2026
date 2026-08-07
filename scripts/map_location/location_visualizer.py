@@ -2,14 +2,14 @@
 """Publish location markers from .locations.yaml to RViz.
 
 Usage:
-  ros2 run finav annotate_visualizer.py                            # auto-detect
-  ros2 run finav annotate_visualizer.py --ros-args -p map_file:=simap
+  ros2 run finav location_visualizer.py                            # auto-detect
+  ros2 run finav location_visualizer.py --ros-args -p map_file:=simap
 """
 
 import math
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 import rclpy
 from geometry_msgs.msg import Pose
@@ -17,7 +17,7 @@ from rclpy.node import Node
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
 
-from map_utils import (
+from location_utils import (
     discover_maps_with_locations,
     detect_running_map_file,
     load_locations,
@@ -60,7 +60,7 @@ def _pose_at(x: float, y: float, yaw: float) -> Pose:
 
 class LocationVisualizer(Node):
     def __init__(self) -> None:
-        super().__init__("annotate_visualizer")
+        super().__init__("location_visualizer")
 
         self.declare_parameter("map_file", "")
         self.declare_parameter("maps_dir", "")
@@ -129,8 +129,8 @@ class LocationVisualizer(Node):
             for m in available:
                 print(f"  - {m}", file=sys.stderr)
             print(
-                f"\n用法: ros2 run finav annotate_visualizer.py "
-                f"--ros-args -p map_file:=<地图名>",
+                "\n用法: ros2 run finav location_visualizer.py "
+                "--ros-args -p map_file:=<地图名>",
                 file=sys.stderr,
             )
 

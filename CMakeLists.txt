@@ -119,7 +119,7 @@ install(PROGRAMS
   scripts/control/base_control.py
   scripts/control/base_driver_worker.py
   scripts/control/base_control_router.py
-  scripts/control/handle_control.py
+  scripts/handle/handle_control.py
   scripts/control/nav_relocate.py
   scripts/imu/dm_imu_publisher.py
   scripts/tool/TF.sh
@@ -129,9 +129,7 @@ install(PROGRAMS
   scripts/tool/clean_map.sh
   scripts/tool/save_map.sh
   scripts/tool/save_map.py
-  scripts/map_annotate/map_utils.py
-  scripts/map_annotate/annotate_visualizer.py
-  scripts/map_annotate/annotate_tool.py
+  scripts/map_location/location_visualizer.py
   sim/scripts/sim_relocate.py
   sim/scripts/sim_relocate.sh
   sim/scripts/sim_chassis_sensor_pub.py
@@ -144,8 +142,9 @@ install(PROGRAMS
 )
 
 install(FILES
-  scripts/control/handle_modbus.py
-  scripts/control/handle_protocol.py
+  scripts/handle/handle_modbus.py
+  scripts/handle/handle_protocol.py
+  scripts/map_location/location_utils.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

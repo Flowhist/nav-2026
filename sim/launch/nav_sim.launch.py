@@ -379,8 +379,8 @@ def generate_launch_description():
 
     location_viz_node = Node(
         package="finav",
-        executable="annotate_visualizer.py",
-        name="annotate_visualizer",
+        executable="location_visualizer.py",
+        name="location_visualizer",
         output="screen",
         condition=IfCondition(show_locations),
         parameters=[
