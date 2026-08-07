@@ -28,7 +28,7 @@ source install/setup.bash
 实机常用入口：
 
 ```bash
-# 启动底盘、摇杆、Web 后台和键盘路由
+# 启动底盘、STM32 手柄、Web 后台和控制路由
 bash start_finav.sh
 
 # 单独启动建图链路
@@ -42,8 +42,10 @@ ros2 launch finav nav.launch.py
 
 - `launch/`：实机建图、导航和子模块启动文件。
 - `config/`：雷达、IMU、EKF、SLAM、底盘、规划和控制参数。
-- `scripts/control/`：底盘驱动、摇杆/键盘、路径规划、路径跟踪。
+- `scripts/control/`：底盘驱动、控制仲裁、路径规划、路径跟踪。
+- `scripts/handle/`：STM32 手柄 Modbus 通信、协议解析和 ROS 节点。
 - `scripts/imu/`：DM-IMU ROS 2 发布节点。
+- `scripts/map_location/`：地图地点文件读取和 RViz 地点可视化。
 - `third_party/`：FREE 雷达和 DM-IMU 厂商代码整理区。
 - `server/`：Web 调试后台。
 - `sim/`：仿真 launch、脚本、Gazebo 模型和世界。
@@ -77,7 +79,7 @@ ros2 launch finav nav.launch.py
 - `state_store.py`
   - 线程安全状态仓库，保存 `status`、`scene`、事件历史。
 - `map_utils.py`
-  - 读取 `maps/` 下的 `.yaml + .pgm`，供“已有地图预览”页面使用。
+  - 读取 `maps/` 下的 `.yaml + .pgm`，并负责 Web 地点配置的读取与保存。
 - `web/index.html`
   - 页面结构。
 - `web/styles.css`
@@ -128,7 +130,7 @@ ros2 launch finav nav.launch.py
 ### 3. 地图预览页
 
 - 从 `maps/` 目录读取地图元数据和 `.pgm`，在前端 canvas 中展示。
-- 页面只读，不显示底栏状态区。
+- 支持在地图上新增、编辑和保存导航地点；地点统一通过 Web 页面维护。
 
 ### 4. 配置文件页
 
@@ -141,7 +143,7 @@ ros2 launch finav nav.launch.py
 - 左 1/3 为状态总览：
   - 机器人状态
   - 系统状态
-  - 包含网页控制、摇杆控制等实时接管状态
+  - 包含网页控制、STM32 手柄控制等实时接管状态
 - 右 2/3 为事件 / 日志区：
   - 事件流
   - 建图日志
@@ -166,7 +168,7 @@ ros2 launch finav nav.launch.py
 - 订阅 `/tf`
   - 统计 `map->odom`、`odom->base_link` 频率
 - 订阅 `/js_state`
-  - 更新底栏里的摇杆控制激活状态
+  - 更新底栏里的 STM32 手柄控制激活状态
 - 定时器：
   - `0.05s` 处理网页命令队列
   - `0.1s` 执行 teleop 超时刹停
@@ -389,7 +391,7 @@ source /home/flowhist/workspace/final_ws/install/local_setup.bash
 python3 server/run_server.py --host 0.0.0.0 --port 8010
 ```
 
-如果需要把底盘、摇杆与网页后台一起拉起，直接在项目根目录执行：
+如果需要把底盘、STM32 手柄与网页后台一起拉起，直接在项目根目录执行：
 
 ```bash
 bash start_finav.sh

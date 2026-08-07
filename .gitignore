@@ -3,7 +3,9 @@ maps/
 
 # Build and dependencies
 build/
+tests/
 devel/
+Doc/plans
 install/
 *.egg-info/
 __pycache__/
@@ -20,6 +22,7 @@ __pycache__/
 # agent files
 .serena
 .agents/
+.superpowers
 CLAUDE.md
 AGENTS.md
 .codex

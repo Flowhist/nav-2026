@@ -62,6 +62,8 @@ RViz / nav_voice_bridge
 
 地点导航统一通过 `nav_voice_bridge.py` 完成：上层发布地点名到 `/nav_voice_bridge/voice_command`，桥接节点查 `.locations.yaml` 后发布 `/goal_pose`。不再保留单独的 `nav_to_location.py` 运行入口。
 
+地点只通过 Web 地图页面注册和编辑；`map_location` 运行时模块只负责读取地点文件及发布 RViz 标记。
+
 | 话题 | 类型 | 主要数据 | 发布者 | 订阅者 | 频率/触发时机 |
 | --- | --- | --- | --- | --- | --- |
 | `/nav_voice_bridge/voice_command` | `std_msgs/msg/String` | 地点名称文本，例如 `.locations.yaml` 中的 key | 语音/上层业务 | `nav_voice_bridge.py` | 事件触发；仅 `nav.launch.py use_nav_bridge:=true` 时启用 |

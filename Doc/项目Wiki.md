@@ -361,6 +361,8 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 相关文件：
 
 - `scripts/control/nav_voice_bridge.py`
+- `scripts/map_location/location_utils.py`
+- `scripts/map_location/location_visualizer.py`
 - `config/nav.yaml`
 - `maps/<map>/<map>.locations.yaml`
 
@@ -370,6 +372,8 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - 从当前地图的 `.locations.yaml` 查找地点坐标和朝向。
 - 发布 `geometry_msgs/PoseStamped` 到 `/goal_pose`，交给 `nav_path_plan.py` 规划。
 - 发布 `/nav_voice_bridge/status` 反馈地点是否命中；该状态不表示最终到达。
+- 地点只在 Web 地图页面注册和编辑，运行时模块只读取地点文件。
+- `location_visualizer.py` 将地点发布为 `/locations`，供 RViz 显示。
 
 开发入口：
 
@@ -420,7 +424,8 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - `server_app.py` 处理 API、静态资源和请求路由。
 - `ros_bridge.py` 后台创建 ROS 节点，订阅 `/map`、`/scan`、`/odom`、`/plan`、`/tf` 等，并把数据整理到 `StateStore`。
 - `process_manager.py` 启动/停止建图和导航 launch，读取运行日志。
-- 前端页面轮询后端 API，显示地图、雷达、路径、机器人状态、运行日志，并提供建图/导航/配置编辑操作。
+- `map_utils.py` 读取地图预览，并读写 `<map>/<map>.locations.yaml`。
+- 前端页面轮询后端 API，显示地图、雷达、路径、机器人状态、运行日志，并提供建图、导航、地点注册和配置编辑操作。
 
 开发入口：
 
@@ -433,7 +438,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 相关文件：
 
-- `sim/README.md`
+- `sim/仿真使用说明.md`
 - `sim/launch/map_sim.launch.py`
 - `sim/launch/nav_sim.launch.py`
 - `sim/launch/path_plan_sim.launch.py`
@@ -453,7 +458,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 开发入口：
 
-- 仿真使用说明：`sim/README.md`。
+- 仿真使用说明：`sim/仿真使用说明.md`。
 - Gazebo 世界和模型：`sim/gazebo/`。
 - 仿真 launch：`sim/launch/`。
 
@@ -609,6 +614,6 @@ ros2 run tf2_ros tf2_echo map base_link
 | 路径规划 | `scripts/control/nav_path_plan.py`, `config/path_plan.yaml` |
 | 路径跟踪 | `scripts/control/nav_control.py`, `config/nav.yaml` |
 | Web 后台 | `server/`, `server/web/` |
-| 地图 | `maps/`, `scripts/tool/save_map.sh`, `scripts/tool/save_map.py` |
+| 地图与地点 | `maps/`, `scripts/tool/save_map.sh`, `scripts/tool/save_map.py`, `scripts/map_location/location_utils.py`, `scripts/map_location/location_visualizer.py` |
 | RViz | `rviz/mapping.rviz`, `rviz/navigation.rviz` |
 | 仿真 | `sim/` |
