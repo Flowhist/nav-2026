@@ -1,0 +1,29 @@
+name: Sync GitHub to GitLab
+
+# 触发条件：push代码、推送tag标签时自动运行
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+
+jobs:
+  mirror_job:
+    runs-on: ubuntu-latest
+    steps:
+      # 完整拉取全部git历史，必须fetch-depth:0，否则标签、历史丢失
+      - name: Checkout full repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push mirror to GitLab
+        env:
+          GL_USER: ${{ secrets.GITLAB_USER }}
+          GL_TOKEN: ${{ secrets.GITLAB_PAT }}
+          GL_RAW_URL: ${{ secrets.GITLAB_URL }}
+        run: |
+          # 拼接带token的远程地址
+          GL_REMOTE="https://${GL_USER}:${GL_TOKEN}@${GL_RAW_URL#https://}"
+          git remote add gitlab "${GL_REMOTE}"
+          # --mirror：完整镜像，同步所有分支、tag；github删分支，gitlab也会删
+          git push --mirror gitlab
