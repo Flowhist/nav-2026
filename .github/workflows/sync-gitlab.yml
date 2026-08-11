@@ -1,29 +1,64 @@
 name: Sync GitHub to GitLab
 
-# 触发条件：push代码、推送tag标签时自动运行
 on:
   push:
     branches: ["**"]
     tags: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-to-gitlab-mirror
+  cancel-in-progress: false
 
 jobs:
-  mirror_job:
-    runs-on: self-hosted
+  mirror:
+    runs-on: [self-hosted, Windows, X64, gitlab-mirror]
+    timeout-minutes: 30
     steps:
-      # 完整拉取全部git历史，必须fetch-depth:0，否则标签、历史丢失
-      - name: Checkout full repository
+      - name: Check out all history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Push mirror to GitLab
+      - name: Mirror branches and tags to GitLab
+        shell: pwsh
         env:
           GL_USER: ${{ secrets.GITLAB_USER }}
           GL_TOKEN: ${{ secrets.GITLAB_PAT }}
           GL_RAW_URL: ${{ secrets.GITLAB_URL }}
         run: |
-          # 拼接带token的远程地址
-          GL_REMOTE="https://${GL_USER}:${GL_TOKEN}@${GL_RAW_URL#https://}"
-          git remote add gitlab "${GL_REMOTE}"
-          # --mirror：完整镜像，同步所有分支、tag；github删分支，gitlab也会删
-          git push --mirror gitlab
+          $ErrorActionPreference = "Stop"
+
+          foreach ($name in "GL_USER", "GL_TOKEN", "GL_RAW_URL") {
+            if ([string]::IsNullOrWhiteSpace((Get-Item "Env:$name").Value)) {
+              throw "Required secret $name is missing."
+            }
+          }
+
+          $gitLabUrl = $env:GL_RAW_URL.TrimEnd('/')
+          if ($gitLabUrl -notmatch '^(https?)://(.+)$') {
+            throw "GITLAB_URL must begin with http:// or https://."
+          }
+
+          $scheme = $Matches[1]
+          $authorityAndPath = $Matches[2]
+          if (-not $authorityAndPath.EndsWith('.git')) {
+            $authorityAndPath += '.git'
+          }
+
+          $user = [Uri]::EscapeDataString($env:GL_USER)
+          $token = [Uri]::EscapeDataString($env:GL_TOKEN)
+          $remoteUrl = "${scheme}://${user}:${token}@${authorityAndPath}"
+
+          git fetch --force --prune origin `
+            "+refs/heads/*:refs/mirror/heads/*" `
+            "+refs/tags/*:refs/tags/*"
+          if ($LASTEXITCODE -ne 0) { throw "Fetching GitHub refs failed." }
+
+          git push --force --prune $remoteUrl `
+            "+refs/mirror/heads/*:refs/heads/*" `
+            "+refs/tags/*:refs/tags/*"
+          if ($LASTEXITCODE -ne 0) { throw "Pushing GitLab refs failed." }
