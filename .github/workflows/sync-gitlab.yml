@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 0
 
       - name: Mirror branches and tags to GitLab
-        shell: pwsh
+        shell: powershell
         env:
           GL_USER: ${{ secrets.GITLAB_USER }}
           GL_TOKEN: ${{ secrets.GITLAB_PAT }}
