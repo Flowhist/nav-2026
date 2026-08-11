@@ -8,7 +8,7 @@ on:
 
 jobs:
   mirror_job:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       # 完整拉取全部git历史，必须fetch-depth:0，否则标签、历史丢失
       - name: Checkout full repository
