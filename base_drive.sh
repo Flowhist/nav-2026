@@ -12,10 +12,12 @@ REPO_DIR="$SCRIPT_DIR"
 WORKSPACE_DIR="$(cd "$REPO_DIR/../.." && pwd)"
 
 # ── 参数解析 ──────────────────────────────────────────────────────────── #
-HANDLE_PORT="/dev/ttyUSB0"
+HANDLE_PORT="/dev/serial/by-path/platform-3610000.usb-usb-0:2.3.3:1.0-port0"
+JOY_DEV="/dev/input/by-id/usb-ShenZhenXiaoLong_SMC25usb32_8D8531A84856-joystick"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --handle-port) HANDLE_PORT="$2"; shift 2 ;;
+        --joy-dev) JOY_DEV="$2"; shift 2 ;;
         *) echo "未知参数: $1"; exit 1 ;;
     esac
 done
@@ -91,7 +93,7 @@ tail -n 0 -F /tmp/base_control.log 2>/dev/null \
 STATUS_TAIL_PID=$!
 
 printf '▶ 启动 STM32 手柄\n'
-ros2 launch finav handle.launch.py "handle_port:=$HANDLE_PORT" \
+ros2 launch finav handle.launch.py "handle_port:=$HANDLE_PORT" "joy_dev:=$JOY_DEV" \
     > /dev/null 2>&1 &
 HANDLE_PID=$!
 

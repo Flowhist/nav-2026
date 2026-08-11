@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Linux joystick input and pure command-shaping helpers for handle_control."""
+
+from dataclasses import dataclass
+import os
+import struct
+from typing import Sequence
+
+
+JS_EVENT_BUTTON = 0x01
+JS_EVENT_AXIS = 0x02
+JS_EVENT_INIT = 0x80
+_EVENT = struct.Struct("<IhBB")
+
+
+def normalize_raw_axis(value: int) -> float:
+    """Normalize a Linux joystick int16 axis to [-1.0, 1.0]."""
+    if value >= 0:
+        return min(1.0, float(value) / 32767.0)
+    return max(-1.0, float(value) / 32768.0)
+
+
+def scaled_axis(
+    value: float,
+    *,
+    direction: float = 1.0,
+    dead_zone: float = 0.05,
+    saturation: float = 1.0,
+) -> float:
+    """Apply direction, dead zone, and saturation to a normalized axis."""
+    value = max(-1.0, min(1.0, float(value)))
+    dead_zone = max(0.0, min(0.99, float(dead_zone)))
+    saturation = max(dead_zone + 1e-6, min(1.0, float(saturation)))
+    magnitude = abs(value)
+    if magnitude <= dead_zone:
+        return 0.0
+    scaled = min(1.0, (magnitude - dead_zone) / (saturation - dead_zone))
+    sign = 1.0 if value >= 0.0 else -1.0
+    return sign * scaled * (1.0 if direction >= 0.0 else -1.0)
+
+
+def axis_value(axes: Sequence[float], index: int) -> float:
+    if index < 0 or index >= len(axes):
+        return 0.0
+    return float(axes[index])
+
+
+@dataclass(frozen=True)
+class HidMappingConfig:
+    linear_axis: int = 1
+    angular_axis: int = 0
+    linear_direction: float = 1.0
+    angular_direction: float = 1.0
+    dead_zone: float = 0.05
+    saturation: float = 1.0
+    max_linear_speed: float = 0.6
+    max_angular_speed: float = 0.5
+
+
+@dataclass(frozen=True)
+class HidCommand:
+    linear: float
+    angular: float
+
+
+def command_from_axes(
+    axes: Sequence[float], config: HidMappingConfig, speed_scale: float
+) -> HidCommand:
+    """Map HID axes to a gear-scaled ROS velocity command."""
+    speed_scale = max(0.0, min(1.0, float(speed_scale)))
+    linear = scaled_axis(
+        axis_value(axes, config.linear_axis),
+        direction=config.linear_direction,
+        dead_zone=config.dead_zone,
+        saturation=config.saturation,
+    )
+    angular = scaled_axis(
+        axis_value(axes, config.angular_axis),
+        direction=config.angular_direction,
+        dead_zone=config.dead_zone,
+        saturation=config.saturation,
+    )
+    return HidCommand(
+        linear=linear * max(0.0, config.max_linear_speed) * speed_scale,
+        angular=angular * max(0.0, config.max_angular_speed) * speed_scale,
+    )
+
+
+def slew_limited_value(
+    current: float,
+    target: float,
+    dt: float,
+    acceleration_rate: float,
+    deceleration_rate: float,
+) -> float:
+    """Move current toward target without exceeding the selected slew rate."""
+    current = float(current)
+    target = float(target)
+    dt = max(0.0, float(dt))
+    if current == target or dt == 0.0:
+        return current
+
+    same_direction = current == 0.0 or current * target > 0.0
+    accelerating = same_direction and abs(target) > abs(current)
+    rate = acceleration_rate if accelerating else deceleration_rate
+    maximum_delta = max(0.0, float(rate)) * dt
+    delta = target - current
+    if abs(delta) <= maximum_delta:
+        return target
+    return current + (maximum_delta if delta > 0.0 else -maximum_delta)
+
+
+class LinuxJoystickReader:
+    """Non-blocking reader for the stable Linux /dev/input/js* ABI."""
+
+    def __init__(self, device: str, initial_axis_count: int = 8):
+        self.device = str(device)
+        self.axes = [0.0] * max(0, int(initial_axis_count))
+        self.buttons = []
+        self._fd = None
+
+    @property
+    def is_open(self) -> bool:
+        return self._fd is not None
+
+    def open(self) -> None:
+        if self._fd is not None:
+            return
+        self._fd = os.open(self.device, os.O_RDONLY | os.O_NONBLOCK)
+        self.axes = [0.0] * len(self.axes)
+        self.buttons = []
+
+    def close(self) -> None:
+        if self._fd is None:
+            return
+        try:
+            os.close(self._fd)
+        finally:
+            self._fd = None
+
+    def read_available(self) -> bool:
+        """Drain queued events and return whether at least one event was read."""
+        if self._fd is None:
+            return False
+        updated = False
+        while True:
+            try:
+                data = os.read(self._fd, _EVENT.size)
+            except BlockingIOError:
+                return updated
+            if not data:
+                raise OSError("joystick device returned EOF")
+            if len(data) != _EVENT.size:
+                raise OSError("short joystick event")
+
+            _timestamp, value, event_type, number = _EVENT.unpack(data)
+            event_type &= ~JS_EVENT_INIT
+            if event_type == JS_EVENT_AXIS:
+                if number >= len(self.axes):
+                    self.axes.extend([0.0] * (number + 1 - len(self.axes)))
+                self.axes[number] = normalize_raw_axis(value)
+                updated = True
+            elif event_type == JS_EVENT_BUTTON:
+                if number >= len(self.buttons):
+                    self.buttons.extend([0] * (number + 1 - len(self.buttons)))
+                self.buttons[number] = 1 if value else 0
+                updated = True
+

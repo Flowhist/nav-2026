@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""STM32 handle launch."""
+"""Launch the combined HID joystick and STM32 Modbus handle node."""
 
 import os
 
@@ -15,6 +15,7 @@ def _load_handle_config(config_path: str):
     defaults = {
         "enabled": "true",
         "port": "/dev/ttyUSB0",
+        "hid_device": "/dev/input/js0",
     }
     try:
         import yaml  # type: ignore
@@ -29,6 +30,9 @@ def _load_handle_config(config_path: str):
         )
         if isinstance(parameters, dict):
             defaults["port"] = str(parameters.get("port", defaults["port"]))
+            defaults["hid_device"] = str(
+                parameters.get("hid_device", defaults["hid_device"])
+            )
             enabled = bool(parameters.get("enabled", True))
             defaults["enabled"] = "true" if enabled else "false"
     except Exception:
@@ -57,12 +61,17 @@ def generate_launch_description():
     use_handle_arg = DeclareLaunchArgument(
         "use_handle",
         default_value=defaults["enabled"],
-        description="是否启动 STM32 手柄通信",
+        description="Start the combined HID and STM32 handle node",
     )
     handle_port_arg = DeclareLaunchArgument(
         "handle_port",
         default_value=defaults["port"],
-        description="STM32 手柄串口路径",
+        description="STM32 Modbus serial device",
+    )
+    joy_dev_arg = DeclareLaunchArgument(
+        "joy_dev",
+        default_value=defaults["hid_device"],
+        description="Linux joystick device",
     )
     handle_node = Node(
         package="finav",
@@ -72,7 +81,10 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("use_handle")),
         parameters=[
             config_path,
-            {"port": LaunchConfiguration("handle_port")},
+            {
+                "port": LaunchConfiguration("handle_port"),
+                "hid_device": LaunchConfiguration("joy_dev"),
+            },
         ],
     )
 
@@ -80,6 +92,7 @@ def generate_launch_description():
         [
             use_handle_arg,
             handle_port_arg,
+            joy_dev_arg,
             handle_node,
         ]
     )

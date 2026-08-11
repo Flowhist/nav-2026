@@ -12,7 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$SCRIPT_DIR"
 WORKSPACE_DIR="$(cd "$REPO_DIR/../.." && pwd)"
 
-HANDLE_PORT="/dev/ttyUSB0"
+HANDLE_PORT="/dev/serial/by-path/platform-3610000.usb-usb-0:2.3.3:1.0-port0"
+JOY_DEV="/dev/input/by-id/usb-ShenZhenXiaoLong_SMC25usb32_8D8531A84856-joystick"
 SERVER_HOST="0.0.0.0"
 SERVER_PORT="8010"
 
@@ -20,6 +21,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --handle-port)
             HANDLE_PORT="$2"
+            shift 2
+            ;;
+        --joy-dev)
+            JOY_DEV="$2"
             shift 2
             ;;
         --host)
@@ -177,7 +182,7 @@ start_control_stack() {
     DRIVER_PID=$!
 
     printf '▶ 启动 STM32 手柄\n'
-    setsid ros2 launch finav handle.launch.py "handle_port:=$HANDLE_PORT" \
+    setsid ros2 launch finav handle.launch.py "handle_port:=$HANDLE_PORT" "joy_dev:=$JOY_DEV" \
         > /dev/null 2>&1 &
     HANDLE_PID=$!
 
@@ -199,6 +204,7 @@ wait_all_stable
 
 printf '\033[32m✓ 底盘、STM32 手柄与 Web 后台均已启动\033[0m\n'
 printf '  手柄串口: %s\n' "$HANDLE_PORT"
+printf '  摇杆设备: %s\n' "$JOY_DEV"
 printf '  Web 地址: http://%s:%s\n' "$SERVER_HOST" "$SERVER_PORT"
 printf '  F=键盘开关  │  Ctrl-C 退出\n\n'
 

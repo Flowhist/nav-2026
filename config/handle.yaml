@@ -1,9 +1,9 @@
-# STM32 手柄通信配置。建议实车部署时将 port 改为稳定的 /dev/serial/by-id/... 路径。
-
+# The handle command is valid only when both the HID joystick and STM32 Modbus gear are online.
 handle_control:
   ros__parameters:
     enabled: true
-    port: "/dev/ttyUSB0"
+    port: "/dev/serial/by-path/platform-3610000.usb-usb-0:2.3.3:1.0-port0"
+    hid_device: "/dev/input/by-id/usb-ShenZhenXiaoLong_SMC25usb32_8D8531A84856-joystick"
     baudrate: 115200
     slave_id: 1
     serial_timeout: 0.05
@@ -11,17 +11,23 @@ handle_control:
     speed_write_rate: 10.0
     reconnect_interval: 1.0
 
-    # 摇杆 ADC 标定值。方向相反时只修改对应 direction 的正负号。
-    axis_minimum: 0
-    axis_center: 2048
-    axis_maximum: 4095
-    dead_zone: 50
-    linear_direction: -1.0
-    angular_direction: -1.0
+    # Measured HID mapping: forward/left are positive and the stick returns to zero.
+    linear_axis: 1
+    angular_axis: 0
+    linear_direction: 1.0
+    angular_direction: 1.0
+    dead_zone: 0.05
+    saturation: 1.0
 
-    # 五档同时缩放线速度与角速度：20%、40%、60%、80%、100%。
+    # Gear 1..5 scales both limits to 20%, 40%, 60%, 80%, 100%.
     max_linear_speed: 0.6
     max_angular_speed: 0.5
+
+    # Linear rates are m/s^2; angular rates are rad/s^2.
+    linear_accel_slew_rate: 1.5
+    linear_decel_slew_rate: 6.0
+    angular_accel_slew_rate: 3.1415926536
+    angular_decel_slew_rate: 6.2831853072
 
     joy_topic: "/joy"
     state_topic: "/js_state"

@@ -143,6 +143,7 @@ install(PROGRAMS
 )
 
 install(FILES
+  scripts/handle/handle_hid.py
   scripts/handle/handle_modbus.py
   scripts/handle/handle_protocol.py
   scripts/map_location/location_utils.py

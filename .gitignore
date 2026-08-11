@@ -3,7 +3,8 @@ maps/
 
 # Build and dependencies
 build/
-tests/
+tests/*
+!tests/test_handle_hid.py
 devel/
 Doc/plans
 install/

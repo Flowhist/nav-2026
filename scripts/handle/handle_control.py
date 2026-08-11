@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bridge the STM32 handle registers to Finav's existing control topics."""
+"""Combine the HID joystick and STM32 Modbus handle into control topics."""
 
 from time import monotonic
 
@@ -12,39 +12,50 @@ from sensor_msgs.msg import Joy
 from serial import SerialException
 from std_msgs.msg import Bool, Empty, UInt16
 
+from handle_hid import (
+    HidMappingConfig,
+    LinuxJoystickReader,
+    command_from_axes,
+    slew_limited_value,
+)
 from handle_modbus import ModbusError, ModbusRtuClient
 from handle_protocol import (
     DISPLAY_SPEED_REGISTER,
     HANDLE_STATE_REGISTER,
     HANDLE_STATE_REGISTER_COUNT,
     HandleRegisters,
-    command_from_registers,
+    gear_scale,
     navigation_button_pressed,
     speed_mps_to_register,
 )
 
 
 class HandleControl(Node):
-    """Own the handle serial port and publish safe, scaled velocity commands."""
+    """Publish commands only while both HID axes and Modbus gear are valid."""
 
     def __init__(self):
         super().__init__("handle_control")
         self.declare_parameter("enabled", True)
         self.declare_parameter("port", "/dev/ttyUSB0")
+        self.declare_parameter("hid_device", "/dev/input/js0")
         self.declare_parameter("baudrate", 115200)
         self.declare_parameter("slave_id", 1)
         self.declare_parameter("serial_timeout", 0.05)
         self.declare_parameter("poll_rate", 50.0)
         self.declare_parameter("speed_write_rate", 10.0)
         self.declare_parameter("reconnect_interval", 1.0)
-        self.declare_parameter("axis_minimum", 0)
-        self.declare_parameter("axis_center", 2048)
-        self.declare_parameter("axis_maximum", 4095)
-        self.declare_parameter("dead_zone", 50)
-        self.declare_parameter("linear_direction", -1.0)
-        self.declare_parameter("angular_direction", -1.0)
+        self.declare_parameter("linear_axis", 1)
+        self.declare_parameter("angular_axis", 0)
+        self.declare_parameter("linear_direction", 1.0)
+        self.declare_parameter("angular_direction", 1.0)
+        self.declare_parameter("dead_zone", 0.05)
+        self.declare_parameter("saturation", 1.0)
         self.declare_parameter("max_linear_speed", 0.6)
         self.declare_parameter("max_angular_speed", 0.5)
+        self.declare_parameter("linear_accel_slew_rate", 1.5)
+        self.declare_parameter("linear_decel_slew_rate", 6.0)
+        self.declare_parameter("angular_accel_slew_rate", 3.1415926536)
+        self.declare_parameter("angular_decel_slew_rate", 6.2831853072)
         self.declare_parameter("joy_topic", "/joy")
         self.declare_parameter("state_topic", "/js_state")
         self.declare_parameter("cmd_vel_topic", "/js_cmd_vel")
@@ -57,6 +68,7 @@ class HandleControl(Node):
 
         self.enabled = bool(self.get_parameter("enabled").value)
         self.port = str(self.get_parameter("port").value)
+        self.hid_device = str(self.get_parameter("hid_device").value)
         self.baudrate = int(self.get_parameter("baudrate").value)
         self.slave_id = int(self.get_parameter("slave_id").value)
         self.serial_timeout = max(
@@ -65,21 +77,35 @@ class HandleControl(Node):
         self.reconnect_interval = max(
             0.2, float(self.get_parameter("reconnect_interval").value)
         )
-        self.axis_minimum = int(self.get_parameter("axis_minimum").value)
-        self.axis_center = int(self.get_parameter("axis_center").value)
-        self.axis_maximum = int(self.get_parameter("axis_maximum").value)
-        self.dead_zone = int(self.get_parameter("dead_zone").value)
-        self.linear_direction = float(
-            self.get_parameter("linear_direction").value
+        self._mapping = HidMappingConfig(
+            linear_axis=int(self.get_parameter("linear_axis").value),
+            angular_axis=int(self.get_parameter("angular_axis").value),
+            linear_direction=float(
+                self.get_parameter("linear_direction").value
+            ),
+            angular_direction=float(
+                self.get_parameter("angular_direction").value
+            ),
+            dead_zone=float(self.get_parameter("dead_zone").value),
+            saturation=float(self.get_parameter("saturation").value),
+            max_linear_speed=max(
+                0.0, float(self.get_parameter("max_linear_speed").value)
+            ),
+            max_angular_speed=max(
+                0.0, float(self.get_parameter("max_angular_speed").value)
+            ),
         )
-        self.angular_direction = float(
-            self.get_parameter("angular_direction").value
+        self._linear_accel_rate = max(
+            0.0, float(self.get_parameter("linear_accel_slew_rate").value)
         )
-        self.max_linear_speed = max(
-            0.0, float(self.get_parameter("max_linear_speed").value)
+        self._linear_decel_rate = max(
+            0.0, float(self.get_parameter("linear_decel_slew_rate").value)
         )
-        self.max_angular_speed = max(
-            0.0, float(self.get_parameter("max_angular_speed").value)
+        self._angular_accel_rate = max(
+            0.0, float(self.get_parameter("angular_accel_slew_rate").value)
+        )
+        self._angular_decel_rate = max(
+            0.0, float(self.get_parameter("angular_decel_slew_rate").value)
         )
 
         cmd_qos = QoSProfile(
@@ -115,11 +141,16 @@ class HandleControl(Node):
         )
 
         self._client = None
-        self._last_connect_attempt = 0.0
+        self._last_modbus_connect_attempt = 0.0
+        self._hid = LinuxJoystickReader(self.hid_device)
+        self._last_hid_connect_attempt = 0.0
         self._online = False
         self._buttons_initialized = False
         self._previous_buttons = 0
         self._actual_speed_mps = 0.0
+        self._last_linear = 0.0
+        self._last_angular = 0.0
+        self._last_command_time = monotonic()
 
         poll_rate = max(1.0, float(self.get_parameter("poll_rate").value))
         speed_write_rate = max(
@@ -130,18 +161,18 @@ class HandleControl(Node):
 
         if self.enabled:
             self.get_logger().info(
-                f"STM32手柄节点已启动，等待连接 {self.port} @ {self.baudrate}"
+                f"Handle control waiting for Modbus {self.port} and HID {self.hid_device}"
             )
         else:
-            self.get_logger().info("STM32手柄节点已禁用")
+            self.get_logger().info("Handle control is disabled")
 
-    def _connect(self) -> bool:
+    def _connect_modbus(self) -> bool:
         if self._client is not None:
             return True
         now = monotonic()
-        if now - self._last_connect_attempt < self.reconnect_interval:
+        if now - self._last_modbus_connect_attempt < self.reconnect_interval:
             return False
-        self._last_connect_attempt = now
+        self._last_modbus_connect_attempt = now
         try:
             self._client = ModbusRtuClient(
                 port=self.port,
@@ -151,24 +182,44 @@ class HandleControl(Node):
             )
         except (OSError, SerialException, ValueError) as exc:
             self._set_online(False)
-            self.get_logger().warning(f"STM32手柄连接失败: {exc}")
+            self.get_logger().warning(f"STM32 Modbus connection failed: {exc}")
             return False
-        self.get_logger().info(f"STM32手柄已连接: {self.port}")
+        self.get_logger().info(f"STM32 Modbus connected: {self.port}")
         return True
 
-    def _disconnect(self, reason: str) -> None:
+    def _disconnect_modbus(self, reason: str) -> None:
         if self._client is not None:
             self._client.close()
             self._client = None
         self._buttons_initialized = False
         self._set_online(False)
         self._publish_zero()
-        self.get_logger().warning(f"STM32手柄通信中断: {reason}")
+        self.get_logger().warning(f"STM32 Modbus communication lost: {reason}")
+
+    def _poll_hid(self) -> bool:
+        if not self._hid.is_open:
+            now = monotonic()
+            if now - self._last_hid_connect_attempt < self.reconnect_interval:
+                return False
+            self._last_hid_connect_attempt = now
+            try:
+                self._hid.open()
+            except (OSError, ValueError) as exc:
+                self.get_logger().warning(f"HID joystick connection failed: {exc}")
+                return False
+            self.get_logger().info(f"HID joystick connected: {self.hid_device}")
+        try:
+            self._hid.read_available()
+        except OSError as exc:
+            self._hid.close()
+            self.get_logger().warning(f"HID joystick communication lost: {exc}")
+            return False
+        return self._hid.is_open
 
     def _set_online(self, online: bool) -> None:
         online = bool(online)
         if online != self._online:
-            message = "STM32手柄通信正常" if online else "STM32手柄已离线"
+            message = "Combined handle online" if online else "Combined handle offline"
             self.get_logger().info(message)
         self._online = online
         state = Bool()
@@ -180,7 +231,9 @@ class HandleControl(Node):
             self._set_online(False)
             self._publish_zero()
             return
-        if not self._connect():
+
+        hid_online = self._poll_hid()
+        if not self._connect_modbus():
             self._set_online(False)
             self._publish_zero()
             return
@@ -190,37 +243,46 @@ class HandleControl(Node):
                 HANDLE_STATE_REGISTER, HANDLE_STATE_REGISTER_COUNT
             )
             sample = HandleRegisters.from_words(words)
-            command = command_from_registers(
-                sample,
-                axis_minimum=self.axis_minimum,
-                axis_center=self.axis_center,
-                axis_maximum=self.axis_maximum,
-                dead_zone=self.dead_zone,
-                linear_direction=self.linear_direction,
-                angular_direction=self.angular_direction,
-                max_linear_speed=self.max_linear_speed,
-                max_angular_speed=self.max_angular_speed,
-            )
         except (ModbusError, OSError, SerialException, ValueError) as exc:
-            self._disconnect(str(exc))
+            self._disconnect_modbus(str(exc))
             return
 
         self._publish_sample(sample)
-        if not command.valid:
+        scale = gear_scale(sample.gear)
+        if not hid_online or scale is None:
             self._set_online(False)
             self._publish_zero()
             return
 
+        target = command_from_axes(self._hid.axes, self._mapping, scale)
+        now = monotonic()
+        dt = min(0.25, max(0.0, now - self._last_command_time))
+        self._last_command_time = now
+        self._last_linear = slew_limited_value(
+            self._last_linear,
+            target.linear,
+            dt,
+            self._linear_accel_rate,
+            self._linear_decel_rate,
+        )
+        self._last_angular = slew_limited_value(
+            self._last_angular,
+            target.angular,
+            dt,
+            self._angular_accel_rate,
+            self._angular_decel_rate,
+        )
+
         self._set_online(True)
         twist = Twist()
-        twist.linear.x = command.linear
-        twist.angular.z = command.angular
+        twist.linear.x = self._last_linear
+        twist.angular.z = self._last_angular
         self._cmd_pub.publish(twist)
 
         joy = Joy()
         joy.header.stamp = self.get_clock().now().to_msg()
-        joy.axes = list(command.joy_axes)
-        joy.buttons = [(sample.buttons >> bit) & 1 for bit in range(7)]
+        joy.axes = list(self._hid.axes)
+        joy.buttons = list(self._hid.buttons)
         self._joy_pub.publish(joy)
 
     def _publish_sample(self, sample: HandleRegisters) -> None:
@@ -243,7 +305,7 @@ class HandleControl(Node):
         self._actual_speed_mps = float(message.twist.twist.linear.x)
 
     def _write_display_speed(self) -> None:
-        if not self.enabled or not self._online or self._client is None:
+        if not self.enabled or self._client is None:
             return
         try:
             self._client.write_single_register(
@@ -251,9 +313,12 @@ class HandleControl(Node):
                 speed_mps_to_register(self._actual_speed_mps),
             )
         except (ModbusError, OSError, SerialException, ValueError) as exc:
-            self._disconnect(str(exc))
+            self._disconnect_modbus(str(exc))
 
     def _publish_zero(self) -> None:
+        self._last_linear = 0.0
+        self._last_angular = 0.0
+        self._last_command_time = monotonic()
         if self.enabled:
             self._cmd_pub.publish(Twist())
 
@@ -261,6 +326,7 @@ class HandleControl(Node):
         if rclpy.ok():
             self._publish_zero()
             self._set_online(False)
+        self._hid.close()
         if self._client is not None:
             self._client.close()
             self._client = None
