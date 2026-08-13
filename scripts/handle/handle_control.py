@@ -53,6 +53,7 @@ class HandleControl(Node):
         self.declare_parameter("saturation", 1.0)
         self.declare_parameter("max_linear_speed", 0.6)
         self.declare_parameter("max_angular_speed", 0.5)
+        self.declare_parameter("command_smoothing_enabled", False)
         self.declare_parameter("linear_accel_slew_rate", 1.5)
         self.declare_parameter("linear_decel_slew_rate", 6.0)
         self.declare_parameter("angular_accel_slew_rate", 3.1415926536)
@@ -95,6 +96,9 @@ class HandleControl(Node):
             max_angular_speed=max(
                 0.0, float(self.get_parameter("max_angular_speed").value)
             ),
+        )
+        self._command_smoothing_enabled = bool(
+            self.get_parameter("command_smoothing_enabled").value
         )
         self._linear_accel_rate = max(
             0.0, float(self.get_parameter("linear_accel_slew_rate").value)
@@ -162,7 +166,8 @@ class HandleControl(Node):
 
         if self.enabled:
             self.get_logger().info(
-                f"Handle control waiting for Modbus {self.port} and HID {self.hid_device}"
+                f"Handle control waiting for Modbus {self.port} and HID {self.hid_device} "
+                f"| command_smoothing={self._command_smoothing_enabled}"
             )
         else:
             self.get_logger().info("Handle control is disabled")
@@ -259,15 +264,18 @@ class HandleControl(Node):
         now = monotonic()
         dt = min(0.25, max(0.0, now - self._last_command_time))
         self._last_command_time = now
-        command = slew_limited_command(
-            HidCommand(self._last_linear, self._last_angular),
-            target,
-            dt,
-            self._linear_accel_rate,
-            self._linear_decel_rate,
-            self._angular_accel_rate,
-            self._angular_decel_rate,
-        )
+        if self._command_smoothing_enabled:
+            command = slew_limited_command(
+                HidCommand(self._last_linear, self._last_angular),
+                target,
+                dt,
+                self._linear_accel_rate,
+                self._linear_decel_rate,
+                self._angular_accel_rate,
+                self._angular_decel_rate,
+            )
+        else:
+            command = target
         self._last_linear = command.linear
         self._last_angular = command.angular
 

@@ -17,7 +17,7 @@ import threading
 import time
 from typing import Optional
 
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 import rclpy
 from rclpy.node import Node
@@ -30,17 +30,6 @@ from base_driver_worker import DriverWorkerBusy, DriverWorkerClient, DriverWorke
 
 PROJECT_ROOT = "/home/embotic/nav_workspace/src/finav"
 OMNILIBS_PATH = "/home/embotic/DCCS/src/site-packages"
-
-
-def select_wheel_acceleration(
-    left_degps: float,
-    right_degps: float,
-    acceleration: int,
-    acceleration_stop: int,
-) -> int:
-    if abs(float(left_degps)) <= 1e-6 and abs(float(right_degps)) <= 1e-6:
-        return int(acceleration_stop)
-    return int(acceleration)
 
 
 def advance_fault_clear_count(count: int, statuses, required: int = 3):
@@ -77,8 +66,10 @@ class WhillBaseDriver(Node):
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         self.declare_parameter("max_linear_speed", 0.6)
         self.declare_parameter("max_angular_speed", 1.2)
-        self.declare_parameter("acceleration", 100)
-        self.declare_parameter("acceleration_stop", 100)
+        self.declare_parameter("acceleration", 400)
+        self.declare_parameter("deceleration", 400)
+        self.declare_parameter("acceleration_reverse", 400)
+        self.declare_parameter("acceleration_stop", 400)
         self.declare_parameter("cmd_resend_interval", 0.5)
         self.declare_parameter("driver_startup_timeout_s", 8.0)
         self.declare_parameter("driver_request_timeout_s", 0.5)
@@ -94,6 +85,10 @@ class WhillBaseDriver(Node):
         self.max_linear_speed = float(self.get_parameter("max_linear_speed").value)
         self.max_angular_speed = float(self.get_parameter("max_angular_speed").value)
         self.acceleration = int(self.get_parameter("acceleration").value)
+        self.deceleration = int(self.get_parameter("deceleration").value)
+        self.acceleration_reverse = int(
+            self.get_parameter("acceleration_reverse").value
+        )
         self.acceleration_stop = int(self.get_parameter("acceleration_stop").value)
         self.cmd_resend_interval = max(
             0.1, float(self.get_parameter("cmd_resend_interval").value)
@@ -116,9 +111,8 @@ class WhillBaseDriver(Node):
         self.right_motor_id = int(self.get_parameter("right_motor_id").value)
 
         # ── 回调组 ──
-        self.cmd_sub_group = ReentrantCallbackGroup()
+        self.cmd_control_group = MutuallyExclusiveCallbackGroup()
         self.odom_timer_group = MutuallyExclusiveCallbackGroup()
-        self.cmd_timer_group = MutuallyExclusiveCallbackGroup()
         self.fault_monitor_timer_group = MutuallyExclusiveCallbackGroup()
         self._last_cmd_log_mono = 0.0
         self._last_send_state_log_mono = 0.0
@@ -138,6 +132,9 @@ class WhillBaseDriver(Node):
         self.wheel_velocity_pub = self.create_publisher(
             Float64MultiArray, "/wheel_velocity_degps", qos
         )
+        self.command_timing_pub = self.create_publisher(
+            Float64MultiArray, "/base_control/command_timing", qos
+        )
 
         # ── 里程计状态 ──
         self.x = 0.0
@@ -147,15 +144,12 @@ class WhillBaseDriver(Node):
 
         # ── 驱动状态 ──
         self.whill = None
-        self.running = True
         self._last_driver_restart_try_mono = 0.0
 
         # ── 控制状态 ──
-        self.last_cmd_time = self.get_clock().now()
         self._cmd_lock = threading.Lock()
-        self._latest_cmd_linear = 0.0
-        self._latest_cmd_angular = 0.0
-        self._latest_cmd_mono: Optional[float] = None
+        self._send_state_lock = threading.RLock()
+        self._last_cmd_mono: Optional[float] = None
         self._last_sent_linear = 0.0
         self._last_sent_angular = 0.0
         self._last_sent_mono = 0.0
@@ -171,7 +165,7 @@ class WhillBaseDriver(Node):
         cmd_vel_topic = str(self.get_parameter("cmd_vel_topic").value)
         self.create_subscription(
             Twist, cmd_vel_topic, self._on_cmd_vel, cmd_qos,
-            callback_group=self.cmd_sub_group,
+            callback_group=self.cmd_control_group,
         )
 
         # ── 初始化底盘驱动 ──
@@ -183,9 +177,9 @@ class WhillBaseDriver(Node):
             1.0 / self.update_rate, self._update_odom,
             callback_group=self.odom_timer_group,
         )
-        self.cmd_timer = self.create_timer(
-            1.0 / self.cmd_send_rate, self._send_cmd,
-            callback_group=self.cmd_timer_group,
+        self.cmd_watchdog_timer = self.create_timer(
+            1.0 / self.cmd_send_rate, self._watchdog_cmd,
+            callback_group=self.cmd_control_group,
         )
         self.fault_monitor_timer = self.create_timer(
             0.2, self._monitor_fault,
@@ -194,8 +188,9 @@ class WhillBaseDriver(Node):
 
         self.get_logger().info(
             f"WHILL 底盘驱动已启动 | odom={self.update_rate:.1f}Hz "
-            f"| cmd_send={self.cmd_send_rate:.1f}Hz | cmd_timeout={self.cmd_timeout:.2f}s "
-            f"| accel={self.acceleration}/{self.acceleration_stop}(stop) "
+            f"| cmd_watchdog={self.cmd_send_rate:.1f}Hz | cmd_timeout={self.cmd_timeout:.2f}s "
+            f"| accel={self.acceleration}/{self.deceleration}(decel)/"
+            f"{self.acceleration_reverse}(reverse)/{self.acceleration_stop}(stop) "
             f"| motors L/R={self.left_motor_id}/{self.right_motor_id} "
             f"| wheel_sign={self.wheel_velocity_sign:.0f}"
         )
@@ -216,16 +211,15 @@ class WhillBaseDriver(Node):
         self.fault_pub.publish(msg)
 
     def _clear_cmd_cache(self, *, require_reset: bool):
-        with self._cmd_lock:
-            self._latest_cmd_linear = 0.0
-            self._latest_cmd_angular = 0.0
-            self._latest_cmd_mono = None
+        with self._send_state_lock:
+            with self._cmd_lock:
+                self._last_cmd_mono = None
+                self._require_cmd_reset = bool(require_reset)
             self._last_sent_linear = 0.0
             self._last_sent_angular = 0.0
             self._last_sent_mono = 0.0
             self._last_zero_keepalive_mono = 0.0
             self._last_send_failed = False
-            self._require_cmd_reset = bool(require_reset)
 
     def _latch_motion_fault(self, error):
         was_latched = self._motion_fault_latched
@@ -297,32 +291,31 @@ class WhillBaseDriver(Node):
 
         with self._cmd_lock:
             if self._motion_fault_latched:
-                self._latest_cmd_linear = 0.0
-                self._latest_cmd_angular = 0.0
-                self._latest_cmd_mono = None
+                self._last_cmd_mono = None
                 return
             if self._require_cmd_reset:
                 if self._cmd_nonzero(linear, angular):
                     if now_mono - self._last_fault_log_mono >= 1.0:
                         self.get_logger().warn("底盘故障后仍收到非零 /cmd_vel，已忽略；请先发送 0 速复位")
                         self._last_fault_log_mono = now_mono
-                    self._latest_cmd_linear = 0.0
-                    self._latest_cmd_angular = 0.0
-                    self._latest_cmd_mono = None
+                    self._last_cmd_mono = None
                     return
 
                 self._require_cmd_reset = False
                 self.get_logger().info("控制指令已复位，允许新的非零 /cmd_vel")
 
-            self._latest_cmd_linear = linear
-            self._latest_cmd_angular = angular
-            self._latest_cmd_mono = time.monotonic()
-        self.last_cmd_time = self.get_clock().now()
+            self._last_cmd_mono = now_mono
+
+        self._apply_twist(
+            linear,
+            angular,
+            source_age_s=max(0.0, time.monotonic() - now_mono),
+        )
 
         if (now_mono - self._last_cmd_log_mono) >= 0.5:
             self.get_logger().info(
-                f"收到 /cmd_vel | linear={self._latest_cmd_linear:.3f} m/s "
-                f"| angular={self._latest_cmd_angular:.3f} rad/s"
+                f"收到并排队 /cmd_vel | linear={linear:.3f} m/s "
+                f"| angular={angular:.3f} rad/s"
             )
             self._last_cmd_log_mono = now_mono
 
@@ -332,46 +325,67 @@ class WhillBaseDriver(Node):
     def _clamp(v, lo, hi):
         return max(lo, min(hi, v))
 
-    def _apply_twist(self, linear_cmd: float, angular_cmd: float) -> bool:
-        linear = self._clamp(float(linear_cmd), -self.max_linear_speed, self.max_linear_speed)
-        angular = self._clamp(float(angular_cmd), -self.max_angular_speed, self.max_angular_speed)
+    def _apply_twist(
+        self,
+        linear_cmd: float,
+        angular_cmd: float,
+        *,
+        source_age_s: float = -1.0,
+    ) -> bool:
+        with self._send_state_lock:
+            if self._motion_fault_latched:
+                return False
+            linear = self._clamp(
+                float(linear_cmd), -self.max_linear_speed, self.max_linear_speed
+            )
+            angular = self._clamp(
+                float(angular_cmd), -self.max_angular_speed, self.max_angular_speed
+            )
 
-        now_mono = time.monotonic()
-        unchanged = (
-            abs(linear - self._last_sent_linear) < 1e-4
-            and abs(angular - self._last_sent_angular) < 1e-4
-        )
-        if (
-            unchanged
-            and not self._last_send_failed
-            and (now_mono - self._last_sent_mono) < self.cmd_resend_interval
-        ):
-            return True
+            now_mono = time.monotonic()
+            unchanged = (
+                abs(linear - self._last_sent_linear) < 1e-4
+                and abs(angular - self._last_sent_angular) < 1e-4
+            )
+            if (
+                unchanged
+                and not self._last_send_failed
+                and (now_mono - self._last_sent_mono) < self.cmd_resend_interval
+            ):
+                return True
 
-        v_left = linear - angular * self.wheel_separation * 0.5
-        v_right = linear + angular * self.wheel_separation * 0.5
-        left_degps = self.wheel_velocity_sign * (v_left / self.wheel_radius) * (180.0 / math.pi)
-        right_degps = self.wheel_velocity_sign * (v_right / self.wheel_radius) * (180.0 / math.pi)
+            v_left = linear - angular * self.wheel_separation * 0.5
+            v_right = linear + angular * self.wheel_separation * 0.5
+            left_degps = self.wheel_velocity_sign * (
+                v_left / self.wheel_radius
+            ) * (180.0 / math.pi)
+            right_degps = self.wheel_velocity_sign * (
+                v_right / self.wheel_radius
+            ) * (180.0 / math.pi)
 
-        sent = self._send_wheel_velocity(left_degps, right_degps)
-        if sent:
-            self._last_sent_linear = linear
-            self._last_sent_angular = angular
-            self._last_sent_mono = now_mono
-            self._last_send_failed = False
-        else:
-            self._last_sent_linear = 0.0
-            self._last_sent_angular = 0.0
-            self._last_send_failed = True
-        return sent
+            sent = self._send_wheel_velocity(
+                left_degps,
+                right_degps,
+                source_age_s=source_age_s,
+            )
+            if sent:
+                self._last_sent_linear = linear
+                self._last_sent_angular = angular
+                self._last_sent_mono = now_mono
+                self._last_send_failed = False
+            else:
+                self._last_sent_linear = 0.0
+                self._last_sent_angular = 0.0
+                self._last_send_failed = True
+            return sent
 
-    def _send_cmd(self):
+    def _watchdog_cmd(self):
+        if not self._drain_velocity_result():
+            return
         if self._motion_fault_latched:
             return
         with self._cmd_lock:
-            linear = self._latest_cmd_linear
-            angular = self._latest_cmd_angular
-            stamp = self._latest_cmd_mono
+            stamp = self._last_cmd_mono
 
         now_mono = time.monotonic()
 
@@ -392,28 +406,56 @@ class WhillBaseDriver(Node):
             self._apply_stop_if_needed(now_mono)
             return
 
-        if (now_mono - self._last_send_state_log_mono) >= 0.5:
-            self.get_logger().info(
-                f"下发速度 | linear={linear:.3f} m/s | angular={angular:.3f} rad/s "
-                f"| cmd_age={cmd_age:.3f}s"
-            )
-            self._last_send_state_log_mono = now_mono
-
-        self._apply_twist(linear, angular)
-
     def _apply_stop_if_needed(self, now_mono: float):
         if not self.connected or self.whill is None:
             return
-        moving = abs(self._last_sent_linear) > 1e-6 or abs(self._last_sent_angular) > 1e-6
-        keepalive_due = (now_mono - self._last_zero_keepalive_mono) >= 1.0
-        if moving or self._last_send_failed or keepalive_due:
-            if self._apply_twist(0.0, 0.0):
-                self._last_zero_keepalive_mono = now_mono
+        with self._send_state_lock:
+            moving = (
+                abs(self._last_sent_linear) > 1e-6
+                or abs(self._last_sent_angular) > 1e-6
+            )
+            keepalive_due = (now_mono - self._last_zero_keepalive_mono) >= 1.0
+            if moving or self._last_send_failed or keepalive_due:
+                if self._apply_twist(0.0, 0.0, source_age_s=-1.0):
+                    self._last_zero_keepalive_mono = now_mono
+
+    def _drain_velocity_result(self) -> bool:
+        if self.whill is None:
+            return True
+
+        error = self.whill.take_velocity_error()
+        if error is not None:
+            self.get_logger().error(f"异步下发轮速失败: {error}")
+            self._latch_motion_fault(error)
+            return False
+
+        result = self.whill.take_velocity_result()
+        if result is None:
+            return True
+
+        # [源指令年龄, 排队等待, CAN调用, 总耗时, 左目标, 右目标,
+        #  左加速度, 右加速度, 被新指令覆盖数]，时间单位均为 ms。
+        msg = Float64MultiArray()
+        msg.data = [
+            float(result["source_age_ms"]),
+            float(result["queue_delay_ms"]),
+            float(result["driver_duration_ms"]),
+            float(result["total_duration_ms"]),
+            float(result["left"]),
+            float(result["right"]),
+            float(result["accelerations"][0]),
+            float(result["accelerations"][1]),
+            float(result["replaced_count"]),
+        ]
+        self.command_timing_pub.publish(msg)
+        return True
 
     def _send_wheel_velocity(
         self,
         left_degps: float,
         right_degps: float,
+        *,
+        source_age_s: float,
     ) -> bool:
         if not self.connected:
             error = DriverWorkerError("driver worker is not connected")
@@ -423,21 +465,19 @@ class WhillBaseDriver(Node):
         try:
             l = float(left_degps)
             r = float(right_degps)
-            accel = select_wheel_acceleration(
-                l,
-                r,
-                self.acceleration,
-                self.acceleration_stop,
-            )
-            self.whill.set_velocity(
+            urgent_stop = abs(l) <= 1e-6 and abs(r) <= 1e-6
+            self.whill.set_velocity_latest(
                 [self.left_motor_id, self.right_motor_id],
                 l,
                 r,
-                accel,
+                self.acceleration,
+                self.deceleration,
+                self.acceleration_reverse,
+                self.acceleration_stop,
+                urgent_stop=urgent_stop,
+                source_age_s=source_age_s,
             )
             return True
-        except DriverWorkerBusy:
-            return False
         except DriverWorkerError as exc:
             self.get_logger().error(f"下发轮速失败: {exc}")
             self._latch_motion_fault(exc)
@@ -560,24 +600,9 @@ class WhillBaseDriver(Node):
     # ── 清理 ───────────────────────────────────────────────────────
 
     def destroy_node(self):
-        self.running = False
-        self._stop_motion()
         if self.whill:
             self.whill.stop()
         super().destroy_node()
-
-    def _stop_motion(self):
-        if not self.connected:
-            return
-        try:
-            self.whill.set_velocity(
-                [self.left_motor_id, self.right_motor_id],
-                0.0,
-                0.0,
-                self.acceleration_stop,
-            )
-        except DriverWorkerError:
-            pass
 
 
 def main(args=None):

@@ -21,6 +21,63 @@ class DriverWorkerBusy(DriverWorkerTimeout):
     pass
 
 
+def _normalized_acceleration(value):
+    if isinstance(value, (list, tuple)):
+        return [int(item) for item in value]
+    return int(value)
+
+
+def select_wheel_acceleration(
+    previous_degps: float,
+    target_degps: float,
+    acceleration: int,
+    deceleration: int,
+    acceleration_reverse: int,
+    acceleration_stop: int,
+) -> int:
+    previous = float(previous_degps)
+    target = float(target_degps)
+    if abs(target) <= 1e-6:
+        return int(acceleration_stop)
+    if abs(previous) <= 1e-6:
+        return int(acceleration)
+    if previous * target < 0.0:
+        return int(acceleration_reverse)
+    if abs(target) < abs(previous):
+        return int(deceleration)
+    return int(acceleration)
+
+
+def select_wheel_accelerations(
+    previous_left_degps: float,
+    previous_right_degps: float,
+    target_left_degps: float,
+    target_right_degps: float,
+    acceleration: int,
+    deceleration: int,
+    acceleration_reverse: int,
+    acceleration_stop: int,
+):
+    return [
+        select_wheel_acceleration(
+            previous_left_degps,
+            target_left_degps,
+            acceleration,
+            deceleration,
+            acceleration_reverse,
+            acceleration_stop,
+        ),
+        select_wheel_acceleration(
+            previous_right_degps,
+            target_right_degps,
+            acceleration,
+            deceleration,
+            acceleration_reverse,
+            acceleration_stop,
+        ),
+    ]
+
+
 def _create_driver(config):
     sys.path.insert(0, str(config["omnilibs_path"]))
     from omnilibs.driver.driver import CAN, ONLINE, Driver
@@ -49,6 +106,7 @@ def _create_driver(config):
         motor_ids,
         [0.0] * len(motor_ids),
         int(config["acceleration_stop"]),
+        wait_target=False,
     )
     return driver
 
@@ -68,7 +126,7 @@ def driver_worker_main(connection, config):
                     result = driver.move_velocity(
                         list(request["motor_ids"]),
                         [float(request["left"]), float(request["right"])],
-                        int(request["acceleration"]),
+                        _normalized_acceleration(request["acceleration"]),
                         wait_target=False,
                     )
                 elif operation == "get_velocity":
@@ -84,6 +142,7 @@ def driver_worker_main(connection, config):
                         motor_ids,
                         [0.0] * len(motor_ids),
                         int(config["acceleration_stop"]),
+                        wait_target=False,
                     )
                     connection.send(
                         {
@@ -162,11 +221,15 @@ class DriverWorkerClient:
         self._next_request_id = 1
         self._request_lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
-
-    @property
-    def pid(self) -> Optional[int]:
-        process = self._process
-        return process.pid if process is not None else None
+        self._velocity_condition = threading.Condition()
+        self._velocity_thread = None
+        self._velocity_running = False
+        self._pending_stop = None
+        self._pending_motion = None
+        self._velocity_error = None
+        self._velocity_result = None
+        self._last_dispatched_left = 0.0
+        self._last_dispatched_right = 0.0
 
     @property
     def is_healthy(self) -> bool:
@@ -212,12 +275,16 @@ class DriverWorkerClient:
                 response.get("error", f"unexpected startup response: {response!r}")
             )
         self._healthy = True
+        self._start_velocity_dispatcher()
 
     def restart(self):
-        self.terminate()
         self.start()
 
     def terminate(self):
+        self._stop_velocity_dispatcher()
+        self._terminate_process()
+
+    def _terminate_process(self):
         with self._lifecycle_lock:
             process = self._process
             connection = self._connection
@@ -243,19 +310,28 @@ class DriverWorkerClient:
             process.join(timeout=0)
 
     def stop(self):
+        self._stop_velocity_dispatcher()
         if self.is_healthy:
             try:
-                self._request("shutdown", timeout_s=self.terminate_timeout_s)
+                self._request("shutdown", timeout_s=self.request_timeout_s)
             except DriverWorkerError:
                 pass
-        self.terminate()
+        self._terminate_process()
 
-    def _request(self, operation: str, *, timeout_s: Optional[float] = None, **payload):
+    def _request(
+        self,
+        operation: str,
+        *,
+        timeout_s: Optional[float] = None,
+        lock_timeout_s: Optional[float] = None,
+        **payload,
+    ):
         timeout = self.request_timeout_s if timeout_s is None else max(0.05, timeout_s)
         deadline = time.monotonic() + timeout
-        if not self._request_lock.acquire(timeout=timeout):
+        lock_timeout = timeout if lock_timeout_s is None else max(0.0, lock_timeout_s)
+        if not self._request_lock.acquire(timeout=lock_timeout):
             raise DriverWorkerBusy(
-                f"driver worker busy for more than {timeout:.2f}s"
+                f"driver worker busy for more than {lock_timeout:.2f}s"
             )
 
         try:
@@ -300,20 +376,179 @@ class DriverWorkerClient:
         finally:
             self._request_lock.release()
 
-    def set_velocity(self, motor_ids, left, right, acceleration):
-        return self._request(
-            "set_velocity",
-            motor_ids=list(motor_ids),
-            left=float(left),
-            right=float(right),
-            acceleration=int(acceleration),
-        )
+    def _start_velocity_dispatcher(self):
+        with self._velocity_condition:
+            self._velocity_running = True
+            self._pending_stop = None
+            self._pending_motion = None
+            self._velocity_error = None
+            self._velocity_result = None
+            self._last_dispatched_left = 0.0
+            self._last_dispatched_right = 0.0
+            thread = threading.Thread(
+                target=self._velocity_loop,
+                name="finav-velocity-dispatcher",
+                daemon=True,
+            )
+            self._velocity_thread = thread
+        thread.start()
+
+    def _stop_velocity_dispatcher(self):
+        with self._velocity_condition:
+            self._velocity_running = False
+            self._pending_stop = None
+            self._pending_motion = None
+            thread = self._velocity_thread
+            self._velocity_thread = None
+            self._velocity_condition.notify_all()
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(self.terminate_timeout_s)
+
+    def set_velocity_latest(
+        self,
+        motor_ids,
+        left,
+        right,
+        acceleration,
+        deceleration,
+        acceleration_reverse,
+        acceleration_stop,
+        *,
+        urgent_stop: bool = False,
+        source_age_s: float = -1.0,
+    ):
+        if not self.is_healthy:
+            raise DriverWorkerError("driver worker is not healthy")
+
+        urgent_stop = bool(urgent_stop)
+        command = {
+            "motor_ids": list(motor_ids),
+            "left": float(left),
+            "right": float(right),
+            "acceleration": int(acceleration),
+            "deceleration": int(deceleration),
+            "acceleration_reverse": int(acceleration_reverse),
+            "acceleration_stop": int(acceleration_stop),
+            "source_age_s": float(source_age_s),
+            "queued_mono": time.monotonic(),
+            "replaced_count": 0,
+        }
+        with self._velocity_condition:
+            if self._velocity_error is not None:
+                error = self._velocity_error
+                self._velocity_error = None
+                raise error
+            if not self._velocity_running:
+                raise DriverWorkerError("velocity dispatcher is not running")
+
+            if urgent_stop:
+                replaced_count = 0
+                for pending in (self._pending_stop, self._pending_motion):
+                    if pending is not None:
+                        replaced_count += pending["replaced_count"] + 1
+                command["replaced_count"] = replaced_count
+                self._pending_stop = command
+                self._pending_motion = None
+            else:
+                replaced = self._pending_motion
+                if replaced is not None:
+                    command["replaced_count"] = replaced["replaced_count"] + 1
+                self._pending_motion = command
+            self._velocity_condition.notify()
+
+    def _velocity_loop(self):
+        while True:
+            with self._velocity_condition:
+                while (
+                    self._velocity_running
+                    and self._pending_stop is None
+                    and self._pending_motion is None
+                ):
+                    self._velocity_condition.wait()
+                if not self._velocity_running:
+                    return
+                if self._pending_stop is not None:
+                    command = self._pending_stop
+                    self._pending_stop = None
+                else:
+                    command = self._pending_motion
+                    self._pending_motion = None
+            if command is None:
+                continue
+
+            started_mono = time.monotonic()
+            accelerations = select_wheel_accelerations(
+                self._last_dispatched_left,
+                self._last_dispatched_right,
+                command["left"],
+                command["right"],
+                command["acceleration"],
+                command["deceleration"],
+                command["acceleration_reverse"],
+                command["acceleration_stop"],
+            )
+            try:
+                self._request(
+                    "set_velocity",
+                    motor_ids=command["motor_ids"],
+                    left=command["left"],
+                    right=command["right"],
+                    acceleration=accelerations,
+                )
+            except DriverWorkerError as exc:
+                with self._velocity_condition:
+                    self._velocity_error = exc
+                    self._pending_stop = None
+                    self._pending_motion = None
+                    if not self.is_healthy:
+                        self._velocity_running = False
+                    self._velocity_condition.notify_all()
+                if not self.is_healthy:
+                    return
+                continue
+
+            finished_mono = time.monotonic()
+            self._last_dispatched_left = command["left"]
+            self._last_dispatched_right = command["right"]
+            source_age_s = command["source_age_s"]
+            result = {
+                "source_age_ms": source_age_s * 1000.0 if source_age_s >= 0.0 else -1.0,
+                "queue_delay_ms": (started_mono - command["queued_mono"]) * 1000.0,
+                "driver_duration_ms": (finished_mono - started_mono) * 1000.0,
+                "total_duration_ms": (finished_mono - command["queued_mono"]) * 1000.0,
+                "left": command["left"],
+                "right": command["right"],
+                "accelerations": accelerations,
+                "replaced_count": command["replaced_count"],
+            }
+            with self._velocity_condition:
+                self._velocity_result = result
+
+    def take_velocity_error(self):
+        with self._velocity_condition:
+            error = self._velocity_error
+            self._velocity_error = None
+            return error
+
+    def take_velocity_result(self):
+        with self._velocity_condition:
+            result = self._velocity_result
+            self._velocity_result = None
+            return result
 
     def get_velocity(self, motor_ids):
-        return self._request("get_velocity", motor_ids=list(motor_ids))
+        return self._request(
+            "get_velocity",
+            lock_timeout_s=0.0,
+            motor_ids=list(motor_ids),
+        )
 
     def get_fault_status(self, motor_ids):
-        return self._request("get_fault_status", motor_ids=list(motor_ids))
+        return self._request(
+            "get_fault_status",
+            lock_timeout_s=0.0,
+            motor_ids=list(motor_ids),
+        )
 
     def reset_fault_status(self, motor_ids):
         return self._request(

@@ -24,7 +24,9 @@ handle_control:
     max_linear_speed: 0.6
     max_angular_speed: 0.5
 
-    # 线/角速度按同一进度耦合追踪目标，避免摇杆转向时一个通道先到、另一个滞后。
+    # 默认由底盘电机 profile 负责动态平滑，避免手柄层与电机层双重爬坡。
+    # 如需恢复手柄层平滑，可打开此开关；以下线/角速率才会生效。
+    command_smoothing_enabled: false
     # Linear rates are m/s^2; angular rates are rad/s^2.
     linear_accel_slew_rate: 1.5
     linear_decel_slew_rate: 6.0

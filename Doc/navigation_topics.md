@@ -52,6 +52,8 @@ RViz / nav_voice_bridge
 | --- | --- | --- | --- | --- | --- |
 | `/js_state` | `std_msgs/msg/Bool` | 手柄通信状态；档位非法或 Modbus 通信异常时为 `false` | `handle_control.py` | `base_control_router.py` | 配置 `poll_rate=50.0Hz` |
 | `/js_cmd_vel` | `geometry_msgs/msg/Twist` | STM32 摇杆速度指令；五档同时按 20% 递增缩放线速度和角速度 | `handle_control.py` | `base_control_router.py` | 配置 `poll_rate=50.0Hz`；异常或摇杆回中时发布零速 |
+| `/wheel_velocity_degps` | `std_msgs/msg/Float64MultiArray` | 左右轮实际反馈速度，单位 `deg/s` | `base_control.py` | 调试/性能分析 | 配置 `update_rate=10.0Hz`；成功读取 CAN 轮速时发布 |
+| `/base_control/command_timing` | `std_msgs/msg/Float64MultiArray` | `[源指令年龄ms, 排队ms, 驱动调用ms, 总耗时ms, 左目标deg/s, 右目标deg/s, 左profile, 右profile, 覆盖数]` | `base_control.py` | 调试/性能分析 | 每次后台速度下发完成后发布，用于区分 ROS 指令延迟、驱动等待和电机实际爬升 |
 | `/handle/gear` | `std_msgs/msg/UInt16` | STM32 当前档位，合法范围 1～5 | `handle_control.py` | 调试/上层状态显示 | 每次成功读取寄存器后发布 |
 | `/handle/buttons` | `std_msgs/msg/UInt16` | `0x0006` 的七位按键状态码 | `handle_control.py` | 调试/上层业务 | 每次成功读取寄存器后发布 |
 | `/handle/navigation_button` | `std_msgs/msg/Empty` | 导航键按下沿事件；当前不直接触发导航 | `handle_control.py` | 预留上层业务 | 导航键由释放变为按下时发布 |

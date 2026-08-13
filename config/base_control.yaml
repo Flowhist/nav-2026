@@ -8,7 +8,7 @@ base_control:
 
     # ==================== 发布频率 ====================
     update_rate: 10.0          # 里程计刷新频率（Hz）
-    cmd_send_rate: 50.0        # 控制指令下发频率（Hz）
+    cmd_send_rate: 50.0        # cmd_vel 超时看门狗与异步结果回收频率（Hz）
     cmd_timeout: 0.35          # 超过该时间未收到新 cmd_vel 则自动归零（s）
 
     # ==================== CAN 总线 ====================
@@ -24,8 +24,11 @@ base_control:
     cmd_vel_topic: '/cmd_vel'
     max_linear_speed: 0.6                # 线速硬限（m/s）
     max_angular_speed: 0.5               # 角速硬限（rad/s）
-    acceleration: 150                    # 非零速度指令使用的加速度（deg/s²）
-    acceleration_stop: 400               # 目标双轮归零时使用的特殊加速度（deg/s²）
+    # 按左右轮各自的目标变化选择 profile；首轮先统一使用已验证过的 400。
+    acceleration: 200                    # 从 0 启动或继续升速（deg/s²）
+    deceleration: 200                    # 同方向降速（deg/s²）
+    acceleration_reverse: 400            # 方向反转（deg/s²）
+    acceleration_stop: 400               # 目标归零停车（deg/s²）
     # omnilibs 隔离进程：调用卡死时强制回收，重启后必须先收到一次 0 速复位
     driver_startup_timeout_s: 8.0        # 驱动加载与首次零速的最长等待时间
     driver_request_timeout_s: 1.5        # 单次 CAN 操作最长等待时间
