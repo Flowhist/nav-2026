@@ -13,10 +13,11 @@ from serial import SerialException
 from std_msgs.msg import Bool, Empty, UInt16
 
 from handle_hid import (
+    HidCommand,
     HidMappingConfig,
     LinuxJoystickReader,
     command_from_axes,
-    slew_limited_value,
+    slew_limited_command,
 )
 from handle_modbus import ModbusError, ModbusRtuClient
 from handle_protocol import (
@@ -258,20 +259,17 @@ class HandleControl(Node):
         now = monotonic()
         dt = min(0.25, max(0.0, now - self._last_command_time))
         self._last_command_time = now
-        self._last_linear = slew_limited_value(
-            self._last_linear,
-            target.linear,
+        command = slew_limited_command(
+            HidCommand(self._last_linear, self._last_angular),
+            target,
             dt,
             self._linear_accel_rate,
             self._linear_decel_rate,
-        )
-        self._last_angular = slew_limited_value(
-            self._last_angular,
-            target.angular,
-            dt,
             self._angular_accel_rate,
             self._angular_decel_rate,
         )
+        self._last_linear = command.linear
+        self._last_angular = command.angular
 
         self._set_online(True)
         twist = Twist()

@@ -69,6 +69,7 @@ def driver_worker_main(connection, config):
                         list(request["motor_ids"]),
                         [float(request["left"]), float(request["right"])],
                         int(request["acceleration"]),
+                        wait_target=False,
                     )
                 elif operation == "get_velocity":
                     result = list(driver.get_velocity(list(request["motor_ids"])))
