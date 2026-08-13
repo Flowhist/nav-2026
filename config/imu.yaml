@@ -18,9 +18,14 @@ dm_imu:
     # 固定航向偏置（度）
     yaw_offset_deg: 180.0
 
-    # Yaw线性漂移补偿：发布端按 yaw - rate * elapsed 修正
-    yaw_drift_compensation_enable: true
+    # EKF 不再融合六轴 IMU 的绝对 yaw，保留下列历史实测值但禁用补偿。
+    yaw_drift_compensation_enable: false
     yaw_drift_rate_deg_s: -0.01626810
+
+    # 陀螺仪固定零偏（多轮静止采样结果），启动后立即应用。
+    gyro_bias_x: 0.0
+    gyro_bias_y: 0.0
+    gyro_bias_z: -0.004357682
 
     # QoS配置
     qos_reliable: true         # 使用RELIABLE传输

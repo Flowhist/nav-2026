@@ -34,12 +34,12 @@ ekf_filter_node:
     odom0_queue_size: 10
     
     # 输入源2: IMU (/imu/data)
-    # 使用 IMU yaw 提供转向角约束；DM-IMU 的慢漂后续在 IMU 发布端做定量补偿。
+    # 仅使用启动零偏校准后的 Z 轴角速度；不融合六轴 IMU 会漂移的绝对 yaw。
     imu0: /imu/data
     imu0_config: [false, false, false,   # x, y, z (位置)
-                  false, false, true,    # roll, pitch, yaw (姿态) - 使用 yaw 方向
+                  false, false, false,   # roll, pitch, yaw (姿态)
                   false, false, false,   # vx, vy, vz (线速度)
-                  false, false, false,   # vroll, vpitch, vyaw (角速度)
+                  false, false, true,    # vroll, vpitch, vyaw - 仅使用 vyaw
                   false, false, false]   # ax, ay, az (线加速度)
     imu0_differential: false
     imu0_relative: false

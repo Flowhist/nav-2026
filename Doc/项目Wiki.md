@@ -254,7 +254,8 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 - 通过 USB 串口读取 DM-IMU 数据。
 - 发布 `/imu/data` 和可选 `/imu/rpy`。
-- 支持陀螺仪/加速度零偏、yaw 偏置和 yaw 漂移补偿。
+- 使用多轮静止采样得到的固定陀螺仪零偏，启动后立即应用并发布 `/imu/data`。
+- EKF 只融合校准后的 Z 轴角速度，不使用六轴 IMU 会漂移的绝对 yaw。
 - IMU 的 `frame_id` 通常为 `imu_link`，与 URDF 中静态 TF 对齐。
 
 开发入口：
