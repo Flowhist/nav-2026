@@ -1,6 +1,6 @@
 # Finav 项目 Wiki
 
-本文面向新加入开发人员，用于快速理解 Finav 的系统组成、运行链路、关键文件位置和常见开发入口。项目是一个基于 ROS 2 Humble 的实机导航系统，包含底盘控制、FREE 激光雷达、DM-IMU、EKF 融合、SLAM Toolbox 建图/定位、自研路径规划/路径跟踪、Web 调试后台和仿真环境。
+本文面向新加入开发人员，用于快速理解 Finav 的系统组成、运行链路、关键文件位置和常见开发入口。项目是一个基于 ROS 2 Humble 的实机导航系统，包含底盘控制、Hinson HE-3051 激光雷达、DM-IMU、EKF 融合、SLAM Toolbox 建图/定位、自研路径规划/路径跟踪、Web 调试后台和仿真环境。
 
 ## 1. 系统总览
 
@@ -11,7 +11,7 @@ WHILL 底盘反馈 -> /odom_encoder -> robot_localization EKF -> /odom + odom->b
 
 DM-IMU --------> /imu/data     
 
-FREE 左/右雷达 -> /scan_left, /scan_right -> scan_fusion_node -> /scan
+Hinson HE-3051 左/右雷达 -> /scan_left, /scan_right -> scan_fusion_node -> /scan
 
 URDF ----------> base_link -> laser_left_frame / laser_right_frame / imu_link 等静态 TF
 
@@ -40,7 +40,7 @@ server/ros_bridge.py 订阅 ROS 状态并提供 Web 页面调试、建图、导�
 
 核心话题：
 
-- `/scan_left` / `/scan_right`：左右 FREE 雷达原始 `sensor_msgs/LaserScan`。
+- `/scan_left` / `/scan_right`：左右 HE-3051 原始 `sensor_msgs/LaserScan`。
 - `/scan`：双雷达融合后的导航/建图输入，仍是下游统一接口。
 - `/imu/data`：DM-IMU `sensor_msgs/Imu`。
 - `/odom_encoder`：底盘编码器里程计。
@@ -89,7 +89,7 @@ bash start_finav.sh --handle-port /dev/ttyUSB0 --host 0.0.0.0 --port 8010
 
 组成：
 
-- `launch/sub/lidar.launch.py`：FREE 雷达。
+- `launch/sub/lidar.launch.py`：双 HE-3051 雷达与扫描融合。
 - `launch/sub/dm_imu.launch.py`：DM-IMU。
 - `launch/sub/ekf.launch.py`：EKF 融合。
 - `launch/sub/slam_toolbox.launch.py mode:=mapping`：SLAM Toolbox 建图。
@@ -198,46 +198,42 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - 改 STM32 串口、摇杆标定、方向和五档最高速度：`config/handle.yaml`。
 - 改键盘/Web 仲裁：`scripts/control/base_control_router.py`。
 
-### 3.2 FREE 雷达模块
+### 3.2 Hinson HE-3051 雷达模块
 
 相关文件：
 
-- `third_party/free_lidar/src/rosnode/free_lidar_node.cpp`
-- `third_party/free_lidar/src/driver/free_eth_driver.cpp`
-- `third_party/free_lidar/src/driver/trailing_filter.cpp`
-- `third_party/free_lidar/include/free_lidar/*.h`
+- `third_party/hinson_he_lidar/hi_driver/`
+- `third_party/hinson_he_lidar/README.vendor.md`
 - `src/rosnode/scan_fusion_node.cpp`
 - `launch/sub/lidar.launch.py`
 - `config/lidar.yaml`
-- `third_party/free_lidar/README.upstream.md`
-- `third_party/free_lidar/docs/H1E0-06B_第四章设备连接.md`
 
 原理：
 
-- 当前实机链路使用两台以太网 FREE 雷达，CMake 中定义了 `FREE_LIDAR_ENABLE_SERIAL=0`。
-- `free_eth_driver.cpp` 负责 TCP 连接雷达、登录设备、配置扫描角度/频率/分辨率、解析扫描分包。
-- `free_lidar_node.cpp` 分别发布 `/scan_left` 和 `/scan_right`。
+- 当前实机链路使用两台 Hinson HE-3051：左 `10.86.81.111:8080`，右 `10.86.81.112:8080`。
+- 两个 `hins_he_lidar_node` 实例分别发布 `/scan_left` 和 `/scan_right`。
 - `scan_fusion_node.cpp` 将左右 LaserScan 变换到 `base_link`，按角度栅格取最近距离，发布融合后的 `/scan`。
 - 下游 SLAM、Web、RViz 和导航仍只依赖 `/scan`，不要随意改动外部话题契约。
-- 当前雷达已正装朝上，`is_reverse_postion` 默认应保持 `false`。
 - 雷达 QoS 使用 Best Effort，RViz 的 LaserScan Display 也必须设置为 Best Effort，否则会出现 Reliability QoS 不兼容。
+- 2026-08-13 实测两路原始 scan 约 20 Hz，每帧 3200 点、范围约 `[-160°, 160°]`、分辨率约 `0.1°`；融合 `/scan` 约 18–20 Hz。
 
 关键配置：
 
-- `left.scanner_ip` / `right.scanner_ip`：左右雷达 IP，当前常用 `192.168.1.111` 和 `192.168.1.112`。
+- `left.scanner_ip` / `right.scanner_ip`：左右雷达 IP。
+- `laser_port`：HE-3051 TCP Server 端口，当前为 `8080`。
+- `laser_type`：HE 系列固定为 `1`。
 - `left.frame_id` / `right.frame_id`：通常为 `laser_left_frame`、`laser_right_frame`。
 - `left.topic_name` / `right.topic_name`：原始话题，默认 `/scan_left`、`/scan_right`。
-- `scan_frequency`：扫描频率。
-- `start_angle` / `stop_angle`：每个雷达的发布角度范围，可用于减少重合、控制覆盖范围。
-- `is_reverse_postion`：物理反装或点序相反时反序 ranges；当前正装时保持 `false`。
+- `change_param`：默认 `false`，首次联调不通过 ROS 修改雷达内部参数。
+- `synctype`：默认 `false`；未确认固件和 NTP 服务器前使用 Jetson 接收时间。
+- `start_angle` / `end_angle`：当前为 `0/0`，表示保留完整 320° 原始扫描。
+- `offset_angle`：保持 `0`，安装方向由 URDF TF 表达。
 - `fusion.output_topic` / `fusion.output_frame`：融合输出话题和坐标系，默认 `/scan`、`base_link`。
 - `fusion.angle_*`、`fusion.range_*`、`sync_queue_size`、`tf_timeout_sec`：融合角度分辨率、距离范围、同步队列和 TF 等待时间。
-- `filter_switch`、`single_filter_enable`：厂商滤波控制。排查原始点云时应关闭。
-- `use_recv_time_stamp`：是否使用首包接收时间作为 `LaserScan.header.stamp`，用于排查运动畸变。
 
 常见排查：
 
-- 连接失败先查网络：上位机网卡应与两台雷达在同一网段，分别 `ping 192.168.1.111`、`ping 192.168.1.112`。
+- 连接失败先查网络：分别 `ping 10.86.81.111`、`ping 10.86.81.112`，并确认 TCP `8080` 未被配置软件或其他驱动占用。
 - 分别执行 `ros2 topic hz /scan_left --qos-reliability best_effort`、`/scan_right`、`/scan` 确认原始和融合数据。
 - `ros2 topic info /scan -v` 确认 `/scan` 发布者是 `scan_fusion_node`，QoS 为 Best Effort。
 - `ros2 run tf2_ros tf2_echo base_link laser_left_frame` 和 `laser_right_frame` 确认 TF 存在。
@@ -466,7 +462,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 - `config/base_control.yaml`：底盘和键盘控制参数。
 - `config/handle.yaml`：STM32 手柄串口、Modbus、摇杆标定、方向和五档速度参数。
-- `config/lidar.yaml`：左右 FREE 雷达 IP、角度、频率、滤波、时间戳策略和融合参数。
+- `config/lidar.yaml`：左右 HE-3051 的 IP、端口、驱动参数和融合参数。
 - `config/imu.yaml`：DM-IMU 串口、零偏、发布参数。
 - `config/ekf.yaml`：robot_localization EKF 融合参数。
 - `config/slam_toolbox_map.yaml`：建图模式 SLAM 参数。
@@ -496,7 +492,7 @@ CMake 安装内容：
 
 - `launch/`、`config/`、`rviz/`、`urdf/`、`maps/` 安装到 share 目录。
 - 控制、IMU、工具、仿真脚本安装为 `ros2 run finav ...` 可执行程序。
-- `third_party/free_lidar` 被编译为 `free_lidar_node`。
+- `third_party/hinson_he_lidar` 被编译为 `hins_he_lidar_node`。
 - `third_party/dm_imu/dm_imu_modules` 安装到 `lib/finav/dm_imu_modules`。
 
 ## 6. 推荐新人上手路径
@@ -505,7 +501,7 @@ CMake 安装内容：
 2. 阅读 `README.md`，了解 Web 后台接口和页面工作流。
 3. 根据职责选择模块：
    - 底盘：`scripts/control/base_control.py`、`config/base_control.yaml`。
-   - 雷达：`third_party/free_lidar/`、`src/rosnode/scan_fusion_node.cpp`、`config/lidar.yaml`。
+   - 雷达：`third_party/hinson_he_lidar/`、`src/rosnode/scan_fusion_node.cpp`、`config/lidar.yaml`。
    - IMU/EKF：`scripts/imu/dm_imu_publisher.py`、`config/imu.yaml`、`config/ekf.yaml`。
    - 建图定位：`launch/sub/slam_toolbox.launch.py`、`config/slam_toolbox_*.yaml`。
    - 路径规划：`scripts/control/nav_path_plan.py`、`config/path_plan.yaml`。
@@ -522,7 +518,8 @@ CMake 安装内容：
 检查：
 
 ```bash
-ping 192.168.1.111
+ping 10.86.81.111
+ping 10.86.81.112
 ip -br addr
 ip route
 ```
@@ -559,10 +556,10 @@ RViz 的 LaserScan Display 需要：
 按顺序排查：
 
 1. 只启动雷达，车静止，分别看 `/scan_left`、`/scan_right` 和融合 `/scan`。
-2. 若原始数据静止仍分段，检查点序、角度范围、`is_reverse_postion`、厂商滤波和雷达硬件。
+2. 若原始数据静止仍分段，检查点序、角度范围、`offset_angle`、厂商滤波和雷达硬件。
 3. 若原始正常、融合异常，检查 `laser_left_frame` / `laser_right_frame` 的安装角和 `scan_fusion_node` 参数。
 4. 若静止正常、运动后分段，优先考虑运动畸变、时间戳、TF 延迟和里程计质量。
-5. 排查原始点云时关闭滤波：`filter_switch: 0`、`single_filter_enable: false`。
+5. 排查原始点云时保持 `shadows_filter_level: 0`，并避免同时调整雷达内部和 ROS 侧过滤参数。
 
 ### 7.5 SLAM 丢弃 scan
 
@@ -605,7 +602,7 @@ ros2 run tf2_ros tf2_echo map base_link
 | 一键启动 | `start_finav.sh`, `base_drive.sh` |
 | 建图 launch | `launch/map.launch.py`, `launch/sub/slam_toolbox.launch.py` |
 | 导航 launch | `launch/nav.launch.py` |
-| 雷达 | `third_party/free_lidar/`, `src/rosnode/scan_fusion_node.cpp`, `launch/sub/lidar.launch.py`, `config/lidar.yaml` |
+| 雷达 | `third_party/hinson_he_lidar/`, `src/rosnode/scan_fusion_node.cpp`, `launch/sub/lidar.launch.py`, `config/lidar.yaml` |
 | IMU | `scripts/imu/dm_imu_publisher.py`, `third_party/dm_imu/`, `config/imu.yaml` |
 | EKF | `launch/sub/ekf.launch.py`, `config/ekf.yaml` |
 | 机器人模型 | `urdf/whillcar.urdf`, `launch/sub/robot_model.launch.py` |

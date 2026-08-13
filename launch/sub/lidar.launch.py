@@ -26,27 +26,28 @@ def _load_branch(data, key, defaults):
         "scanner_ip": str(branch.get("scanner_ip", defaults["scanner_ip"])),
         "frame_id": str(branch.get("frame_id", defaults["frame_id"])),
         "topic_name": str(branch.get("topic_name", defaults["topic_name"])),
-        "is_ethernet": bool(branch.get("is_ethernet", defaults["is_ethernet"])),
-        "port_name": str(branch.get("port_name", defaults["port_name"])),
-        "baud": int(branch.get("baud", defaults["baud"])),
-        "scan_frequency": int(branch.get("scan_frequency", defaults["scan_frequency"])),
-        "scan_resolution": int(branch.get("scan_resolution", defaults["scan_resolution"])),
-        "start_angle": int(branch.get("start_angle", defaults["start_angle"])),
-        "stop_angle": int(branch.get("stop_angle", defaults["stop_angle"])),
-        "range_min": float(branch.get("range_min", defaults["range_min"])),
-        "range_max": float(branch.get("range_max", defaults["range_max"])),
-        "filter_switch": int(branch.get("filter_switch", defaults["filter_switch"])),
-        "single_filter_enable": bool(
-            branch.get("single_filter_enable", defaults["single_filter_enable"])
+        "laser_port": int(branch.get("laser_port", defaults["laser_port"])),
+        "laser_type": int(branch.get("laser_type", defaults["laser_type"])),
+        "use_udp": bool(branch.get("use_udp", defaults["use_udp"])),
+        "synctype": bool(branch.get("synctype", defaults["synctype"])),
+        "change_param": bool(branch.get("change_param", defaults["change_param"])),
+        "spin_frequency_hz": int(
+            branch.get("spin_frequency_hz", defaults["spin_frequency_hz"])
         ),
-        "cluster_num": int(branch.get("cluster_num", defaults["cluster_num"])),
-        "broad_filter_num": int(branch.get("broad_filter_num", defaults["broad_filter_num"])),
-        "nor_switch": int(branch.get("nor_switch", defaults["nor_switch"])),
-        "is_reverse_postion": bool(
-            branch.get("is_reverse_postion", defaults["is_reverse_postion"])
+        "angle_increment": str(
+            branch.get("angle_increment", defaults["angle_increment"])
         ),
-        "use_recv_time_stamp": bool(
-            branch.get("use_recv_time_stamp", defaults["use_recv_time_stamp"])
+        "noise_filter_level": int(
+            branch.get("noise_filter_level", defaults["noise_filter_level"])
+        ),
+        "start_angle": float(branch.get("start_angle", defaults["start_angle"])),
+        "end_angle": float(branch.get("end_angle", defaults["end_angle"])),
+        "offset_angle": float(branch.get("offset_angle", defaults["offset_angle"])),
+        "shadows_filter_level": int(
+            branch.get("shadows_filter_level", defaults["shadows_filter_level"])
+        ),
+        "disturb_filter_enable": bool(
+            branch.get("disturb_filter_enable", defaults["disturb_filter_enable"])
         ),
     }
 
@@ -90,22 +91,19 @@ def _resolve_project_dir(pkg_share):
 
 def _load_lidar_config():
     base = {
-        "is_ethernet": True,
-        "port_name": "/dev/ttyUSB0",
-        "baud": 921600,
-        "scan_frequency": 30,
-        "scan_resolution": 1000,
-        "start_angle": -45,
-        "stop_angle": 225,
-        "range_min": 0.05,
-        "range_max": 25.0,
-        "filter_switch": 0,
-        "single_filter_enable": False,
-        "cluster_num": 10,
-        "broad_filter_num": 20,
-        "nor_switch": 1,
-        "is_reverse_postion": False,
-        "use_recv_time_stamp": False,
+        "laser_port": 8080,
+        "laser_type": 1,
+        "use_udp": False,
+        "synctype": False,
+        "change_param": False,
+        "spin_frequency_hz": 30,
+        "angle_increment": "0.100",
+        "noise_filter_level": 1,
+        "start_angle": 0.0,
+        "end_angle": 0.0,
+        "offset_angle": 0.0,
+        "shadows_filter_level": 0,
+        "disturb_filter_enable": False,
     }
     defaults = {
         "left": {
@@ -147,25 +145,23 @@ def _load_lidar_config():
 
 def _driver_parameters(cfg, scanner_ip):
     return {
-        "frame_id": str(cfg["frame_id"]),
-        "is_ethernet": bool(cfg["is_ethernet"]),
-        "scanner_ip": scanner_ip,
-        "port_name": str(cfg["port_name"]),
-        "baud": int(cfg["baud"]),
-        "scan_frequency": int(cfg["scan_frequency"]),
-        "scan_resolution": int(cfg["scan_resolution"]),
-        "start_angle": int(cfg["start_angle"]),
-        "stop_angle": int(cfg["stop_angle"]),
-        "range_min": float(cfg["range_min"]),
-        "range_max": float(cfg["range_max"]),
-        "filter_switch": int(cfg["filter_switch"]),
-        "cluster_num": int(cfg["cluster_num"]),
-        "broad_filter_num": int(cfg["broad_filter_num"]),
-        "NOR_switch": int(cfg["nor_switch"]),
-        "is_reverse_postion": bool(cfg["is_reverse_postion"]),
-        "use_recv_time_stamp": bool(cfg["use_recv_time_stamp"]),
-        "single_filter_enable": bool(cfg["single_filter_enable"]),
+        "frame_name": str(cfg["frame_id"]),
         "topic_name": str(cfg["topic_name"]),
+        "laser_ip": scanner_ip,
+        "laser_port": int(cfg["laser_port"]),
+        "laser_type": int(cfg["laser_type"]),
+        "use_udp": bool(cfg["use_udp"]),
+        "synctype": bool(cfg["synctype"]),
+        "block_enable": False,
+        "change_param": bool(cfg["change_param"]),
+        "spin_frequency_Hz": int(cfg["spin_frequency_hz"]),
+        "angle_increment": str(cfg["angle_increment"]),
+        "noise_filter_level": int(cfg["noise_filter_level"]),
+        "start_angle": float(cfg["start_angle"]),
+        "end_angle": float(cfg["end_angle"]),
+        "offset_angle": float(cfg["offset_angle"]),
+        "shadows_filter_level": int(cfg["shadows_filter_level"]),
+        "disturb_filter_enable": bool(cfg["disturb_filter_enable"]),
     }
 
 
@@ -200,8 +196,8 @@ def generate_launch_description():
             ),
             Node(
                 package="finav",
-                executable="free_lidar_node",
-                name="free_lidar_left_node",
+                executable="hins_he_lidar_node",
+                name="hins_he_lidar_left_node",
                 output="screen",
                 emulate_tty=True,
                 respawn=True,
@@ -210,8 +206,8 @@ def generate_launch_description():
             ),
             Node(
                 package="finav",
-                executable="free_lidar_node",
-                name="free_lidar_right_node",
+                executable="hins_he_lidar_node",
+                name="hins_he_lidar_right_node",
                 output="screen",
                 emulate_tty=True,
                 respawn=True,

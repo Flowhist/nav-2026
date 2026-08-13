@@ -1,58 +1,45 @@
-# finav 双 FREE 雷达配置（建图/导航共用）
-# 两台雷达内部发布 /scan_left 和 /scan_right，最终由 scan_fusion_node 融合为 /scan。
+# Finav 双 Hinson HE-3051 雷达配置（建图/导航共用）
+# 两台驱动分别发布 /scan_left 和 /scan_right，最终由 scan_fusion_node 融合为 /scan。
 # 下游 SLAM、Web、导航仍只使用 /scan。
 
 left:
-  # 左雷达网络与 ROS 输出
   scanner_ip: 10.86.81.111
   frame_id: laser_left_frame
   topic_name: /scan_left
-  is_ethernet: true
-  # 串口模式备用；以太网模式下通常不生效
-  port_name: /dev/ttyUSB0
-  baud: 921600
-  # 雷达采样频率、角分辨率与裁剪角度
-  scan_frequency: 30
-  scan_resolution: 1000
-  start_angle: 10
-  stop_angle: 215
-  # 有效量程，超出范围的点会被过滤
-  range_min: 0.05
-  range_max: 25.0
-  # 原厂滤波/归一化参数；调试点云形状时优先保持滤波关闭
-  filter_switch: 0
-  single_filter_enable: false
-  cluster_num: 10
-  broad_filter_num: 20
-  nor_switch: 1
-  is_reverse_postion: false
-  use_recv_time_stamp: false
+  laser_port: 8080
+  laser_type: 1
+  use_udp: false
+  synctype: false
+  # 首次联调不改变雷达内部转速、分辨率或滤波参数。
+  change_param: false
+  # HE-3051 在厂商协议中用 30 表示实际 20 Hz。
+  spin_frequency_hz: 30
+  angle_increment: "0.100"
+  noise_filter_level: 1
+  # 0/0 在厂商驱动中表示不裁剪，安装方向由 URDF TF 描述。
+  start_angle: 0.0
+  end_angle: 0.0
+  offset_angle: 0.0
+  shadows_filter_level: 0
+  disturb_filter_enable: false
 
 right:
-  # 右雷达网络与 ROS 输出
   scanner_ip: 10.86.81.112
   frame_id: laser_right_frame
   topic_name: /scan_right
-  is_ethernet: true
-  # 串口模式备用；以太网模式下通常不生效
-  port_name: /dev/ttyUSB0
-  baud: 921600
-  # 雷达采样频率、角分辨率与裁剪角度
-  scan_frequency: 30
-  scan_resolution: 1000
-  start_angle: -45
-  stop_angle: 170
-  # 有效量程，超出范围的点会被过滤
-  range_min: 0.05
-  range_max: 25.0
-  # 原厂滤波/归一化参数；调试点云形状时优先保持滤波关闭
-  filter_switch: 0
-  single_filter_enable: false
-  cluster_num: 10
-  broad_filter_num: 20
-  nor_switch: 1
-  is_reverse_postion: false
-  use_recv_time_stamp: false
+  laser_port: 8080
+  laser_type: 1
+  use_udp: false
+  synctype: false
+  change_param: false
+  spin_frequency_hz: 30
+  angle_increment: "0.100"
+  noise_filter_level: 1
+  start_angle: 0.0
+  end_angle: 0.0
+  offset_angle: 0.0
+  shadows_filter_level: 0
+  disturb_filter_enable: false
 
 fusion:
   # 双雷达融合后的统一 LaserScan 输出

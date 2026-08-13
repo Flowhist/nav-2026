@@ -2,7 +2,7 @@
 <package format="3">
   <name>finav</name>
   <version>0.2.0</version>
-  <description>Professional navigation system with SLAM Toolbox, DM-IMU, and FREE lidar support</description>
+  <description>Professional navigation system with SLAM Toolbox, DM-IMU, and Hinson HE lidar support</description>
   <maintainer email="denis.dillenberger@gmail.com">Denis Dillenberger</maintainer>
   <author email="denis.dillenberger@gmail.com">Denis Dillenberger</author>
   <license>BSD</license>

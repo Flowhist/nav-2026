@@ -44,23 +44,33 @@ set(dependencies
   laser_geometry
   )
 
-# Declare a C++ executable for free_lidar_node
-add_executable(free_lidar_node
-  third_party/free_lidar/src/rosnode/free_lidar_node.cpp
-  third_party/free_lidar/src/driver/free_eth_driver.cpp
-  third_party/free_lidar/src/driver/trailing_filter.cpp
+# Hinson HE-3051 lidar driver (adapted from the vendor ROS 2 package).
+set(hinson_he_driver_dir
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/hinson_he_lidar/hi_driver
 )
 
-ament_target_dependencies(free_lidar_node ${dependencies})
-target_compile_definitions(free_lidar_node PRIVATE FREE_LIDAR_ENABLE_SERIAL=0)
+add_executable(hins_he_lidar_node
+  ${hinson_he_driver_dir}/src/main.cpp
+  ${hinson_he_driver_dir}/src/XingSongDriver/xingsong_driver.cpp
+  ${hinson_he_driver_dir}/src/XingSongDriver/laserprotocol.cpp
+  ${hinson_he_driver_dir}/src/XingSongDriver/shadowsfilter.cpp
+  ${hinson_he_driver_dir}/src/ConnectDriver/ConnectDriver.cpp
+)
 
-target_include_directories(free_lidar_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/free_lidar/include>
+ament_target_dependencies(hins_he_lidar_node
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+)
+
+target_include_directories(hins_he_lidar_node PUBLIC
+  $<BUILD_INTERFACE:${hinson_he_driver_dir}/src>
+  $<BUILD_INTERFACE:${hinson_he_driver_dir}/include>
   $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(free_lidar_node
-  ${Boost_LIBRARIES}
+target_link_libraries(hins_he_lidar_node
+  Boost::thread
 )
 
 add_executable(scan_fusion_node
@@ -124,7 +134,6 @@ install(PROGRAMS
   scripts/imu/dm_imu_publisher.py
   scripts/tool/TF.sh
   scripts/tool/clean_nav.sh
-  scripts/tool/set_lidar_ip.py
   scripts/tool/base_monitor.py
   scripts/tool/clean_map.sh
   scripts/tool/save_map.sh
@@ -174,7 +183,7 @@ install(DIRECTORY
   FILES_MATCHING PATTERN "*.py"
 )
 
-install(TARGETS free_lidar_node scan_fusion_node # serial_bridge_node
+install(TARGETS hins_he_lidar_node scan_fusion_node # serial_bridge_node
   EXPORT export_${PROJECT_NAME}
   DESTINATION lib/${PROJECT_NAME})
 

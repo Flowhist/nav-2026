@@ -1,6 +1,6 @@
 # Finav
 
-Finav 是一个基于 ROS 2 Humble 的实机导航项目，当前包含 WHILL 底盘控制、FREE 激光雷达、DM-IMU、EKF 融合、SLAM Toolbox 建图/定位、自研路径规划与路径跟踪、Web 调试后台和 Gazebo/RViz 仿真环境。
+Finav 是一个基于 ROS 2 Humble 的实机导航项目，当前包含 WHILL 底盘控制、Hinson HE-3051 激光雷达、DM-IMU、EKF 融合、SLAM Toolbox 建图/定位、自研路径规划与路径跟踪、Web 调试后台和 Gazebo/RViz 仿真环境。
 
 新开发者请先阅读项目 Wiki：
 
@@ -46,7 +46,7 @@ ros2 launch finav nav.launch.py
 - `scripts/handle/`：STM32 手柄 Modbus 通信、协议解析和 ROS 节点。
 - `scripts/imu/`：DM-IMU ROS 2 发布节点。
 - `scripts/map_location/`：地图地点文件读取和 RViz 地点可视化。
-- `third_party/`：FREE 雷达和 DM-IMU 厂商代码整理区。
+- `third_party/`：Hinson HE-3051 雷达和 DM-IMU 厂商代码整理区。
 - `server/`：Web 调试后台。
 - `sim/`：仿真 launch、脚本、Gazebo 模型和世界。
 - `maps/`：已保存地图。

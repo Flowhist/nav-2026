@@ -7,7 +7,7 @@ patterns=(
   "launch/map.launch.py"
   "sync_slam_toolbox_node"
   "slam_toolbox"
-  "free_lidar_node"
+  "hins_he_lidar_node"
   "scan_fusion_node"
   "r2000_node"
   "dm_imu_publisher.py"
@@ -24,7 +24,7 @@ for sig in TERM KILL; do
   sleep 1
 done
 
-remaining="$(pgrep -fa "map.launch.py|sync_slam_toolbox_node|slam_toolbox|free_lidar_node|scan_fusion_node|r2000_node|dm_imu|ekf_node|robot_state_publisher|joint_state_publisher|static_transform_publisher" || true)"
+remaining="$(pgrep -fa "map.launch.py|sync_slam_toolbox_node|slam_toolbox|hins_he_lidar_node|scan_fusion_node|r2000_node|dm_imu|ekf_node|robot_state_publisher|joint_state_publisher|static_transform_publisher" || true)"
 if [[ -n "$remaining" ]]; then
   printf '⚠ 建图相关残留进程:\n%s\n' "$remaining"
 else

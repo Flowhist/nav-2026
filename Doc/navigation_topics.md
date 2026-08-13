@@ -30,8 +30,8 @@ RViz / nav_voice_bridge
 
 | 话题 | 类型 | 主要数据 | 发布者 | 订阅者 | 频率/触发时机 |
 | --- | --- | --- | --- | --- | --- |
-| `/scan_left` | `sensor_msgs/msg/LaserScan` | 左雷达原始扫描，frame 为 `laser_left_frame` | `free_lidar_left_node` | `scan_fusion_node` | 雷达配置 `scan_frequency=30Hz`；实际受雷达输出和驱动处理影响 |
-| `/scan_right` | `sensor_msgs/msg/LaserScan` | 右雷达原始扫描，frame 为 `laser_right_frame` | `free_lidar_right_node` | `scan_fusion_node` | 雷达配置 `scan_frequency=30Hz`；实际受雷达输出和驱动处理影响 |
+| `/scan_left` | `sensor_msgs/msg/LaserScan` | 左 HE-3051 原始扫描，frame 为 `laser_left_frame` | `hins_he_lidar_left_node` | `scan_fusion_node` | 2026-08-13 实测约 `20Hz`、3200 点、约 `0.1°` 分辨率 |
+| `/scan_right` | `sensor_msgs/msg/LaserScan` | 右 HE-3051 原始扫描，frame 为 `laser_right_frame` | `hins_he_lidar_right_node` | `scan_fusion_node` | 2026-08-13 实测约 `20Hz`、3200 点、约 `0.1°` 分辨率 |
 | `/scan` | `sensor_msgs/msg/LaserScan` | 融合后的车体坐标系扫描，frame 配置为 `base_link`，角度范围 `[-pi, pi]` | `scan_fusion_node` | `slam_toolbox`、RViz | 输入雷达同步融合后发布，理论接近雷达频率；受左右雷达同步、`input_timeout_sec=1.0`、TF 查询影响 |
 | `/map` | `nav_msgs/msg/OccupancyGrid` | 栅格地图，包含 `info.resolution`、`origin`、`data` 占用概率 | `slam_toolbox` 定位模式 | `nav_path_plan.py`、RViz | 配置 `map_update_interval=1.0s`，约 `1Hz`；定位模式加载已有地图并发布给规划和 RViz |
 
@@ -76,7 +76,7 @@ RViz / nav_voice_bridge
 
 | 节点 | 主要输入 | 主要输出 | 说明 |
 | --- | --- | --- | --- |
-| `free_lidar_left_node` / `free_lidar_right_node` | 两颗 FREE 雷达 TCP 数据 | `/scan_left`、`/scan_right` | 雷达 IP 来自 `config/lidar.yaml`，网络端口为 TCP `2111` |
+| `hins_he_lidar_left_node` / `hins_he_lidar_right_node` | 两颗 HE-3051 TCP 数据 | `/scan_left`、`/scan_right` | 雷达 IP 来自 `config/lidar.yaml`，网络端口为 TCP `8080` |
 | `scan_fusion_node` | `/scan_left`、`/scan_right`、TF | `/scan` | 将双雷达点云转换/融合到 `base_link` |
 | `slam_toolbox` | `/scan`、`/odom`、地图文件 | `/map`、`/tf` 中的 `map -> odom` | `nav.launch.py` 中以 localization 模式启动 |
 | `nav_path_plan.py` | `/map`、`/goal_pose`、TF `map -> base_link`、`/nav_clear` | `/plan` | 基于 OccupancyGrid 和车体足迹做全局规划 |

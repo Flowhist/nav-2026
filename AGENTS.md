@@ -2,13 +2,13 @@
 
 ## Project Overview
 - Finav is a ROS 2 Humble navigation project for a WHILL-based robot.
-- It includes chassis control, FREE lidar, DM-IMU, EKF fusion, SLAM Toolbox mapping/localization, custom planning/control, a web debug backend, and Gazebo/RViz simulation.
+- It includes chassis control, Hinson HE lidar, DM-IMU, EKF fusion, SLAM Toolbox mapping/localization, custom planning/control, a web debug backend, and Gazebo/RViz simulation.
 - Read `Doc/项目Wiki.md` before deep subsystem work.
 
 ## Tech Stack
 - ROS 2 Humble with `ament_cmake`
 - Python ROS nodes via `rclpy`
-- C++14 ROS node for FREE lidar via `rclcpp`
+- C++14 ROS node for Hinson HE lidar via `rclcpp`
 - SLAM Toolbox, robot_localization, Nav2 map server components
 - Gazebo / ros_gz_bridge simulation and RViz visualization
 - Python HTTP backend with static HTML/CSS/JS frontend
@@ -38,7 +38,7 @@
 - `scripts/tool/`: map save, cleanup, TF, and operational scripts.
 - `server/`: web debug backend; `server/web/` contains frontend assets.
 - `sim/`: Gazebo/RViz simulation launch files, scripts, models, and worlds.
-- `third_party/`: vendored FREE lidar and DM-IMU protocol code.
+- `third_party/`: vendored Hinson HE lidar and DM-IMU protocol code.
 - `urdf/`, `rviz/`, `maps/`, `Doc/`: robot model, visualization configs, saved maps, and documentation.
 
 ## Working Rules
