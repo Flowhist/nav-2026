@@ -226,8 +226,7 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 - `left.topic_name` / `right.topic_name`：原始话题，默认 `/scan_left`、`/scan_right`。
 - `change_param`：默认 `false`，首次联调不通过 ROS 修改雷达内部参数。
 - `synctype`：默认 `false`；未确认固件和 NTP 服务器前使用 Jetson 接收时间。
-- `start_angle` / `end_angle`：当前为 `0/0`，表示保留完整 320° 原始扫描。
-- `offset_angle`：保持 `0`，安装方向由 URDF TF 表达。
+- `start_angle` / `end_angle`：分别设置左右雷达的保留角度范围；`0/0` 表示保留完整 320° 原始扫描。
 - `fusion.output_topic` / `fusion.output_frame`：融合输出话题和坐标系，默认 `/scan`、`base_link`。
 - `fusion.angle_*`、`fusion.range_*`、`sync_queue_size`、`tf_timeout_sec`：融合角度分辨率、距离范围、同步队列和 TF 等待时间。
 
@@ -557,7 +556,7 @@ RViz 的 LaserScan Display 需要：
 按顺序排查：
 
 1. 只启动雷达，车静止，分别看 `/scan_left`、`/scan_right` 和融合 `/scan`。
-2. 若原始数据静止仍分段，检查点序、角度范围、`offset_angle`、厂商滤波和雷达硬件。
+2. 若原始数据静止仍分段，检查点序、角度范围、厂商滤波和雷达硬件。
 3. 若原始正常、融合异常，检查 `laser_left_frame` / `laser_right_frame` 的安装角和 `scan_fusion_node` 参数。
 4. 若静止正常、运动后分段，优先考虑运动畸变、时间戳、TF 延迟和里程计质量。
 5. 排查原始点云时保持 `shadows_filter_level: 0`，并避免同时调整雷达内部和 ROS 侧过滤参数。

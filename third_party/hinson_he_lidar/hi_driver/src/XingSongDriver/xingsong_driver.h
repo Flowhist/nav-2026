@@ -101,9 +101,6 @@ private:
     int  blockcount = 0;
     int blocktime =  5;
 
-    float offset_angle = 0.0;
-
-
     double angle_min = 0.0;
 
     double angle_max = 0.0;

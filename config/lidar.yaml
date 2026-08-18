@@ -14,12 +14,12 @@ left:
   change_param: false
   # HE-3051 在厂商协议中用 30 表示实际 20 Hz。
   spin_frequency_hz: 30
-  angle_increment: "0.100"
+  angle_increment: "0.050"
   noise_filter_level: 1
+
   # 0/0 在厂商驱动中表示不裁剪，安装方向由 URDF TF 描述。
-  start_angle: 0.0
-  end_angle: 0.0
-  offset_angle: 0.0
+  start_angle: -110.0
+  end_angle: 110.0
   shadows_filter_level: 0
   disturb_filter_enable: false
 
@@ -33,11 +33,11 @@ right:
   synctype: false
   change_param: false
   spin_frequency_hz: 30
-  angle_increment: "0.100"
+  angle_increment: "0.050"
   noise_filter_level: 1
-  start_angle: 0.0
-  end_angle: 0.0
-  offset_angle: 0.0
+
+  start_angle: -70.0
+  end_angle: 110.0
   shadows_filter_level: 0
   disturb_filter_enable: false
 
@@ -51,7 +51,7 @@ fusion:
   angle_increment: 0.0017453292519943296
   # 融合后保留的有效量程
   range_min: 0.05
-  range_max: 25.0
+  range_max: 10.0
   # 同步队列和 TF 等待时间；丢帧/延迟时优先检查这里
   sync_queue_size: 10
   input_timeout_sec: 1.0

@@ -27,9 +27,7 @@ class StateStore:
                 "goal_pose": None,
                 "initial_pose": None,
             },
-            "teleop": {
-                "active": False,
-                "timeout_at": None,
+            "control": {
                 "joystick_active": False,
                 "joystick_online": False,
                 "joystick_updated_at": None,
@@ -39,15 +37,41 @@ class StateStore:
                 "navigation": {"running": False, "stopping": False, "started_at": None, "pid": None, "log_path": None},
                 "busy": False,
             },
+            "transport": {
+                "active_streams": 0,
+                "last_mode": None,
+                "stream_hz": 0.0,
+                "bytes_per_sec": 0,
+                "last_frame_at": None,
+            },
         }
         self._scene_map_version = 0
+        self._scene_plan_version = 0
+        self._live_viewers = 0
+        self._viewer_modes = {"mapping": 0, "navigation": 0}
         self._scene: Dict[str, Any] = {
             "map": None,
-            "scan": {"frame_id": "map", "points": [], "updated_at": None},
+            "scan": {
+                "frame_id": "base_link",
+                "encoding": "uint16-mm-base64",
+                "pose_map": None,
+                "angle_min": 0.0,
+                "angle_increment": 0.0,
+                "count": 0,
+                "ranges_b64": "",
+                "updated_at": None,
+            },
             "plan": {"points": 0, "points_xy": [], "length_m": 0.0, "updated_at": None},
             "robot_pose_map": None,
             "goal_pose": None,
             "initial_pose": None,
+            "robot_footprint": {
+                "front_m": 0.75,
+                "rear_m": 0.15,
+                "left_m": 0.35,
+                "right_m": 0.35,
+                "margin_m": 0.03,
+            },
         }
 
     def update_status(self, patch: Dict[str, Any]) -> None:
@@ -59,23 +83,63 @@ class StateStore:
         with self._lock:
             return self._deep_copy(self._status)
 
-    def update_scene(self, patch: Dict[str, Any], *, map_changed: bool = False) -> None:
+    def update_scene(
+        self,
+        patch: Dict[str, Any],
+        *,
+        map_changed: bool = False,
+        plan_changed: bool = False,
+    ) -> None:
         with self._lock:
-            # Scene payloads are polled frequently and can contain large arrays.
-            # Keep previous branches immutable and replace only the updated path.
+            # Scene snapshots are streamed frequently. Keep previous branches
+            # immutable so readers can take a cheap shallow snapshot.
             self._scene = self._merge_dict(self._scene, patch)
             if map_changed:
                 self._scene_map_version += 1
+            if plan_changed:
+                self._scene_plan_version += 1
 
-    def snapshot_scene(self, known_map_version: int = -1) -> Dict[str, Any]:
+    def snapshot_scene(
+        self,
+        known_map_version: int = -1,
+        known_plan_version: int = -1,
+    ) -> Dict[str, Any]:
         with self._lock:
             payload = dict(self._scene)
             current_map_version = self._scene_map_version
+            current_plan_version = self._scene_plan_version
             payload["map_version"] = current_map_version
             payload["map_changed"] = current_map_version != known_map_version
+            payload["plan_version"] = current_plan_version
+            payload["plan_changed"] = current_plan_version != known_plan_version
             if not payload["map_changed"]:
                 payload["map"] = None
+            if not payload["plan_changed"]:
+                payload["plan"] = None
             return payload
+
+    def add_live_viewer(self, mode: str) -> int:
+        with self._lock:
+            self._live_viewers += 1
+            self._viewer_modes[mode] = self._viewer_modes.get(mode, 0) + 1
+            self._status.setdefault("transport", {})["active_streams"] = self._live_viewers
+            self._status["transport"]["last_mode"] = mode
+            return self._live_viewers
+
+    def remove_live_viewer(self, mode: str) -> int:
+        with self._lock:
+            self._live_viewers = max(0, self._live_viewers - 1)
+            self._viewer_modes[mode] = max(0, self._viewer_modes.get(mode, 0) - 1)
+            self._status.setdefault("transport", {})["active_streams"] = self._live_viewers
+            return self._live_viewers
+
+    def live_stream_hz(self) -> float:
+        with self._lock:
+            if self._viewer_modes.get("navigation", 0):
+                return 15.0
+            if self._viewer_modes.get("mapping", 0):
+                return 10.0
+            return 0.0
 
     def add_event(self, level: str, message: str, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         with self._lock:

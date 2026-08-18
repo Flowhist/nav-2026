@@ -38,7 +38,7 @@ nav_control:
     # 预瞄距离越大越平滑，但弯道响应越滞后；建议 0.6~1.0
     lookahead_dist:  0.80
 
-    goal_tolerance:  0.20   # 到达终点停止距离 (m)
+    goal_tolerance:  0.15   # 到达终点停止距离 (m)
 
     # ==================== 模式切换（带迟滞） ====================
     rotate_threshold_deg:  40.0   # 角差 > 此值 → ROTATE 原地旋转

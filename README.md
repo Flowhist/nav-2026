@@ -59,7 +59,7 @@ ros2 launch finav nav.launch.py
 `server/` 是 Finav 建图 / 导航项目的轻量网页调试后台。
 它同时承担 4 件事：
 
-1. 把 ROS2 运行状态整理成网页可轮询的数据。
+1. 把 ROS2 运行状态整理成网页可持续推送的数据。
 2. 把网页上的控制操作转成 ROS 指令或启动 / 清理脚本。
 3. 提供地图预览、配置文件编辑、运行日志读取等 HTTP 接口。
 4. 维护一份线程安全的全局状态，供前端页面统一消费。
@@ -89,9 +89,9 @@ ros2 launch finav nav.launch.py
 - `web/app-dock.js`
   - 底栏状态 / 事件 / 日志区域逻辑。
 - `web/app-pages.js`
-  - 页面数据加载、地图列表、配置编辑器。
+  - 实时场景流、地图列表、配置编辑器。
 - `web/app.js`
-  - 前端主交互绑定、键控、导航拖拽、初始化入口。
+  - 前端主交互绑定、导航拖拽、页面切换、初始化入口。
 - `runtime/`
   - `mapping.log`、`navigation.log` 运行日志输出目录。
 
@@ -102,15 +102,13 @@ ros2 launch finav nav.launch.py
 - 左侧显示实时 `/map` 和 `/scan`。
 - 右侧包含：
   - 建图启动 / 结束
-  - 网页键控
-  - 速度档位
   - 地图保存
 - “开始建图”会调用：
   - `POST /api/runtime/mapping/start`
   - 后端实际执行 `ros2 launch finav map.launch.py`
 - “结束建图”或离开建图页会调用：
   - `POST /api/runtime/mapping/stop`
-  - 后端执行 `scripts/map_process/clean_map.sh`
+  - 后端执行 `scripts/tool/clean_map.sh`
 
 ### 2. 导航页
 
@@ -137,17 +135,13 @@ ros2 launch finav nav.launch.py
 - 从 `config/` 读取 `.yaml/.yml` 文件列表。
 - 支持网页直接查看、编辑、保存。
 - 当前是“纯文本编辑 + 前端轻量 YAML 高亮”，未做 YAML 语法校验。
+- 可关闭或整套重启当前 `start_finav.sh` 监督的 Finav 服务；“关闭”不会关闭 Jetson 系统。
 
-### 5. 底栏
+### 5. 运行状态中心
 
-- 左 1/3 为状态总览：
-  - 机器人状态
-  - 系统状态
-  - 包含网页控制、STM32 手柄控制等实时接管状态
-- 右 2/3 为事件 / 日志区：
-  - 事件流
-  - 建图日志
-  - 导航日志
+- 常驻于建图 / 导航页底部，展开后覆盖大部分工作区，不触发页面切换或任务清理。
+- 汇总建图 / 导航就绪条件、地图 / 雷达 / 里程计 / TF 新鲜度与频率、机器人位姿、目标、路径、手柄链路、运行进程和日志。
+- 展开期间暂停被遮挡的实时画面流，状态数据仍按低频更新，以减少无效传输和渲染。
 
 ## 后端数据流
 
@@ -156,11 +150,11 @@ ros2 launch finav nav.launch.py
 `ros_bridge.py` 后台启动一个 ROS2 节点 `web_control_server`：
 
 - 订阅 `/map`
-  - 更新 `scene.map`
-  - 递增 `map_version`
+  - 对栅格内容计算签名，仅在内容变化时更新 `scene.map` 和递增 `map_version`
+  - 栅格以 `int8 + Base64` 紧凑传输
 - 订阅 `/scan`
-  - 把激光点投影到 `map` 坐标系
-  - 更新 `scene.scan`
+  - 仅在网页存在可见实时画面时处理
+  - 距离压缩为毫米级 `uint16 + Base64`，浏览器侧完成极坐标投影
 - 订阅 `/odom`
   - 更新机器人里程计位姿、速度
 - 订阅 `/plan`
@@ -170,8 +164,7 @@ ros2 launch finav nav.launch.py
 - 订阅 `/js_state`
   - 更新底栏里的 STM32 手柄控制激活状态
 - 定时器：
-  - `0.05s` 处理网页命令队列
-  - `0.1s` 执行 teleop 超时刹停
+  - `0.02s` 处理网页命令队列
   - `0.25s` 刷新 `map` 坐标系下机器人位姿
   - `1.0s` 汇总频率统计
 
@@ -180,8 +173,9 @@ ros2 launch finav nav.launch.py
 - `status`
   - 机器人状态
   - 系统状态
-  - teleop 状态
+  - 手柄控制状态
   - runtime 状态
+  - 实时画面传输状态
 - `scene`
   - 地图
   - 雷达点
@@ -195,9 +189,8 @@ ros2 launch finav nav.launch.py
 
 前端通过 HTTP 调接口：
 
-- teleop
-  - `/api/teleop/cmd_vel`
-  - `/api/teleop/stop`
+- 实时画面
+  - `/api/stream`（SSE；建图 10 Hz，导航 15 Hz）
 - 导航
   - `/api/nav/initialpose`
   - `/api/nav/goal`
@@ -208,6 +201,8 @@ ros2 launch finav nav.launch.py
   - `/api/runtime/*`
 - 配置
   - `/api/configs*`
+- 整套服务控制
+  - `/api/system/*`
 
 `server_app.py` 接口收到请求后：
 
@@ -242,6 +237,7 @@ ros2 launch finav nav.launch.py
 
 - `GET /api/health`
 - `GET /api/status`
+- `GET /api/stream?mode=mapping|navigation&map_version=<n>&plan_version=<n>`
 - `GET /api/scene?map_version=<n>`
 - `GET /api/history?since=<seq>&limit=<n>`
 
@@ -256,8 +252,6 @@ ros2 launch finav nav.launch.py
 - `POST /api/nav/goal` `{ x, y, yaw_deg }`
 - `POST /api/nav/initialpose` `{ x, y, yaw_deg }`
 - `POST /api/nav/cancel`
-- `POST /api/teleop/cmd_vel` `{ linear_x, angular_z, timeout_ms }`
-- `POST /api/teleop/stop`
 
 ### 运行时
 
@@ -276,6 +270,12 @@ ros2 launch finav nav.launch.py
 - `GET /api/configs/<filename>`
 - `POST /api/configs/<filename>` `{ content }`
 
+### Finav 服务
+
+- `GET /api/system`
+- `POST /api/system/shutdown`
+- `POST /api/system/restart`
+
 ## 前端实现说明
 
 当前前端是“无构建工具”的原生页面：
@@ -289,9 +289,9 @@ ros2 launch finav nav.launch.py
 - `app-dock.js`
   - 负责底栏状态 / 事件 / 运行日志。
 - `app-pages.js`
-  - 负责场景轮询、地图预览、配置页编辑与保存。
+  - 负责场景流、地图预览、配置页编辑与保存。
 - `app.js`
-  - 负责 teleop、导航拖拽、页面切换、事件绑定、应用初始化。
+  - 负责导航拖拽、页面切换、事件绑定、应用初始化。
 
 ### 当前前端结构评价
 
@@ -322,9 +322,9 @@ ros2 launch finav nav.launch.py
 - `web/app-dock.js`
   - 状态栏、事件流、运行日志。
 - `web/app-pages.js`
-  - 地图预览、配置文件页、场景轮询。
+  - 地图预览、配置文件页、场景流。
 - `web/app.js`
-  - teleop、导航拖拽、绑定、轮询启动。
+  - 导航拖拽、绑定、初始化。
 
 如果后面前端继续扩张，再考虑：
 
@@ -344,41 +344,29 @@ ros2 launch finav nav.launch.py
 - 地图、配置、日志都走显式 API，而不是前端直接碰文件系统，边界清晰。
 
 ### 目前主要风险
-1. `scene` 深拷贝成本高
-   - `/api/scene` 每 350ms 轮询一次。
-   - 当前 `StateStore.snapshot_scene()` 仍会深拷贝 `scan.points`、`plan.points_xy` 等大数组。
-   - 当地图、雷达点很多时，这会成为 CPU 和内存复制开销。
 
-2. `/map` 数据体积大
-   - 当前 live map 直接把 occupancy grid 全量放进内存并传给前端。
-   - 虽然通过 `map_version` 避免了每次都重发地图，但首次下发和地图变化时仍然很重。
+1. 缺少鉴权
+   - 内网调试可接受，但只要被其他机器访问，就能起停 launch、改配置文件或控制整套服务。
 
-4. 缺少鉴权
-   - 内网调试可接受，但只要被其他机器访问，就能直接发 `/cmd_vel`、起停 launch、改配置文件。
-
-5. 配置编辑缺少语法校验
+2. 配置编辑缺少语法校验
    - 当前是“保存即写盘”，如果用户改坏 YAML，后续 launch 会直接失败。
 
-6. 前端 monolith 风险
-   - `app.js` 单文件体量已到维护拐点。
+3. 原生脚本仍共享全局状态
+   - 当前按职责拆成四个文件，但模块边界仍依赖脚本加载顺序。
 
 ## 可继续优化的地方
 
-1. 给 `/api/scene` 做更强的差量返回
-   - 当前只对 map 做了 `map_version` 优化。
-   - 扫描点、路径点也可以做版本号或时间戳 gating。
-
-2. 给日志接口加 `since_mtime` / `etag`
+1. 给日志接口加 `since_mtime` / `etag`
    - 前端如果发现日志没更新，可以直接跳过渲染。
 
-3. 配置文件保存前做 YAML 解析校验
+2. 配置文件保存前做 YAML 解析校验
    - 至少提示“语法错误，不保存”。
 
-4. 给 `RuntimeManager` 增加启动成功判定
+3. 给 `RuntimeManager` 增加启动成功判定
    - 现在“start”更多表示命令已发出。
    - 更稳的方式是结合 `/map`、`/plan`、关键进程存活状态给出“已启动 / 启动失败”。
 
-5. 为事件流增加级别过滤或保留上限控制
+4. 为事件流增加级别过滤或保留上限控制
    - 当前默认最多 2000 条，前端显示 240 条。
 
 ## 启动
@@ -407,7 +395,7 @@ http://<你的IP>:8010
 
 - 看 server 是否起起来：`/api/health`
 - 看 ROS bridge 是否正常：`/api/status`
-- 看 live map 是否刷新：`/api/scene`
+- 看实时场景是否推送：`/api/stream?mode=mapping`
 - 看运行日志：
   - `server/runtime/mapping.log`
   - `server/runtime/navigation.log`

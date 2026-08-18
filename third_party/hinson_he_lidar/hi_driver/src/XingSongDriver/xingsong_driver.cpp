@@ -35,9 +35,6 @@ void XingsongDriver::Init()
     node_->get_parameter_or<bool>("y_direction", y_direction, false);
 
 
-    node_->declare_parameter("offset_angle", 0.00);
-    node_->get_parameter_or<float>("offset_angle", offset_angle, 0.00);
-
     node_->declare_parameter("synctype", false);
     node_->get_parameter_or<bool>("synctype", synctype, false);
 
@@ -71,8 +68,8 @@ void XingsongDriver::Init()
         end_laser_angle = 340;
 
         
-        angle_min = -1 * M_PI - LasrProtocol::normalizeAngle( offset_angle / 180.0 * M_PI) + start_laser_angle / 180.0 * M_PI;
-        angle_max =  M_PI - LasrProtocol::normalizeAngle( offset_angle / 180.0 * M_PI) - start_laser_angle / 180.0 * M_PI;
+        angle_min = -1 * M_PI + start_laser_angle / 180.0 * M_PI;
+        angle_max =  M_PI - start_laser_angle / 180.0 * M_PI;
          
    
          
@@ -109,8 +106,8 @@ void XingsongDriver::Init()
          start_laser_angle = 0;
          end_laser_angle = 360;
         
-        angle_min = -1 * M_PI - LasrProtocol::normalizeAngle( offset_angle / 180.0 * M_PI);
-        angle_max =  M_PI - LasrProtocol::normalizeAngle( offset_angle / 180.0 * M_PI);
+        angle_min = -1 * M_PI;
+        angle_max =  M_PI;
 
         start_laser_rad = start_laser_angle * M_PI / 180.0 + angle_min;
        
@@ -145,8 +142,8 @@ void XingsongDriver::Init()
         start_laser_angle = 45;
          end_laser_angle = 315;
          
-        angle_min = -1 * M_PI - LasrProtocol::normalizeAngle( offset_angle / 180.0 * M_PI) + start_laser_angle / 180.0 * M_PI;
-        angle_max =  M_PI - LasrProtocol::normalizeAngle( offset_angle / 180.0 * M_PI) - start_laser_angle / 180.0 * M_PI;
+        angle_min = -1 * M_PI + start_laser_angle / 180.0 * M_PI;
+        angle_max =  M_PI - start_laser_angle / 180.0 * M_PI;
          
 
         start_laser_rad = start_laser_angle * M_PI / 180.0 + angle_min;
@@ -181,8 +178,8 @@ void XingsongDriver::Init()
          end_laser_angle = 360;
         
 
-        angle_min = 0 - LasrProtocol::normalizeAngle( offset_angle / 180.0 * M_PI);
-        angle_max =  2*M_PI - LasrProtocol::normalizeAngle( offset_angle / 180.0 * M_PI);
+        angle_min = 0;
+        angle_max = 2*M_PI;
 
         start_laser_rad = start_laser_angle * M_PI / 180.0 + angle_min;
 
@@ -217,8 +214,8 @@ void XingsongDriver::Init()
         start_laser_angle = 0;
          end_laser_angle = 360;
         
-        angle_min = -1 * M_PI - LasrProtocol::normalizeAngle( offset_angle / 180.0 * M_PI);
-        angle_max =  M_PI - LasrProtocol::normalizeAngle( offset_angle / 180.0 * M_PI);
+        angle_min = -1 * M_PI;
+        angle_max = M_PI;
 
         start_laser_rad = start_laser_angle * M_PI / 180.0 + angle_min;
 

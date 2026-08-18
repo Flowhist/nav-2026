@@ -53,13 +53,23 @@ class RuntimeManager:
         self.state_store.update_scene(
             {
                 "map": None,
-                "scan": {"frame_id": "map", "points": [], "updated_at": now},
+                "scan": {
+                    "frame_id": "base_link",
+                    "encoding": "uint16-mm-base64",
+                    "pose_map": None,
+                    "angle_min": 0.0,
+                    "angle_increment": 0.0,
+                    "count": 0,
+                    "ranges_b64": "",
+                    "updated_at": now,
+                },
                 "plan": {"points": 0, "points_xy": [], "length_m": 0.0, "updated_at": now},
                 "robot_pose_map": None,
                 "goal_pose": None,
                 "initial_pose": None,
             },
             map_changed=True,
+            plan_changed=True,
         )
 
     def snapshot(self) -> Dict[str, object]:
@@ -226,6 +236,52 @@ class RuntimeManager:
             self.stop(mode)
         self._stop_relocate()
         return self.snapshot()
+
+    def finav_supervisor_status(self) -> Dict[str, object]:
+        pid = self._find_start_finav_pid()
+        return {
+            "managed": pid is not None,
+            "pid": pid,
+            "script": str((self.repo_dir / "start_finav.sh").resolve()),
+        }
+
+    def request_finav_action(self, action: str, delay_s: float = 0.45) -> Dict[str, object]:
+        signals = {
+            "shutdown": signal.SIGTERM,
+            "restart": signal.SIGUSR2,
+        }
+        target_signal = signals.get(action)
+        if target_signal is None:
+            raise ValueError(f"unsupported finav action: {action}")
+
+        supervisor_pid = self._find_start_finav_pid()
+        if supervisor_pid is None:
+            raise RuntimeError("start_finav.sh supervisor is not running")
+
+        self.state_store.add_event(
+            "warn" if action == "shutdown" else "info",
+            f"finav {action} requested",
+            {"supervisor_pid": supervisor_pid},
+        )
+
+        def deliver_signal() -> None:
+            time.sleep(max(0.1, float(delay_s)))
+            try:
+                os.kill(supervisor_pid, target_signal)
+            except OSError as exc:
+                self.state_store.add_event(
+                    "error",
+                    f"finav {action} signal failed",
+                    {"detail": str(exc)},
+                )
+
+        threading.Thread(target=deliver_signal, daemon=True).start()
+        return {
+            "ok": True,
+            "action": action,
+            "supervisor_pid": supervisor_pid,
+            "delay_s": delay_s,
+        }
 
     def _find_start_finav_pid(self) -> int | None:
         script = (self.repo_dir / "start_finav.sh").resolve()

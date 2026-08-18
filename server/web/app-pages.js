@@ -1,36 +1,72 @@
-async function pollScene() {
-  try {
-    if (!isLivePage()) return;
-    const payload = await api(`/api/scene?map_version=${appState.mapVersion}`);
-    appState.mapVersion = payload.map_version ?? appState.mapVersion;
-    if (payload.map) appState.scene.map = payload.map;
-    if ("scan" in payload) appState.scene.scan = payload.scan;
-    if ("plan" in payload) appState.scene.plan = payload.plan;
-    if ("robot_pose_map" in payload) appState.scene.robot_pose_map = payload.robot_pose_map;
-    if ("goal_pose" in payload) appState.scene.goal_pose = payload.goal_pose;
-    if ("initial_pose" in payload) appState.scene.initial_pose = payload.initial_pose;
-    renderLiveCanvases();
-    updateSceneHints();
-  } catch (err) {
-    console.error(err);
-  } finally {
-    window.setTimeout(pollScene, getScenePollDelay());
-  }
+function stopSceneStream() {
+  if (appState.stream.source) appState.stream.source.close();
+  appState.stream.source = null;
+  appState.stream.mode = null;
+}
+
+function startSceneStream() {
+  stopSceneStream();
+  if (!isLivePage() || document.hidden) return;
+
+  const mode = appState.page;
+  const source = new EventSource(
+    `/api/stream?mode=${encodeURIComponent(mode)}&map_version=${appState.mapVersion}&plan_version=${appState.planVersion}`,
+  );
+  appState.stream.source = source;
+  appState.stream.mode = mode;
+  appState.stream.frames = 0;
+  appState.stream.sampleStartedAt = performance.now();
+
+  source.onopen = () => setConnectionState("online");
+  source.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      appState.mapVersion = payload.map_version ?? appState.mapVersion;
+      appState.planVersion = payload.plan_version ?? appState.planVersion;
+      if (payload.map) {
+        appState.scene.map = payload.map;
+        [...mapRasterCache.keys()].filter((key) => key.startsWith("live-")).forEach((key) => mapRasterCache.delete(key));
+      }
+      if (payload.scan) appState.scene.scan = payload.scan;
+      if (payload.plan) appState.scene.plan = payload.plan;
+      if ("robot_pose_map" in payload) appState.scene.robot_pose_map = payload.robot_pose_map;
+      if ("goal_pose" in payload) appState.scene.goal_pose = payload.goal_pose;
+      if ("initial_pose" in payload) appState.scene.initial_pose = payload.initial_pose;
+      if (payload.robot_footprint) appState.scene.robot_footprint = payload.robot_footprint;
+
+      const now = performance.now();
+      appState.stream.frames += 1;
+      appState.stream.lastFrameAt = Date.now();
+      if (payload.stream?.server_sent_at) {
+        appState.stream.latencyMs = Math.max(0, Date.now() - payload.stream.server_sent_at * 1000);
+      }
+      const elapsed = now - appState.stream.sampleStartedAt;
+      if (elapsed >= 1000) {
+        appState.stream.measuredHz = appState.stream.frames * 1000 / elapsed;
+        appState.stream.frames = 0;
+        appState.stream.sampleStartedAt = now;
+      }
+      renderLiveCanvases();
+      updateSceneHints();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+  source.onerror = () => {
+    if (appState.stream.source === source) setConnectionState("offline");
+  };
 }
 
 function isLivePage() {
   return appState.page === "mapping" || appState.page === "navigation";
 }
 
-function getScenePollDelay() {
-  return isLivePage() ? 350 : 1500;
-}
-
 function resetLiveScene() {
   appState.mapVersion = -1;
+  appState.planVersion = -1;
   appState.scene = {
     map: null,
-    scan: { points: [] },
+    scan: { count: 0, ranges_b64: "" },
     plan: { points: 0, points_xy: [] },
     robot_pose_map: null,
     goal_pose: null,
@@ -46,7 +82,7 @@ function updateSceneHints() {
   $("mappingHint").textContent = appState.page === "mapping" && appState.navPlacementMode === "initial"
     ? "手动重定位中：在地图上拖拽设置车体位置和朝向。"
     : hasMap
-      ? `${cameraHint}｜地图 ${map.width} × ${map.height}｜雷达点 ${appState.scene.scan?.points?.length || 0}`
+      ? `${cameraHint}｜地图 ${map.width} × ${map.height}｜雷达点 ${appState.scene.scan?.count || 0}｜画面 ${fmt(appState.stream.measuredHz, 1)} Hz`
       : "等待 `/map` 数据...";
 
   if (appState.navPlacementMode === "initial") {
@@ -55,7 +91,7 @@ function updateSceneHints() {
     $("navigationHint").textContent = "手动设置目的地中：左键拖拽方向，右键仍可旋转视图。";
   } else {
     $("navigationHint").textContent = hasMap
-      ? `${cameraHint}｜路径点 ${appState.scene.plan?.points || 0}｜雷达点 ${appState.scene.scan?.points?.length || 0}`
+      ? `${cameraHint}｜路径点 ${appState.scene.plan?.points || 0}｜雷达点 ${appState.scene.scan?.count || 0}｜画面 ${fmt(appState.stream.measuredHz, 1)} Hz`
       : "等待 `/map` 数据...";
   }
 
@@ -75,6 +111,10 @@ function renderLiveCanvases() {
     yaw_deg: appState.navDrag.yawDeg,
     label: appState.navPlacementMode === "initial" ? "初始" : "目标",
   } : null;
+  const activeMap = getActiveNavigationMap(appState.navMapName);
+  const locations = activeMap && appState.navLocationsFor === activeMap
+    ? appState.navLocations
+    : [];
 
   if (appState.page === "mapping") {
     drawScene($("mappingCanvas"), appState.scene.map, appState.scene, {
@@ -88,6 +128,8 @@ function renderLiveCanvases() {
       prefix: "live",
       showPlan: true,
       showTargets: true,
+      locations,
+      selectedLocation: $("navLocationInput")?.value.trim() || "",
       dragPose,
     });
   }
@@ -157,8 +199,10 @@ function renderNavMapPicker() {
     return;
   }
 
-  if (!appState.navMapName || !appState.savedMaps.some((item) => item.name === appState.navMapName)) {
+  const previousMap = appState.navMapName;
+  if (!previousMap || !appState.savedMaps.some((item) => item.name === previousMap)) {
     appState.navMapName = appState.savedMaps[0].name;
+    if (previousMap && previousMap !== appState.navMapName) $("navLocationInput").value = "";
   }
 
   $("navMapLabel").textContent = appState.navMapName;
@@ -166,16 +210,24 @@ function renderNavMapPicker() {
 
   appState.savedMaps.forEach((item) => {
     const btn = createInfoButton(
-      "stage-option map-option" + (item.name === appState.navMapName ? " active" : ""),
+      "nav-select-option" + (item.name === appState.navMapName ? " active" : ""),
       item.name,
       `${item.width} × ${item.height} · ${fmt(item.resolution, 3)} m/px`,
     );
     btn.type = "button";
+    btn.setAttribute("role", "option");
+    btn.setAttribute("aria-selected", String(item.name === appState.navMapName));
     btn.addEventListener("click", () => {
+      if (appState.navMapName !== item.name) {
+        $("navLocationInput").value = "";
+        appState.navLocations = [];
+        appState.navLocationsFor = "";
+      }
       appState.navMapName = item.name;
       renderNavMapPicker();
-      toggleNavMapMenu(false);
+      toggleNavSelect("navMapPanel", false);
       loadNavLocations().catch(console.error);
+      renderRuntimeControls();
     });
     box.appendChild(btn);
   });
@@ -203,17 +255,36 @@ async function loadNavLocations(force = false) {
     appState.navLocationsFor = map;
   }
   renderNavLocationList();
+  renderLiveCanvases();
 }
 
 function renderNavLocationList() {
-  const list = $("navLocationList");
+  const list = $("navLocationOptions");
+  const input = $("navLocationInput");
   if (list) {
     list.innerHTML = "";
-    appState.navLocations.forEach((loc) => {
-      const opt = document.createElement("option");
-      opt.value = loc.name;
-      list.appendChild(opt);
-    });
+    if (!appState.navLocations.length) {
+      list.innerHTML = `<div class="subtle">当前地图没有可选地点</div>`;
+    } else {
+      const selected = input.value.trim();
+      appState.navLocations.forEach((loc) => {
+        const btn = createInfoButton(
+          "nav-select-option" + (loc.name === selected ? " active" : ""),
+          loc.name,
+          `x=${fmt(loc.x, 2)} · y=${fmt(loc.y, 2)} · yaw=${fmt(loc.yaw_deg, 1)}°`,
+        );
+        btn.type = "button";
+        btn.setAttribute("role", "option");
+        btn.setAttribute("aria-selected", String(loc.name === selected));
+        btn.addEventListener("click", () => {
+          input.value = loc.name;
+          toggleNavSelect("navLocationPanel", false);
+          renderRuntimeControls();
+          renderLiveCanvases();
+        });
+        list.appendChild(btn);
+      });
+    }
   }
   const hint = $("navLocationHint");
   if (hint) {
@@ -239,6 +310,13 @@ function getRuntime(mode) {
   return appState.status?.runtime?.[mode] || { running: false, stopping: false };
 }
 
+function getActiveNavigationMap(fallback = "") {
+  const navigation = getRuntime("navigation");
+  return navigation.running && !navigation.stopping
+    ? String(navigation.launch_args?.map_file || fallback).trim()
+    : "";
+}
+
 function applyRunState(id, runtime, activeText) {
   const node = $(id);
   const text = runtime.stopping ? "结束中" : runtime.running ? activeText : "未启动";
@@ -250,6 +328,19 @@ function applyRunState(id, runtime, activeText) {
 function renderRuntimeControls() {
   const mapping = getRuntime("mapping");
   const navigation = getRuntime("navigation");
+  const activeMap = getActiveNavigationMap();
+  if (
+    activeMap
+    && activeMap !== appState.navMapName
+    && appState.savedMaps.some((item) => item.name === activeMap)
+  ) {
+    appState.navMapName = activeMap;
+    appState.navLocations = [];
+    appState.navLocationsFor = "";
+    $("navLocationInput").value = "";
+    renderNavMapPicker();
+    loadNavLocations().catch(console.error);
+  }
   const mappingBusy = mapping.running || mapping.stopping;
   const navigationBusy = navigation.running || navigation.stopping;
   const navCommandsEnabled = navigation.running && !navigation.stopping;
@@ -282,6 +373,10 @@ function renderRuntimeControls() {
   const btnNavLocation = $("btnNavLocation");
   if (navLocationInput) navLocationInput.disabled = !navCommandsEnabled;
   if (btnNavLocation) btnNavLocation.disabled = !navCommandsEnabled || !navLocationInput.value.trim();
+  if (typeof toggleNavSelect === "function") {
+    if (navigationBusy) toggleNavSelect("navMapPanel", false);
+    if (!navCommandsEnabled) toggleNavSelect("navLocationPanel", false);
+  }
 }
 
 function splitYamlComment(line) {
@@ -485,6 +580,85 @@ async function loadConfigs() {
   }
 }
 
+async function loadSystemSupervisor() {
+  try {
+    const data = await api("/api/system");
+    const state = $("systemSupervisorState");
+    state.textContent = data.managed
+      ? `start_finav.sh 正在监督当前服务 · PID ${data.pid}`
+      : "未检测到 start_finav.sh 监督进程，关闭和重启不可用";
+    state.dataset.state = data.managed ? "ok" : "error";
+    $("btnShutdownFinav").disabled = !data.managed;
+    $("btnRestartFinav").disabled = !data.managed;
+  } catch (err) {
+    const state = $("systemSupervisorState");
+    state.textContent = "监督进程状态读取失败";
+    state.dataset.state = "error";
+    $("btnShutdownFinav").disabled = true;
+    $("btnRestartFinav").disabled = true;
+  }
+}
+
+async function requestFinavPowerAction(action, button) {
+  const restarting = action === "restart";
+  const confirmed = await showAnnotationConfirmDialog({
+    title: restarting ? "重启 Finav" : "关闭 Finav",
+    message: restarting
+      ? "将停止当前建图、导航、底盘、手柄、路由和 Web 进程，随后重新启动整套 start_finav。页面会短暂断开，是否继续？"
+      : "将停止当前建图、导航、底盘、手柄、路由和 Web 进程。Jetson 系统不会关机，是否继续？",
+    confirmText: restarting ? "确认重启" : "确认关闭",
+    danger: true,
+  });
+  if (!confirmed) return;
+
+  setButtonBusy(button, true, restarting ? "正在重启…" : "正在关闭…");
+  showBlockingModal(true, restarting ? "正在重启 Finav，等待服务恢复…" : "正在关闭 Finav 服务…");
+  try {
+    await api(`/api/system/${action}`, "POST", {}, { timeoutMs: 4000 });
+    if (!restarting) {
+      setText("blockingModalText", "Finav 已收到关闭请求，本页面即将断开。");
+      return;
+    }
+    stopSceneStream();
+    await waitForFinavRecovery();
+    showBlockingModal(false);
+    setButtonBusy(button, false);
+    showToast("Finav 已完成重启", "ok");
+    loadSystemSupervisor().catch(console.error);
+    if (isLivePage()) startSceneStream();
+  } catch (err) {
+    if (restarting && !err?.status) {
+      try {
+        await waitForFinavRecovery();
+        showBlockingModal(false);
+        setButtonBusy(button, false);
+        showToast("Finav 已恢复连接", "ok");
+        loadSystemSupervisor().catch(console.error);
+        return;
+      } catch (_recoveryError) {
+        // Report the original action error below.
+      }
+    }
+    showBlockingModal(false);
+    setButtonBusy(button, false);
+    reportActionError(err, restarting ? "Finav 重启失败" : "Finav 关闭失败");
+  }
+}
+
+async function waitForFinavRecovery(timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  await new Promise((resolve) => window.setTimeout(resolve, 1200));
+  while (Date.now() < deadline) {
+    try {
+      await api(`/api/health?t=${Date.now()}`, "GET", null, { timeoutMs: 1500 });
+      return;
+    } catch (_err) {
+      await new Promise((resolve) => window.setTimeout(resolve, 800));
+    }
+  }
+  throw new Error("30 秒内未检测到 Finav 服务恢复");
+}
+
 function showConfigOverview() {
   $("configOverview").classList.remove("hidden");
   $("configEditorView").classList.add("hidden");
@@ -530,10 +704,8 @@ async function saveConfigEditor() {
     appState.configEditor.content = content;
     appState.configEditor.impact = data.impact || appState.configEditor.impact;
     await loadConfigs();
-    if (appState.configEditor.name === "base_control.yaml" && typeof loadTeleopConfig === "function") {
-      await loadTeleopConfig();
-    }
     setConfigSaveNotice("保存成功", "ok");
+    showToast("配置已保存", "ok");
   } catch (err) {
     reportActionError(err, "配置保存失败");
     setConfigSaveNotice("保存失败", "error");
@@ -552,6 +724,7 @@ async function restartRuntimeTarget(mode, button) {
       renderRuntimeControls();
     }
     setConfigRestartNotice("已请求重启", "ok");
+    showToast("底盘控制重启请求已发送", "ok");
   } catch (err) {
     reportActionError(err, "重启失败");
     setConfigRestartNotice("重启失败", "error");
@@ -561,7 +734,9 @@ async function restartRuntimeTarget(mode, button) {
   }
 }
 
-async function startRuntime(mode, options = {}) {
+async function startRuntime(mode) {
+  const button = mode === "mapping" ? $("btnStartMapping") : $("btnStartNavigation");
+  setButtonBusy(button, true, "启动中…");
   try {
     if (mode === "navigation" && !appState.savedMaps.length) {
       await loadSavedMaps();
@@ -576,8 +751,12 @@ async function startRuntime(mode, options = {}) {
       appState.status = { ...(appState.status || {}), runtime: data.runtime };
       renderRuntimeControls();
     }
+    showToast(mode === "mapping" ? "建图启动请求已发送" : "导航启动请求已发送", "ok");
   } catch (err) {
     reportActionError(err, "运行启动失败");
+  } finally {
+    setButtonBusy(button, false);
+    renderRuntimeControls();
   }
 }
 
@@ -592,11 +771,12 @@ async function stopRuntime(mode, options = {}) {
       resetLiveScene();
       renderLiveCanvases();
       updateSceneHints();
+      showToast(mode === "mapping" ? "建图会话已结束" : "导航会话已结束", "ok");
     } catch (err) {
       reportActionError(err, "运行停止失败");
     }
   };
-  if (options.showModal) await withBlockingModal(run);
+  if (options.showModal) await withBlockingModal(run, mode === "mapping" ? "正在结束建图进程…" : "正在结束导航进程…");
   else await run();
 }
 
@@ -612,11 +792,15 @@ async function loadSavedMaps() {
       appState.previewAnnotationMode = false;
       appState.previewAnnotationDraft = null;
       appState.navMapName = "";
+      appState.navLocations = [];
+      appState.navLocationsFor = "";
+      $("navLocationInput").value = "";
       $("previewTitle").textContent = "地图预览";
       $("previewMeta").textContent = "从 `maps/` 目录读取 `.pgm` 与 `.yaml`";
       renderMapList();
       renderPreviewLocationList();
       renderNavMapPicker();
+      renderNavLocationList();
       renderPreviewCanvas();
       return;
     }
@@ -656,6 +840,7 @@ async function deleteSelectedPreviewMap() {
       appState.previewAnnotationDraft = null;
     }
     await loadSavedMaps();
+    showToast(`地图“${name}”已删除`, "ok");
   } catch (err) {
     reportActionError(err, "地图删除失败");
   }
@@ -677,7 +862,7 @@ async function loadPreviewMap(name, rerenderList = true) {
     renderPreviewLocationList();
     renderPreviewCanvas();
   } catch (err) {
-    console.error(err);
+    reportActionError(err, "地图预览加载失败");
   }
 }
 
@@ -737,6 +922,7 @@ async function savePreviewLocations() {
       appState.navLocationsFor = "";
       loadNavLocations(true).catch(console.error);
     }
+    showToast("地点标注已保存", "ok");
   } catch (err) {
     reportActionError(err, "地点保存失败");
   } finally {

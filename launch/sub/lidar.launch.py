@@ -42,7 +42,6 @@ def _load_branch(data, key, defaults):
         ),
         "start_angle": float(branch.get("start_angle", defaults["start_angle"])),
         "end_angle": float(branch.get("end_angle", defaults["end_angle"])),
-        "offset_angle": float(branch.get("offset_angle", defaults["offset_angle"])),
         "shadows_filter_level": int(
             branch.get("shadows_filter_level", defaults["shadows_filter_level"])
         ),
@@ -101,7 +100,6 @@ def _load_lidar_config():
         "noise_filter_level": 1,
         "start_angle": 0.0,
         "end_angle": 0.0,
-        "offset_angle": 0.0,
         "shadows_filter_level": 0,
         "disturb_filter_enable": False,
     }
@@ -159,7 +157,6 @@ def _driver_parameters(cfg, scanner_ip):
         "noise_filter_level": int(cfg["noise_filter_level"]),
         "start_angle": float(cfg["start_angle"]),
         "end_angle": float(cfg["end_angle"]),
-        "offset_angle": float(cfg["offset_angle"]),
         "shadows_filter_level": int(cfg["shadows_filter_level"]),
         "disturb_filter_enable": bool(cfg["disturb_filter_enable"]),
     }

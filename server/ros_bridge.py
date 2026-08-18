@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
+import base64
 import math
 import queue
 import subprocess
+import sys
 import threading
 import time
+import zlib
+from array import array
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from state_store import StateStore
 
@@ -14,11 +18,6 @@ class RosBridge:
     def __init__(self, state_store: StateStore) -> None:
         self.state_store = state_store
         self._cmd_q: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=200)
-        self._teleop_lock = threading.Lock()
-        self._teleop_linear = 0.0
-        self._teleop_angular = 0.0
-        self._teleop_active = False
-        self._teleop_stop_pending = False
         self._thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
@@ -32,41 +31,6 @@ class RosBridge:
             self._cmd_q.put_nowait(payload)
         except queue.Full:
             self.state_store.add_event("warn", "command queue full, drop command", payload)
-
-    def set_teleop_state(self, linear_x: float, angular_z: float) -> None:
-        with self._teleop_lock:
-            self._teleop_linear = float(linear_x)
-            self._teleop_angular = float(angular_z)
-            self._teleop_active = abs(self._teleop_linear) > 1e-6 or abs(self._teleop_angular) > 1e-6
-            self._teleop_stop_pending = not self._teleop_active
-
-        self.state_store.update_status(
-            {
-                "teleop": {
-                    "active": self._teleop_active,
-                    "timeout_at": None,
-                }
-            }
-        )
-
-    def stop_teleop(self) -> None:
-        with self._teleop_lock:
-            self._teleop_linear = 0.0
-            self._teleop_angular = 0.0
-            self._teleop_active = False
-            self._teleop_stop_pending = True
-
-        self.state_store.update_status({"teleop": {"active": False, "timeout_at": None}})
-
-    def take_teleop_state(self) -> Tuple[float, float, bool, bool]:
-        with self._teleop_lock:
-            linear = self._teleop_linear
-            angular = self._teleop_angular
-            active = self._teleop_active
-            stop_pending = self._teleop_stop_pending
-            if stop_pending:
-                self._teleop_stop_pending = False
-            return linear, angular, active, stop_pending
 
     def _run(self) -> None:
         try:
@@ -168,11 +132,11 @@ class _BridgeNode:
         }
         self._last_tick = time.monotonic()
         self._last_seen: Dict[str, float] = {}
-        self._last_map_stamp: Optional[Tuple[int, int]] = None
+        self._last_map_signature: Optional[Tuple[object, ...]] = None
+        self._next_web_scan_at = 0.0
 
         self._joystick_active = False
 
-        self.create_timer(0.02, lambda: _BridgeNode._publish_web_teleop(self))
         self.create_timer(0.02, lambda: _BridgeNode._process_commands(self))
         self.create_timer(0.25, lambda: _BridgeNode._refresh_pose_map(self))
         self.create_timer(1.0, lambda: _BridgeNode._publish_metrics(self))
@@ -201,11 +165,25 @@ class _BridgeNode:
 
     @staticmethod
     def _on_map(self: Any, msg: Any) -> None:
-        stamp = (int(msg.header.stamp.sec), int(msg.header.stamp.nanosec))
-        if self._last_map_stamp == stamp:
-            return
-        self._last_map_stamp = stamp
         _BridgeNode._touch(self, "map")
+
+        try:
+            raw_map = bytes(msg.data)
+        except (TypeError, ValueError):
+            raw_map = array("b", (int(value) for value in msg.data)).tobytes()
+        origin_yaw = round(math.degrees(_BridgeNode._yaw_from_quat(msg.info.origin.orientation)), 2)
+        signature = (
+            int(msg.info.width),
+            int(msg.info.height),
+            round(float(msg.info.resolution), 9),
+            round(float(msg.info.origin.position.x), 6),
+            round(float(msg.info.origin.position.y), 6),
+            origin_yaw,
+            zlib.crc32(raw_map),
+        )
+        if self._last_map_signature == signature:
+            return
+        self._last_map_signature = signature
 
         self.state_store.update_scene(
             {
@@ -218,10 +196,11 @@ class _BridgeNode:
                     "origin": {
                         "x": float(msg.info.origin.position.x),
                         "y": float(msg.info.origin.position.y),
-                        "yaw_deg": round(math.degrees(_BridgeNode._yaw_from_quat(msg.info.origin.orientation)), 2),
+                        "yaw_deg": origin_yaw,
                     },
                     "updated_at": time.time(),
-                    "data": [int(x) for x in msg.data],
+                    "encoding": "int8-base64",
+                    "data_b64": base64.b64encode(raw_map).decode("ascii"),
                 }
             },
             map_changed=True,
@@ -261,7 +240,10 @@ class _BridgeNode:
             "updated_at": time.time(),
         }
         self.state_store.update_status({"robot": {"plan": plan_status}})
-        self.state_store.update_scene({"plan": {**plan_status, "points_xy": [[x, y] for x, y in points]}})
+        self.state_store.update_scene(
+            {"plan": {**plan_status, "points_xy": [[x, y] for x, y in points]}},
+            plan_changed=True,
+        )
 
     @staticmethod
     def _lookup_pose_in_map(self: Any, frame_id: str) -> Optional[Tuple[float, float, float]]:
@@ -283,33 +265,49 @@ class _BridgeNode:
         self._counts["scan"] += 1
         _BridgeNode._touch(self, "scan")
 
-        pose_in_map = _BridgeNode._lookup_pose_in_map(self, msg.header.frame_id or "base_link")
-        points: List[List[float]] = []
+        # Web visualization is the only consumer of this transformed payload.
+        # Keep topic metrics alive, but avoid TF work and allocations when no
+        # mapping/navigation page has an active stream.
+        stream_hz = self.state_store.live_stream_hz()
+        if stream_hz <= 0:
+            return
+        now = time.monotonic()
+        interval = 1.0 / stream_hz
+        if now - self._next_web_scan_at > interval:
+            self._next_web_scan_at = now
+        if now < self._next_web_scan_at:
+            return
+        self._next_web_scan_at += interval
 
-        if pose_in_map is not None:
-            base_x, base_y, base_yaw = pose_in_map
-            cos_yaw = math.cos(base_yaw)
-            sin_yaw = math.sin(base_yaw)
-            step = max(1, len(msg.ranges) // 720)
-            for i in range(0, len(msg.ranges), step):
-                r = float(msg.ranges[i])
-                if not math.isfinite(r) or r < msg.range_min or r > msg.range_max:
-                    continue
-                angle = float(msg.angle_min + i * msg.angle_increment)
-                local_x = r * math.cos(angle)
-                local_y = r * math.sin(angle)
-                world_x = base_x + local_x * cos_yaw - local_y * sin_yaw
-                world_y = base_y + local_x * sin_yaw + local_y * cos_yaw
-                points.append([round(world_x, 4), round(world_y, 4)])
+        pose_in_map = _BridgeNode._lookup_pose_in_map(self, msg.header.frame_id or "base_link")
+        step = max(1, len(msg.ranges) // 720)
+        packed_ranges = array("H")
+        for i in range(0, len(msg.ranges), step):
+            distance = float(msg.ranges[i])
+            if not math.isfinite(distance) or distance < msg.range_min or distance > msg.range_max:
+                packed_ranges.append(0)
+            else:
+                packed_ranges.append(max(1, min(65535, int(round(distance * 1000.0)))))
+        if sys.byteorder != "little":
+            packed_ranges.byteswap()
+
+        pose_payload = _BridgeNode._pose_dict(*pose_in_map) if pose_in_map is not None else None
+        if pose_payload is not None:
+            self.state_store.update_status({"robot": {"pose_map": pose_payload}})
 
         self.state_store.update_scene(
             {
                 "scan": {
-                    "frame_id": "map",
+                    "frame_id": msg.header.frame_id or "base_link",
                     "updated_at": time.time(),
-                    "pose_map": _BridgeNode._pose_dict(*pose_in_map) if pose_in_map is not None else None,
-                    "points": points,
-                }
+                    "pose_map": pose_payload,
+                    "encoding": "uint16-mm-base64",
+                    "angle_min": float(msg.angle_min),
+                    "angle_increment": float(msg.angle_increment) * step,
+                    "count": len(packed_ranges),
+                    "ranges_b64": base64.b64encode(packed_ranges.tobytes()).decode("ascii"),
+                },
+                "robot_pose_map": pose_payload,
             }
         )
 
@@ -331,9 +329,9 @@ class _BridgeNode:
         _BridgeNode._touch(self, "js_state")
         self.state_store.update_status(
             {
-                "teleop": {
-                    "joystick_active": False,
-                    "joystick_online": self._joystick_active,
+                "control": {
+                    "joystick_active": self._joystick_active,
+                    "joystick_online": True,
                     "joystick_updated_at": time.time(),
                 }
             }
@@ -353,17 +351,6 @@ class _BridgeNode:
         msg = self.Twist()
         msg.linear.x = 0.0
         msg.angular.z = 0.0
-        self.pub_web_cmd.publish(msg)
-
-    @staticmethod
-    def _publish_web_teleop(self: Any) -> None:
-        linear, angular, active, stop_pending = self.bridge.take_teleop_state()
-        if not active and not stop_pending:
-            return
-
-        msg = self.Twist()
-        msg.linear.x = linear
-        msg.angular.z = angular
         self.pub_web_cmd.publish(msg)
 
     @staticmethod
@@ -435,11 +422,13 @@ class _BridgeNode:
             _BridgeNode._save_map(self, name)
 
         elif ctype == "cancel_nav":
-            self.bridge.stop_teleop()
             _BridgeNode._publish_web_stop(self)
             self.pub_nav_clear.publish(self.Empty())
             self.state_store.update_status({"robot": {"goal_pose": None, "plan": {"points": 0, "length_m": 0.0, "updated_at": time.time()}}})
-            self.state_store.update_scene({"goal_pose": None, "plan": {"points": 0, "length_m": 0.0, "points_xy": [], "updated_at": time.time()}})
+            self.state_store.update_scene(
+                {"goal_pose": None, "plan": {"points": 0, "length_m": 0.0, "points_xy": [], "updated_at": time.time()}},
+                plan_changed=True,
+            )
             _BridgeNode._event(self, "info", "navigation state cleared and robot stopped")
 
         elif ctype == "nav_to_location":
@@ -485,7 +474,7 @@ class _BridgeNode:
 
         self.state_store.update_status(
             {
-                "teleop": {
+                "control": {
                     "joystick_active": self._joystick_active if joystick_online else False,
                     "joystick_online": joystick_online,
                 },

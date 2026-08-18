@@ -37,10 +37,10 @@
   <xacro:property name="imu_z" value="0.2"/>
 
   <xacro:property name="laser_z" value="0.35"/>
-  <xacro:property name="laser_dual_x" value="0.535"/>
-  <xacro:property name="laser_dual_y" value="0.2625"/>
-  <xacro:property name="laser_left_yaw" value="${-45 * pi/180}"/>
-  <xacro:property name="laser_right_yaw" value="${-137 * pi/180}"/>
+  <xacro:property name="laser_dual_x" value="0.59"/>
+  <xacro:property name="laser_dual_y" value="0.276"/>
+  <xacro:property name="laser_left_yaw" value="${90 * pi/180}"/>
+  <xacro:property name="laser_right_yaw" value="${-90 * pi/180}"/>
   <xacro:property name="laser_size" value="0.10"/>
   <xacro:property name="laser_mass" value="0.6"/>
 

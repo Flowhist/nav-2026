@@ -1,175 +1,3 @@
-function syncTeleopStage() {
-  const idx = appState.teleop.stageIndex;
-  const meta = stageMeta[idx] || { label: `${idx + 1}档`, desc: "", speed: appState.teleop.speedStages[idx] || 0 };
-  $("speedStageLabel").textContent = `${meta.label} · ${meta.speed.toFixed(2)} m/s · ${appState.teleop.angularSpeed.toFixed(2)} rad/s`;
-  document.querySelectorAll("#stagePanel .stage-option").forEach((btn) => {
-    const stageIndex = Number(btn.dataset.stage);
-    const stage = stageMeta[stageIndex] || { label: `${stageIndex + 1}档`, desc: "", speed: appState.teleop.speedStages[stageIndex] || 0 };
-    btn.classList.toggle("active", stageIndex === idx);
-    const descNode = btn.querySelector("span");
-    if (descNode) {
-      descNode.textContent = `${stage.desc} · ${stage.speed.toFixed(2)} m/s · ${appState.teleop.angularSpeed.toFixed(2)} rad/s`;
-    }
-  });
-}
-
-function syncTeleopButtons() {
-  const current = appState.teleop.currentCommand || "stop";
-  document.querySelectorAll(".teleop-btn").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.cmd === current);
-  });
-}
-
-function syncTeleopAvailability() {
-  const joystickActive = !!appState.status?.teleop?.joystick_active;
-  const enabled = !!appState.teleop.keyboardEnabled && !joystickActive;
-  const panel = $("teleopPanel");
-  const blocker = $("teleopBlocker");
-
-  panel?.classList.toggle("teleop-locked", joystickActive);
-  blocker?.classList.toggle("hidden", !joystickActive);
-  if ($("teleopToggle")) $("teleopToggle").disabled = joystickActive;
-  if ($("speedStageToggle")) $("speedStageToggle").disabled = joystickActive;
-  document.querySelectorAll("#stagePanel .stage-option").forEach((btn) => {
-    btn.disabled = joystickActive;
-  });
-  document.querySelectorAll(".teleop-btn").forEach((btn) => {
-    btn.disabled = !enabled;
-  });
-  if (joystickActive) {
-    toggleStageMenu(false);
-    stopTeleop(false);
-  }
-}
-
-async function applyTeleopCommand(kind, options = {}) {
-  const { force = false } = options;
-  const command = kind || "stop";
-  if (!force && appState.teleop.currentCommand === command) return;
-
-  appState.teleop.currentCommand = command;
-  syncTeleopButtons();
-
-  if (command === "stop") {
-    await api("/api/teleop/stop", "POST", {});
-    return;
-  }
-
-  const [lin, ang] = resolveTeleopCommand(command);
-  await api("/api/teleop/state", "POST", {
-    command,
-    linear_x: lin,
-    angular_z: ang,
-  });
-}
-
-function stopTeleop(sendStop = true) {
-  appState.teleop.currentCommand = "stop";
-  syncTeleopButtons();
-  if (sendStop) api("/api/teleop/stop", "POST", {}).catch(console.error);
-}
-
-function sendTeleopStopBeacon() {
-  if (!navigator.sendBeacon) return;
-  const body = new Blob(["{}"], { type: "application/json" });
-  navigator.sendBeacon("/api/teleop/stop", body);
-}
-
-function resolveTeleopCommand(kind) {
-  const linear = appState.teleop.speedStages[appState.teleop.stageIndex] || 0;
-  const angular = appState.teleop.angularSpeed || 0;
-  const mapping = {
-    forward: [linear, 0],
-    backward: [-linear, 0],
-    left: [0, angular],
-    right: [0, -angular],
-    stop: [0, 0],
-  };
-  return mapping[kind] || [0, 0];
-}
-
-async function loadTeleopConfig() {
-  try {
-    const data = await api("/api/configs/base_control.yaml");
-    const content = String(data.content || "");
-    const angMatch = content.match(/^\s*keyboard_angular_speed\s*:\s*([0-9]+(?:\.[0-9]+)?)/m);
-    if (angMatch) {
-      const value = Number(angMatch[1]);
-      if (Number.isFinite(value) && value > 0) {
-        appState.teleop.angularSpeed = value;
-      }
-    }
-
-    const speedMatch = content.match(/^\s*keyboard_linear_speeds\s*:\s*\[([^\]]+)\]/m);
-    if (speedMatch) {
-      const speeds = speedMatch[1]
-        .split(",")
-        .map((item) => Number(item.trim()))
-        .filter((item) => Number.isFinite(item) && item > 0);
-      if (speeds.length) {
-        appState.teleop.speedStages = speeds;
-        appState.teleop.stageIndex = Math.min(appState.teleop.stageIndex, speeds.length - 1);
-      }
-    }
-  } catch (err) {
-    console.error(err);
-  }
-  syncTeleopStage();
-}
-
-function setKeyboardTeleop(enabled, options = {}) {
-  const { sendStop = true } = options;
-  if (enabled && appState.status?.teleop?.joystick_active) {
-    enabled = false;
-  }
-  appState.teleop.keyboardEnabled = enabled;
-  $("teleopToggle").classList.toggle("active", enabled);
-  $("teleopToggle").textContent = enabled ? "关闭" : "开启";
-  $("teleopHint").textContent = enabled
-    ? "开启状态\n输入一次持续运动，W/A/S/D 移动，Space 急停，J/K 调整前进档位"
-    : "关闭状态\n开启后可用 W/A/S/D、Space、J/K 控制";
-  if (!enabled) stopTeleop(sendStop);
-  syncTeleopAvailability();
-  if (!appState.status?.teleop?.joystick_active) renderStatus(appState.status);
-}
-
-function handleKeyboardTeleop(event) {
-  if (!appState.teleop.keyboardEnabled || appState.status?.teleop?.joystick_active) return;
-  if (event.target && ["INPUT", "TEXTAREA"].includes(event.target.tagName)) return;
-
-  const key = event.key.toLowerCase();
-  if (key === "w") {
-    event.preventDefault();
-    applyTeleopCommand("forward").catch(console.error);
-  } else if (key === "s") {
-    event.preventDefault();
-    applyTeleopCommand("backward").catch(console.error);
-  } else if (key === "a") {
-    event.preventDefault();
-    applyTeleopCommand("left").catch(console.error);
-  } else if (key === "d") {
-    event.preventDefault();
-    applyTeleopCommand("right").catch(console.error);
-  } else if (key === " ") {
-    event.preventDefault();
-    applyTeleopCommand("stop", { force: true }).catch(console.error);
-  } else if (key === "j") {
-    event.preventDefault();
-    appState.teleop.stageIndex = clamp(appState.teleop.stageIndex - 1, 0, appState.teleop.speedStages.length - 1);
-    syncTeleopStage();
-    if (["forward", "backward"].includes(appState.teleop.currentCommand)) {
-      applyTeleopCommand(appState.teleop.currentCommand, { force: true }).catch(console.error);
-    }
-  } else if (key === "k") {
-    event.preventDefault();
-    appState.teleop.stageIndex = clamp(appState.teleop.stageIndex + 1, 0, appState.teleop.speedStages.length - 1);
-    syncTeleopStage();
-    if (["forward", "backward"].includes(appState.teleop.currentCommand)) {
-      applyTeleopCommand(appState.teleop.currentCommand, { force: true }).catch(console.error);
-    }
-  }
-}
-
 function setNavPlacementMode(mode) {
   appState.navPlacementMode = mode;
   $("btnArmInit").classList.toggle("active", mode === "initial");
@@ -273,8 +101,9 @@ async function finishNavDrag(event) {
 
   try {
     await api(endpoint, "POST", body);
+    showToast(appState.navPlacementMode === "initial" ? "初始位姿已发送" : "导航目标已发送", "ok");
   } catch (err) {
-    console.error(err);
+    reportActionError(err, "位姿指令发送失败");
   } finally {
     setNavPlacementMode(null);
     renderLiveCanvases();
@@ -574,18 +403,20 @@ function toggleHelp(helpId) {
   });
 }
 
-function toggleStageMenu(force) {
-  const panel = $("stagePanel");
+function toggleNavSelect(panelId, force) {
+  const panel = $(panelId);
+  if (!panel) return;
   const shouldOpen = typeof force === "boolean" ? force : !panel.classList.contains("open");
-  panel.classList.toggle("open", shouldOpen);
-  $("speedStageToggle").setAttribute("aria-expanded", String(shouldOpen));
-}
-
-function toggleNavMapMenu(force) {
-  const panel = $("navMapPanel");
-  const shouldOpen = typeof force === "boolean" ? force : !panel.classList.contains("open");
-  panel.classList.toggle("open", shouldOpen);
-  $("navMapToggle").setAttribute("aria-expanded", String(shouldOpen));
+  if (shouldOpen) {
+    document.querySelectorAll(".nav-select").forEach((item) => {
+      const open = item === panel;
+      item.classList.toggle("open", open);
+      $(item.dataset.control)?.setAttribute("aria-expanded", String(open));
+    });
+  } else {
+    panel.classList.remove("open");
+    $(panel.dataset.control)?.setAttribute("aria-expanded", "false");
+  }
 }
 
 function confirmPageSwitchStop(mode, page) {
@@ -593,7 +424,9 @@ function confirmPageSwitchStop(mode, page) {
   const target = { mapping: "建图", navigation: "导航", preview: "地图预览", configs: "配置文件" }[page] || page;
   return showAnnotationConfirmDialog({
     title: `结束${label}会话`,
-    message: `切换到“${target}”会先结束当前${label}会话，是否继续？`,
+    message: mode === "mapping"
+      ? `切换到“${target}”会结束当前建图，且不会自动保存地图。确认已经保存并继续？`
+      : `切换到“${target}”会先结束当前导航会话，是否继续？`,
     confirmText: "继续切换",
     danger: true,
   });
@@ -614,6 +447,8 @@ async function setPage(page) {
   }
 
   appState.page = page;
+  toggleNavSelect("navMapPanel", false);
+  toggleNavSelect("navLocationPanel", false);
   document.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.page === page);
   });
@@ -621,13 +456,30 @@ async function setPage(page) {
     node.classList.toggle("active", node.id === `page-${page}`);
   });
   $("statusDock").classList.toggle("hidden", page === "preview" || page === "configs");
+  if (!isLivePage()) setStatusExpanded(false);
   if (page === "preview") loadSavedMaps().catch(console.error);
   if (page === "navigation" && !appState.savedMaps.length) loadSavedMaps().catch(console.error);
   if (page === "configs") {
     showConfigOverview();
     loadConfigs().catch(console.error);
+    loadSystemSupervisor().catch(console.error);
   }
+  if (isLivePage() && $("statusDock").classList.contains("collapsed")) startSceneStream();
+  else stopSceneStream();
   renderCurrentPageCanvases();
+}
+
+function setStatusExpanded(expanded) {
+  const dock = $("statusDock");
+  dock.classList.toggle("collapsed", !expanded);
+  $("statusToggle").setAttribute("aria-expanded", String(expanded));
+  $("dockToggleText").textContent = expanded ? "收起" : "展开";
+  if (expanded) {
+    stopSceneStream();
+    if (appState.dockView !== "events") loadRuntimeLog(appState.dockView).catch(console.error);
+  } else if (isLivePage()) {
+    startSceneStream();
+  }
 }
 
 function bind() {
@@ -639,52 +491,53 @@ function bind() {
     btn.addEventListener("click", () => toggleHelp(btn.dataset.help));
   });
 
-  $("speedStageToggle").addEventListener("click", () => toggleStageMenu());
   $("navMapToggle").addEventListener("click", () => {
-    loadSavedMaps().catch(console.error);
-    toggleNavMapMenu();
+    if (!appState.savedMaps.length) loadSavedMaps().catch(console.error);
+    toggleNavSelect("navMapPanel");
   });
-  document.querySelectorAll(".stage-option").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      appState.teleop.stageIndex = Number(btn.dataset.stage);
-      syncTeleopStage();
-      toggleStageMenu(false);
-      if (["forward", "backward"].includes(appState.teleop.currentCommand)) {
-        applyTeleopCommand(appState.teleop.currentCommand, { force: true }).catch(console.error);
-      }
-    });
-  });
-
   document.addEventListener("click", (event) => {
     if (event.target.closest(".help-wrap")) return;
     document.querySelectorAll(".map-help").forEach((panel) => panel.classList.add("hidden"));
-    if (!event.target.closest("#stagePanel")) toggleStageMenu(false);
-    if (!event.target.closest("#navMapPanel")) toggleNavMapMenu(false);
+    if (!event.target.closest("#navMapPanel")) toggleNavSelect("navMapPanel", false);
+    if (!event.target.closest("#navLocationPanel")) toggleNavSelect("navLocationPanel", false);
   });
 
-  $("teleopToggle").addEventListener("click", () => setKeyboardTeleop(!appState.teleop.keyboardEnabled));
   $("btnStartMapping").addEventListener("click", () => startRuntime("mapping").catch(console.error));
-  $("btnStopMapping").addEventListener("click", () => stopRuntime("mapping", { showModal: true }).catch(console.error));
+  $("btnStopMapping").addEventListener("click", async () => {
+    const confirmed = await showAnnotationConfirmDialog({
+      title: "结束建图",
+      message: "结束建图不会自动保存地图。确认已经保存所需地图并结束当前会话？",
+      confirmText: "结束建图",
+      danger: true,
+    });
+    if (confirmed) await stopRuntime("mapping", { showModal: true });
+  });
   $("btnStartNavigation").addEventListener("click", () => startRuntime("navigation").catch(console.error));
-  $("btnStopNavigation").addEventListener("click", () => stopRuntime("navigation", { showModal: true }).catch(console.error));
+  $("btnStopNavigation").addEventListener("click", async () => {
+    const confirmed = await showAnnotationConfirmDialog({
+      title: "结束导航",
+      message: "将停止当前导航链路并清理目标与路径状态，是否继续？",
+      confirmText: "结束导航",
+      danger: true,
+    });
+    if (confirmed) await stopRuntime("navigation", { showModal: true });
+  });
   $("btnSaveMap").addEventListener("click", async () => {
+    const button = $("btnSaveMap");
     try {
       const mapping = getRuntime("mapping");
       const name = await showMapSaveDialog(mapping.launch_args?.map_file || "manual_map");
       if (!name) return;
+      setButtonBusy(button, true, "保存中…");
       await api("/api/map/save", "POST", { name });
       window.setTimeout(() => loadSavedMaps().catch(console.error), 1800);
       showToast("已请求保存地图", "ok");
     } catch (err) {
       reportActionError(err, "地图保存失败");
+    } finally {
+      setButtonBusy(button, false);
+      renderRuntimeControls();
     }
-  });
-
-  document.querySelectorAll(".teleop-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (!appState.teleop.keyboardEnabled || appState.status?.teleop?.joystick_active) return;
-      applyTeleopCommand(btn.dataset.cmd, { force: btn.dataset.cmd === "stop" }).catch(console.error);
-    });
   });
 
   $("btnArmInit").addEventListener("click", () => setNavPlacementMode(appState.navPlacementMode === "initial" ? null : "initial"));
@@ -699,6 +552,7 @@ function bind() {
         appState.status = { ...(appState.status || {}), runtime: data.runtime };
         renderRuntimeControls();
       }
+      showToast("自动重定位已开始", "ok");
     } catch (err) {
       reportActionError(err, "重定位失败");
     }
@@ -709,6 +563,7 @@ function bind() {
       appState.navDrag = null;
       await api("/api/nav/cancel", "POST", {});
       renderLiveCanvases();
+      showToast("已发送停止导航指令", "ok");
     } catch (err) {
       reportActionError(err, "导航取消失败");
     }
@@ -718,27 +573,42 @@ function bind() {
     const input = $("navLocationInput");
     const name = (input.value || "").trim();
     if (!name) return;
+    toggleNavSelect("navLocationPanel", false);
     try {
       await api("/api/nav/location", "POST", { name });
+      showToast(`已发送地点“${name}”`, "ok");
     } catch (err) {
       reportActionError(err, "地点导航失败");
     }
   };
   $("btnNavLocation").addEventListener("click", () => sendNavLocation());
-  $("navLocationInput").addEventListener("keydown", (event) => {
+  const navLocationInput = $("navLocationInput");
+  const showAllNavLocations = () => {
+    renderNavLocationList();
+    toggleNavSelect("navLocationPanel", true);
+  };
+  navLocationInput.addEventListener("focus", showAllNavLocations);
+  navLocationInput.addEventListener("click", showAllNavLocations);
+  navLocationInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
       sendNavLocation();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      toggleNavSelect("navLocationPanel", false);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      showAllNavLocations();
     }
   });
-  $("navLocationInput").addEventListener("input", () => renderRuntimeControls());
-
-  $("statusToggle").addEventListener("click", () => {
-    const dock = $("statusDock");
-    const collapsed = dock.classList.toggle("collapsed");
-    $("statusToggle").setAttribute("aria-expanded", String(!collapsed));
-    $("dockToggleText").textContent = collapsed ? "展开" : "收起";
+  navLocationInput.addEventListener("input", () => {
+    renderNavLocationList();
+    renderRuntimeControls();
+    renderLiveCanvases();
   });
+
+  $("statusToggle").addEventListener("click", () => setStatusExpanded($("statusDock").classList.contains("collapsed")));
+  $("statusClose").addEventListener("click", () => setStatusExpanded(false));
 
   document.querySelectorAll(".dock-tab").forEach((btn) => {
     btn.addEventListener("click", () => setDockView(btn.dataset.logView));
@@ -760,6 +630,8 @@ function bind() {
     setConfigSaveNotice("");
   });
   $("configEditor").addEventListener("scroll", syncConfigEditorScroll);
+  $("btnRestartFinav").addEventListener("click", (event) => requestFinavPowerAction("restart", event.currentTarget));
+  $("btnShutdownFinav").addEventListener("click", (event) => requestFinavPowerAction("shutdown", event.currentTarget));
 
   bindCanvasInteractions("mappingCanvas", { allowPlacement: true });
   bindCanvasInteractions("navigationCanvas", { allowPlacement: true });
@@ -783,25 +655,18 @@ function bind() {
     finishPreviewAnnotationDrag(event).catch(console.error);
   });
 
-  window.addEventListener("keydown", handleKeyboardTeleop);
   window.addEventListener("resize", () => {
     renderCurrentPageCanvases();
   });
-  window.addEventListener("blur", () => {
-    if (appState.teleop.keyboardEnabled) stopTeleop(true);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopSceneStream();
+    else if (isLivePage() && $("statusDock").classList.contains("collapsed")) startSceneStream();
   });
-  window.addEventListener("pagehide", () => {
-    if (appState.teleop.keyboardEnabled) sendTeleopStopBeacon();
-  });
+  window.addEventListener("pagehide", stopSceneStream);
 
-  syncTeleopStage();
-  syncTeleopButtons();
-  setKeyboardTeleop(false);
-  syncTeleopAvailability();
   updateSceneHints();
   renderDockStream();
   renderRuntimeControls();
-  loadTeleopConfig().catch(console.error);
   loadSavedMaps().catch(console.error);
   setPage("mapping").catch(console.error);
 }
@@ -810,4 +675,3 @@ bind();
 pollStatus();
 pollEvents();
 pollDockLogs();
-pollScene();

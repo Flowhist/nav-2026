@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">Finav Web Console</p>
         <h1>建图与导航控制台</h1>
-        <p class="subtle">桌面端工作台：实时地图、雷达、网页键控与地图预览</p>
+        <p class="subtle">桌面端工作台：实时地图、雷达、导航任务与运行诊断</p>
       </div>
       <nav class="tabs" aria-label="页面切换">
         <button class="tab active" data-page="mapping">建图</button>
@@ -20,6 +20,10 @@
         <button class="tab" data-page="preview">地图预览</button>
         <button class="tab" data-page="configs">配置文件</button>
       </nav>
+      <div id="connectionBadge" class="connection-badge pending" role="status">
+        <span class="connection-dot"></span>
+        <span id="connectionBadgeText">正在连接</span>
+      </div>
     </header>
 
     <main class="workspace">
@@ -66,57 +70,15 @@
               <div class="mapping-session-section">
                 <h4>新建地图</h4>
                 <button id="btnStartMapping" class="primary wide">开始建图</button>
+                <p class="action-help">启动前请确认雷达、里程计和 TF 数据正常。建图过程中可随时打开底部状态中心检查数据链路。</p>
               </div>
               <div class="mapping-session-section">
                 <h4>保存地图</h4>
                 <button id="btnSaveMap" class="primary wide">保存地图</button>
                 <button id="btnStopMapping" class="danger wide">结束建图</button>
+                <p class="action-help">结束建图不会自动保存；尚未保存时请先执行“保存地图”。</p>
               </div>
             </section>
-
-            <section id="teleopPanel" class="glass panel teleop-panel">
-              <div class="panel-head">
-                <h3>网页键盘控制</h3>
-                <button id="teleopToggle" class="toggle-btn">开启</button>
-              </div>
-              <p id="teleopHint" class="subtle">关闭状态。开启后可用 `W/A/S/D`、`Space`、`J/K` 控制；角速度固定读取 `config/base_control.yaml`。</p>
-              <div class="dpad">
-                <button class="teleop-btn up" data-cmd="forward">前进</button>
-                <button class="teleop-btn left" data-cmd="left">左转</button>
-                <button class="teleop-btn stop danger" data-cmd="stop">急停</button>
-                <button class="teleop-btn right" data-cmd="right">右转</button>
-                <button class="teleop-btn down" data-cmd="backward">后退</button>
-              </div>
-              <div id="stagePanel" class="stage-panel">
-                <button id="speedStageToggle" class="speed-stage" type="button" aria-expanded="false">
-                  <span>当前档位</span>
-                  <strong id="speedStageLabel">2档 · 0.20 m/s · 0.50 rad/s</strong>
-                </button>
-                <div id="speedStageMenu" class="stage-menu">
-                  <button class="stage-option" type="button" data-stage="0">
-                    <strong>1档</strong>
-                    <span>慢速 · 0.10 m/s · 0.50 rad/s</span>
-                  </button>
-                  <button class="stage-option" type="button" data-stage="1">
-                    <strong>2档</strong>
-                    <span>常用 · 0.20 m/s · 0.50 rad/s</span>
-                  </button>
-                  <button class="stage-option" type="button" data-stage="2">
-                    <strong>3档</strong>
-                    <span>较快 · 0.40 m/s · 0.50 rad/s</span>
-                  </button>
-                  <button class="stage-option" type="button" data-stage="3">
-                    <strong>4档</strong>
-                    <span>高速 · 0.60 m/s · 0.50 rad/s</span>
-                  </button>
-                </div>
-              </div>
-              <div id="teleopBlocker" class="teleop-blocker hidden" aria-live="polite">
-                <strong>摇杆控制中</strong>
-                <span>摇杆接管时网页键盘控制已锁定</span>
-              </div>
-            </section>
-
           </aside>
         </div>
       </section>
@@ -134,6 +96,7 @@
                   <span><i class="legend-map"></i>地图</span>
                   <span><i class="legend-scan"></i>雷达</span>
                   <span><i class="legend-robot"></i>机器人</span>
+                  <span><i class="legend-location"></i>已注册地点</span>
                 </div>
                 <div class="help-wrap">
                   <button class="hint-toggle hint-icon" data-help="navigationHelp" type="button" aria-label="查看地图操作提示">
@@ -162,14 +125,17 @@
                 <h3>导航会话</h3>
                 <span id="navigationRunState" class="run-state idle">未启动</span>
               </div>
-              <div id="navMapPanel" class="stage-panel map-picker">
-                <button id="navMapToggle" class="speed-stage" type="button" aria-expanded="false">
-                  <span>地图列表</span>
-                  <strong id="navMapLabel">未发现地图</strong>
-                </button>
-                <div id="navMapMenu" class="stage-menu map-stage-menu">
-                  <div id="navMapOptions" class="map-stage-options">
-                    <div class="subtle">等待地图列表...</div>
+              <div class="nav-field">
+                <label id="navMapFieldLabel">导航地图</label>
+                <div id="navMapPanel" class="nav-select" data-control="navMapToggle">
+                  <button id="navMapToggle" class="nav-select-control" type="button" aria-expanded="false" aria-haspopup="listbox" aria-controls="navMapOptions" aria-labelledby="navMapFieldLabel navMapLabel">
+                    <span id="navMapLabel">未发现地图</span>
+                    <span class="nav-select-chevron" aria-hidden="true"></span>
+                  </button>
+                  <div id="navMapMenu" class="nav-select-menu">
+                    <div id="navMapOptions" class="nav-select-options" role="listbox" aria-label="可用导航地图">
+                      <div class="subtle">等待地图列表...</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -177,14 +143,19 @@
                 <button id="btnStartNavigation" class="primary wide">开始导航</button>
                 <button id="btnStopNavigation" class="danger wide">结束导航</button>
               </div>
-              <div class="nav-location">
-                <h4>按地名导航</h4>
-                <!-- <label for="navLocationInput">按地名导航</label> -->
+              <p class="action-help">启动后先确认定位有效，再发送地点或地图目标。切换到其他页面会提示结束当前会话。</p>
+              <div class="nav-field nav-location">
+                <label for="navLocationInput">按地名导航</label>
                 <div class="nav-location-row">
-                  <input id="navLocationInput" type="text" list="navLocationList" placeholder="输入地名，如 spot1" autocomplete="off" />
+                  <div id="navLocationPanel" class="nav-select" data-control="navLocationInput">
+                    <input id="navLocationInput" class="nav-select-control" type="text" placeholder="输入或选择地点" autocomplete="off" role="combobox" aria-autocomplete="none" aria-haspopup="listbox" aria-controls="navLocationOptions" aria-expanded="false" />
+                    <span class="nav-select-chevron" aria-hidden="true"></span>
+                    <div id="navLocationMenu" class="nav-select-menu">
+                      <div id="navLocationOptions" class="nav-select-options" role="listbox" aria-label="当前地图可导航地点"></div>
+                    </div>
+                  </div>
                   <button id="btnNavLocation" class="primary" type="button">前往</button>
                 </div>
-                <datalist id="navLocationList"></datalist>
                 <p id="navLocationHint" class="subtle">通过 voice_command 下发地点，需要导航运行中且地图已标注地点。</p>
               </div>
             </section>
@@ -270,6 +241,18 @@
               <span id="configRestartNotice" class="save-notice hidden"></span>
             </div>
           </section>
+
+          <section class="system-power-panel" aria-labelledby="systemPowerTitle">
+            <div>
+              <h3 id="systemPowerTitle">Finav 服务控制</h3>
+              <p class="subtle">管理由 `start_finav.sh` 启动的底盘、手柄、路由、Web、建图和导航相关进程，不会关闭 Jetson 系统。</p>
+              <span id="systemSupervisorState" class="supervisor-state">正在检查监督进程…</span>
+            </div>
+            <div class="system-power-actions">
+              <button id="btnRestartFinav" class="primary" type="button">一键重启 Finav</button>
+              <button id="btnShutdownFinav" class="danger" type="button">关闭 Finav</button>
+            </div>
+          </section>
         </div>
 
         <div id="configEditorView" class="config-editor-view hidden">
@@ -302,39 +285,77 @@
     </main>
   </div>
 
-  <footer id="statusDock" class="status-dock collapsed">
+  <footer id="statusDock" class="status-dock collapsed" aria-label="运行状态中心">
     <button id="statusToggle" class="dock-toggle" aria-expanded="false">
-      <span>机器人状态 / 系统状态</span>
+      <span class="dock-toggle-summary">
+        <span id="dockHealthDot" class="health-dot pending"></span>
+        <strong>运行状态中心</strong>
+        <span id="dockHealthSummary">正在获取 ROS 数据…</span>
+      </span>
       <span id="dockToggleText">展开</span>
     </button>
     <div class="dock-body">
-      <section class="dock-panel dock-status-panel">
-        <div class="dock-panel-title">
-          <h3>状态总览</h3>
+      <div class="status-center-head">
+        <div>
+          <p class="eyebrow">FINAV LIVE DIAGNOSTICS</p>
+          <h2>运行状态中心</h2>
+          <p id="statusCenterSummary" class="subtle">汇总运行条件、实时数据链路和诊断日志。</p>
         </div>
-        <div class="dock-scroll">
-          <div class="dock-section-label">机器人状态</div>
+        <button id="statusClose" type="button">收起状态中心</button>
+      </div>
+
+      <div class="status-overview-grid">
+        <article class="health-card" id="overallHealthCard">
+          <span>总体状态</span><strong id="overallHealth">检查中</strong><small id="overallHealthDetail">等待服务数据</small>
+        </article>
+        <article class="health-card" id="mappingReadyCard">
+          <span>建图条件</span><strong id="mappingReady">检查中</strong><small id="mappingReadyDetail">--</small>
+        </article>
+        <article class="health-card" id="navigationReadyCard">
+          <span>导航条件</span><strong id="navigationReady">检查中</strong><small id="navigationReadyDetail">--</small>
+        </article>
+        <article class="health-card" id="transportHealthCard">
+          <span>画面传输</span><strong id="streamRate">-- Hz</strong><small id="streamLatency">延迟 -- ms</small>
+        </article>
+      </div>
+
+      <div class="status-detail-grid">
+        <section class="dock-panel status-data-panel">
+          <div class="dock-panel-title"><h3>数据链路</h3><span class="subtle">频率与新鲜度</span></div>
+          <div class="status-table">
+            <div class="status-table-head"><span>数据</span><span>频率</span><span>最后更新</span><span>判断</span></div>
+            <div><strong>地图 /map</strong><span id="hzMap">按变化</span><span id="ageMap">--</span><span id="stateMap" class="state-pill">--</span></div>
+            <div><strong>雷达 /scan</strong><span id="hzScan">--</span><span id="ageScan">--</span><span id="stateScan" class="state-pill">--</span></div>
+            <div><strong>里程计 /odom</strong><span id="hzOdom">--</span><span id="ageOdom">--</span><span id="stateOdom" class="state-pill">--</span></div>
+            <div><strong>map → odom</strong><span id="tfMapOdom">--</span><span id="ageTfMap">--</span><span id="stateTfMap" class="state-pill">--</span></div>
+            <div><strong>odom → base_link</strong><span id="tfOdomBase">--</span><span id="ageTfOdom">--</span><span id="stateTfOdom" class="state-pill">--</span></div>
+            <div><strong>规划 /plan</strong><span id="hzPlan">--</span><span id="agePlan">--</span><span id="statePlan" class="state-pill">--</span></div>
+          </div>
+        </section>
+
+        <section class="dock-panel status-robot-panel">
+          <div class="dock-panel-title"><h3>机器人与任务</h3></div>
           <div class="kv compact">
+            <div>ROS 桥接</div><div id="rosConnected">--</div>
+            <div>当前任务</div><div id="activeRuntime">--</div>
             <div>地图位姿</div><div id="poseMap">--</div>
             <div>里程计位姿</div><div id="poseOdom">--</div>
             <div>当前速度</div><div id="velOdom">--</div>
-            <div>路径点数</div><div id="planPts">--</div>
-            <div>路径长度</div><div id="planLen">--</div>
-            <div>网页控制</div><div id="teleopState">--</div>
-            <div>摇杆控制</div><div id="joystickState">--</div>
+            <div>当前目标</div><div id="goalStatus">--</div>
+            <div>规划路径</div><div id="planSummary">--</div>
+            <div>手柄链路</div><div id="joystickState">--</div>
           </div>
-          <div class="dock-divider" aria-hidden="true"></div>
-          <div class="dock-section-label">系统状态</div>
-          <div class="kv compact">
-            <div>ROS 连接</div><div id="rosConnected">--</div>
-            <div>map→odom TF</div><div id="tfMapOdom">--</div>
-            <div>odom→base_link TF</div><div id="tfOdomBase">--</div>
-            <div>/odom 频率</div><div id="hzOdom">--</div>
-            <div>/plan 频率</div><div id="hzPlan">--</div>
-            <div>/scan 频率</div><div id="hzScan">--</div>
+        </section>
+
+        <section class="dock-panel status-runtime-panel">
+          <div class="dock-panel-title"><h3>运行进程</h3></div>
+          <div class="runtime-status-list">
+            <div><span>建图</span><strong id="runtimeMapping">未运行</strong><small id="runtimeMappingMeta">--</small></div>
+            <div><span>导航</span><strong id="runtimeNavigation">未运行</strong><small id="runtimeNavigationMeta">--</small></div>
+            <div><span>重定位</span><strong id="runtimeRelocate">未运行</strong><small id="runtimeRelocateMeta">--</small></div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
       <section class="dock-panel dock-log-panel">
         <div class="panel-head">
@@ -357,7 +378,7 @@
   <div id="blockingModal" class="blocking-modal hidden" aria-live="polite">
     <div class="blocking-card">
       <div class="blocking-spinner"></div>
-      <p>正在结束进程……</p>
+      <p id="blockingModalText">正在处理，请稍候…</p>
     </div>
   </div>
 

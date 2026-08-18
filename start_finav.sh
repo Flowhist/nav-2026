@@ -50,8 +50,9 @@ START_CHECKS=6
 START_INTERVAL=0.1
 CLEANING_UP=0
 RESTART_REQUESTED=0
+FULL_RESTART_REQUESTED=0
 STOP_TIMEOUT=1.0
-MAP_CLEAN_SCRIPT="$REPO_DIR/scripts/map_process/clean_map.sh"
+MAP_CLEAN_SCRIPT="$REPO_DIR/scripts/tool/clean_map.sh"
 NAV_CLEAN_SCRIPT="$REPO_DIR/scripts/tool/clean_nav.sh"
 
 fail() {
@@ -135,9 +136,15 @@ handle_control_restart() {
     force_stop_group "$ROUTER_PID"
 }
 
+handle_full_restart() {
+    FULL_RESTART_REQUESTED=1
+    force_stop_group "$ROUTER_PID"
+}
+
 trap cleanup EXIT
 trap handle_interrupt INT TERM
 trap handle_control_restart USR1
+trap handle_full_restart USR2
 
 ROS_SETUP="/opt/ros/humble/setup.bash"
 WORKSPACE_SETUP_LOCAL="$WORKSPACE_DIR/install/local_setup.bash"
@@ -193,9 +200,20 @@ start_control_stack() {
     ROUTER_PID=$!
 }
 
-printf '▶ 启动 web server\n'
-python3 "$REPO_DIR/server/run_server.py" --host "$SERVER_HOST" --port "$SERVER_PORT" &
-SERVER_PID=$!
+start_web_server() {
+    printf '▶ 启动 web server\n'
+    python3 "$REPO_DIR/server/run_server.py" --host "$SERVER_HOST" --port "$SERVER_PORT" &
+    SERVER_PID=$!
+}
+
+stop_web_server() {
+    force_stop_pid "$SERVER_PID"
+    wait_pid_exit "$SERVER_PID"
+    wait "$SERVER_PID" 2>/dev/null || true
+    SERVER_PID=""
+}
+
+start_web_server
 
 start_control_stack
 
@@ -210,6 +228,20 @@ printf '  F=键盘开关  │  Ctrl-C 退出\n\n'
 
 while true; do
     wait "$ROUTER_PID" || true
+    if [[ "$FULL_RESTART_REQUESTED" -eq 1 ]]; then
+        printf '\n▶ 收到 Web 整套重启请求，停止当前 Finav 进程...\n'
+        stop_web_server
+        stop_control_stack
+        [[ -f "$MAP_CLEAN_SCRIPT" ]] && bash "$MAP_CLEAN_SCRIPT" >/dev/null 2>&1 || true
+        [[ -f "$NAV_CLEAN_SCRIPT" ]] && bash "$NAV_CLEAN_SCRIPT" >/dev/null 2>&1 || true
+        FULL_RESTART_REQUESTED=0
+        RESTART_REQUESTED=0
+        start_web_server
+        start_control_stack
+        wait_all_stable
+        printf '\033[32m✓ Finav 整套服务重启完成\033[0m\n'
+        continue
+    fi
     if [[ "$RESTART_REQUESTED" -eq 1 ]]; then
         printf '\n▶ 收到 Web 重启请求，重启底盘控制三节点...\n'
         stop_control_stack

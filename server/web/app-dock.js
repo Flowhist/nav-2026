@@ -101,12 +101,13 @@ function setDockView(view) {
   }
 }
 
-function showBlockingModal(visible) {
+function showBlockingModal(visible, message = "正在处理，请稍候…") {
+  setText("blockingModalText", message);
   setHidden("blockingModal", !visible);
 }
 
-async function withBlockingModal(task) {
-  showBlockingModal(true);
+async function withBlockingModal(task, message) {
+  showBlockingModal(true, message);
   try {
     return await task();
   } finally {
@@ -121,28 +122,33 @@ async function pollStatus() {
   } catch (err) {
     console.error(err);
   } finally {
-    window.setTimeout(pollStatus, 500);
+    window.setTimeout(pollStatus, document.hidden ? 3000 : 1000);
   }
 }
 
 async function pollEvents() {
   try {
-    const data = await api(`/api/history?since=${appState.lastSeq}&limit=200`);
-    addEvents(data.events || []);
+    if (isLivePage() && !$("statusDock").classList.contains("collapsed")) {
+      const data = await api(`/api/history?since=${appState.lastSeq}&limit=200`);
+      addEvents(data.events || []);
+    }
   } catch (err) {
     console.error(err);
   } finally {
-    window.setTimeout(pollEvents, 1000);
+    window.setTimeout(pollEvents, document.hidden ? 4000 : 1500);
   }
 }
 
 async function pollDockLogs() {
   try {
-    if (appState.dockView === "mapping" || appState.dockView === "navigation") {
+    if (
+      isLivePage()
+      && !$("statusDock").classList.contains("collapsed")
+      && (appState.dockView === "mapping" || appState.dockView === "navigation")
+    ) {
       await loadRuntimeLog(appState.dockView);
     }
   } finally {
-    window.setTimeout(pollDockLogs, 1500);
+    window.setTimeout(pollDockLogs, document.hidden ? 5000 : 2000);
   }
 }
-

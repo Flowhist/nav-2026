@@ -8,10 +8,11 @@ const appState = {
   page: "mapping",
   lastSeq: 0,
   mapVersion: -1,
+  planVersion: -1,
   status: null,
   scene: {
     map: null,
-    scan: { points: [] },
+    scan: { count: 0, ranges_b64: "" },
     plan: { points: 0, points_xy: [] },
     robot_pose_map: null,
     goal_pose: null,
@@ -45,12 +46,14 @@ const appState = {
     content: "",
     impact: null,
   },
-  teleop: {
-    keyboardEnabled: false,
-    currentCommand: "stop",
-    speedStages: [0.1, 0.2, 0.4, 0.6],
-    angularSpeed: 0.5,
-    stageIndex: 1,
+  stream: {
+    source: null,
+    mode: null,
+    frames: 0,
+    measuredHz: 0,
+    latencyMs: null,
+    lastFrameAt: null,
+    sampleStartedAt: performance.now(),
   },
   navPlacementMode: null,
   navDrag: null,
@@ -63,12 +66,6 @@ const appState = {
 };
 
 const mapRasterCache = new Map();
-const stageMeta = [
-  { label: "1档", desc: "慢速", speed: 0.10 },
-  { label: "2档", desc: "常用", speed: 0.20 },
-  { label: "3档", desc: "较快", speed: 0.40 },
-  { label: "4档", desc: "高速", speed: 0.60 },
-];
 let configSaveNoticeTimer = null;
 let toastTimer = null;
 
@@ -78,16 +75,42 @@ function fmt(n, digits = 2) {
 }
 
 async function api(path, method = "GET", body = null, options = {}) {
-  const { headers = {}, ...rest } = options;
+  const { headers = {}, timeoutMs = 8000, ...rest } = options;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const opt = {
     method,
     headers: { "Content-Type": "application/json", ...headers },
+    signal: controller.signal,
     ...rest,
   };
   if (body !== null && body !== undefined) opt.body = JSON.stringify(body);
-  const res = await fetch(path, opt);
-  if (!res.ok) throw new Error(await readApiError(res));
-  return res.json();
+  try {
+    const res = await fetch(path, opt);
+    if (!res.ok) {
+      const err = new Error(await readApiError(res));
+      err.status = res.status;
+      setConnectionState("online");
+      throw err;
+    }
+    setConnectionState("online");
+    return res.json();
+  } catch (err) {
+    if (!err?.status) setConnectionState("offline");
+    if (err?.name === "AbortError") throw new Error("请求超时，请检查 Finav 服务连接");
+    throw err;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function setConnectionState(state) {
+  const badge = $("connectionBadge");
+  const label = $("connectionBadgeText");
+  if (!badge || !label) return;
+  badge.classList.remove("pending", "online", "offline");
+  badge.classList.add(state);
+  label.textContent = state === "online" ? "服务在线" : state === "offline" ? "连接中断" : "正在连接";
 }
 
 async function readApiError(res) {
@@ -126,6 +149,20 @@ function setText(id, text) {
 function setHidden(id, hidden) {
   const el = $(id);
   if (el) el.classList.toggle("hidden", hidden);
+}
+
+function setButtonBusy(button, busy, busyText = "处理中…") {
+  if (!button) return;
+  if (busy) {
+    button.dataset.originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = busyText;
+    button.classList.add("busy");
+  } else {
+    button.textContent = button.dataset.originalText || button.textContent;
+    delete button.dataset.originalText;
+    button.classList.remove("busy");
+  }
 }
 
 function clamp(value, min, max) {
@@ -179,13 +216,25 @@ function buildMapRaster(mapData, prefix) {
   const ctx = offscreen.getContext("2d");
   const image = ctx.createImageData(mapData.width, mapData.height);
 
+  let occupancy = mapData.data;
+  if (!occupancy && mapData.encoding === "int8-base64" && mapData.data_b64) {
+    const binary = window.atob(mapData.data_b64);
+    const decoded = new Int8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      const value = binary.charCodeAt(index);
+      decoded[index] = value > 127 ? value - 256 : value;
+    }
+    occupancy = decoded;
+  }
+  occupancy = occupancy || [];
+
   for (let y = 0; y < mapData.height; y += 1) {
     for (let x = 0; x < mapData.width; x += 1) {
       const src = y * mapData.width + x;
       const dstY = prefix === "preview" ? y : mapData.height - 1 - y;
       const dstX = x;
       const dst = (dstY * mapData.width + dstX) * 4;
-      const value = mapData.data[src];
+      const value = occupancy[src] ?? -1;
       let color;
       if (value < 0) color = [207, 215, 207];
       else if (value >= 65) color = [52, 70, 61];
@@ -352,6 +401,97 @@ function drawArrow(ctx, view, canvas, pose, color, label) {
   ctx.restore();
 }
 
+function scanWorldPoints(scan) {
+  if (!scan) return [];
+  if (scan._decodedAt === scan.updated_at && scan._worldPoints) return scan._worldPoints;
+  if (scan.encoding !== "uint16-mm-base64" || !scan.ranges_b64 || !scan.pose_map) return [];
+
+  const binary = window.atob(scan.ranges_b64);
+  const count = Math.floor(binary.length / 2);
+  const pose = scan.pose_map;
+  const poseYaw = (pose.yaw_deg || 0) * Math.PI / 180;
+  const cosYaw = Math.cos(poseYaw);
+  const sinYaw = Math.sin(poseYaw);
+  const points = [];
+  for (let index = 0; index < count; index += 1) {
+    const offset = index * 2;
+    const millimeters = binary.charCodeAt(offset) | (binary.charCodeAt(offset + 1) << 8);
+    if (!millimeters) continue;
+    const distance = millimeters / 1000;
+    const angle = Number(scan.angle_min || 0) + index * Number(scan.angle_increment || 0);
+    const localX = distance * Math.cos(angle);
+    const localY = distance * Math.sin(angle);
+    points.push([
+      pose.x + localX * cosYaw - localY * sinYaw,
+      pose.y + localX * sinYaw + localY * cosYaw,
+    ]);
+  }
+  scan._decodedAt = scan.updated_at;
+  scan._worldPoints = points;
+  return points;
+}
+
+function drawRobotFootprint(ctx, view, canvas, pose, footprint = {}) {
+  if (!pose) return;
+  const yaw = (pose.yaw_deg || 0) * Math.PI / 180;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const front = Number(footprint.front_m ?? 0.84);
+  const rear = Number(footprint.rear_m ?? 0.25);
+  const left = Number(footprint.left_m ?? 0.45);
+  const right = Number(footprint.right_m ?? 0.45);
+  const margin = Number(footprint.margin_m ?? 0.03);
+  const project = (x, y) => worldToScreen(
+    view,
+    canvas,
+    pose.x + x * cos - y * sin,
+    pose.y + x * sin + y * cos,
+  );
+  const polygon = (extra) => [
+    project(front + extra, left + extra),
+    project(front + extra, -(right + extra)),
+    project(-(rear + extra), -(right + extra)),
+    project(-(rear + extra), left + extra),
+  ];
+  const trace = (points) => {
+    ctx.beginPath();
+    points.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
+    ctx.closePath();
+  };
+
+  ctx.save();
+  const body = polygon(0);
+  trace(body);
+  ctx.fillStyle = "rgba(196, 106, 43, 0.34)";
+  ctx.strokeStyle = "#a84f1c";
+  ctx.lineWidth = 2.2 * (window.devicePixelRatio || 1);
+  ctx.fill();
+  ctx.stroke();
+
+  if (margin > 0) {
+    trace(polygon(margin));
+    ctx.setLineDash([5 * (window.devicePixelRatio || 1), 4 * (window.devicePixelRatio || 1)]);
+    ctx.strokeStyle = "rgba(183, 58, 49, 0.75)";
+    ctx.lineWidth = 1.2 * (window.devicePixelRatio || 1);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  const center = project(0, 0);
+  const nose = project(front, 0);
+  ctx.beginPath();
+  ctx.moveTo(center.x, center.y);
+  ctx.lineTo(nose.x, nose.y);
+  ctx.strokeStyle = "#7f3210";
+  ctx.lineWidth = 2 * (window.devicePixelRatio || 1);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, 3.5 * (window.devicePixelRatio || 1), 0, Math.PI * 2);
+  ctx.fillStyle = "#7f3210";
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawScene(canvas, mapData, scene, options = {}) {
   if (!resizeCanvas(canvas)) return;
   const ctx = canvas.getContext("2d");
@@ -389,16 +529,18 @@ function drawScene(canvas, mapData, scene, options = {}) {
     ctx.restore();
   }
 
-  if (scene?.scan?.points?.length) {
+  const scanPoints = scanWorldPoints(scene?.scan);
+  if (scanPoints.length) {
     ctx.save();
     ctx.fillStyle = "rgba(45, 155, 178, 0.75)";
     const radius = 1.8 * (window.devicePixelRatio || 1);
-    scene.scan.points.forEach(([x, y]) => {
+    ctx.beginPath();
+    scanPoints.forEach(([x, y]) => {
       const pt = worldToScreen(view, canvas, x, y);
-      ctx.beginPath();
+      ctx.moveTo(pt.x + radius, pt.y);
       ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
-      ctx.fill();
     });
+    ctx.fill();
     ctx.restore();
   }
 
@@ -409,7 +551,7 @@ function drawScene(canvas, mapData, scene, options = {}) {
     drawArrow(ctx, view, canvas, scene.goal_pose, "#bd5d38", "目标");
   }
   if (scene?.robot_pose_map) {
-    drawArrow(ctx, view, canvas, scene.robot_pose_map, "#c46a2b");
+    drawRobotFootprint(ctx, view, canvas, scene.robot_pose_map, scene.robot_footprint);
   }
 
   if (options.locations?.length) {
@@ -438,15 +580,33 @@ function renderStatus(status) {
   const poseOdom = robot.pose_odom || {};
   const vel = robot.velocity || {};
   const plan = robot.plan || {};
-  const teleop = status.teleop || {};
-  const joystickState = teleop.joystick_online ? (teleop.joystick_active ? "激活中" : "关闭") : "离线";
+  const control = status.control || {};
+  const runtime = status.runtime || {};
+  const lastSeen = ros.last_seen || {};
+  const transport = status.transport || {};
+  const streamActive = Number(transport.active_streams || 0) > 0;
+  const joystickState = control.joystick_online ? (control.joystick_active ? "正在接管" : "在线") : "离线";
+  const age = (key) => Number(lastSeen[key]);
+  const fresh = (key, limit = 1.5) => Number.isFinite(age(key)) && age(key) <= limit;
+  const ageText = (key) => Number.isFinite(age(key)) ? `${fmt(age(key), age(key) < 10 ? 1 : 0)} 秒前` : "未收到";
+  const setDataState = (id, ok, idle = false) => {
+    const node = $(id);
+    if (!node) return;
+    node.textContent = idle ? "待命" : ok ? "正常" : "异常";
+    node.dataset.state = idle ? "idle" : ok ? "ok" : "error";
+  };
+  const runtimeLabel = (item, label) => item?.stopping ? `${label}停止中` : item?.running ? `${label}运行中` : "未运行";
+  const runtimeMeta = (item) => item?.running
+    ? `PID ${item.pid || "--"} · 已运行 ${formatDuration(Date.now() / 1000 - Number(item.started_at || Date.now() / 1000))}`
+    : "当前无进程";
 
-  if (teleop.joystick_active && appState.teleop.keyboardEnabled && typeof setKeyboardTeleop === "function") {
-    setKeyboardTeleop(false);
-  }
-  if (typeof syncTeleopAvailability === "function") {
-    syncTeleopAvailability();
-  }
+  const mapReceived = Number.isFinite(age("map"));
+  const mappingReady = !!ros.connected && fresh("scan") && fresh("odom") && fresh("tf_odom_base_link");
+  const navigationReady = mappingReady && mapReceived && fresh("tf_map_odom", 3.0);
+  const activeRuntime = runtime.mapping?.running ? "建图运行中" : runtime.navigation?.running ? "导航运行中" : "无建图/导航任务";
+  const overallOk = !!ros.connected && (fresh("scan") || (!runtime.mapping?.running && !runtime.navigation?.running));
+
+  setConnectionState(ros.connected ? "online" : "offline");
 
   setText("rosConnected", ros.connected ? "在线" : "离线");
   setText("tfMapOdom", `${fmt(tf.map_odom)} Hz`);
@@ -454,17 +614,69 @@ function renderStatus(status) {
   setText("hzOdom", `${fmt(hz.odom)} Hz`);
   setText("hzPlan", `${fmt(hz.plan)} Hz`);
   setText("hzScan", `${fmt(hz.scan)} Hz`);
+  setText("hzMap", "事件驱动");
+  setText("ageMap", ageText("map"));
+  setText("ageScan", ageText("scan"));
+  setText("ageOdom", ageText("odom"));
+  setText("ageTfMap", ageText("tf_map_odom"));
+  setText("ageTfOdom", ageText("tf_odom_base_link"));
+  setText("agePlan", ageText("plan"));
+  setDataState("stateMap", mapReceived, !runtime.mapping?.running && !runtime.navigation?.running);
+  setDataState("stateScan", fresh("scan"), !runtime.mapping?.running && !runtime.navigation?.running);
+  setDataState("stateOdom", fresh("odom"), !runtime.mapping?.running && !runtime.navigation?.running);
+  setDataState("stateTfMap", fresh("tf_map_odom", 3.0), !runtime.mapping?.running && !runtime.navigation?.running);
+  setDataState("stateTfOdom", fresh("tf_odom_base_link"), !runtime.mapping?.running && !runtime.navigation?.running);
+  setDataState("statePlan", fresh("plan", 3.0), !runtime.navigation?.running || Number(plan.points || 0) === 0);
   setText("poseMap", `x=${fmt(poseMap.x, 3)}, y=${fmt(poseMap.y, 3)}, yaw=${fmt(poseMap.yaw_deg, 1)}°`);
   setText("poseOdom", `x=${fmt(poseOdom.x, 3)}, y=${fmt(poseOdom.y, 3)}, yaw=${fmt(poseOdom.yaw_deg, 1)}°`);
   setText("velOdom", `vx=${fmt(vel.vx, 3)} m/s, wz=${fmt(vel.wz, 3)} rad/s`);
-  setText("planPts", String(plan.points ?? "--"));
-  setText("planLen", `${fmt(plan.length_m, 2)} m`);
-  setText(
-    "teleopState",
-    teleop.joystick_active ? "摇杆接管" : teleop.active ? "发送中" : appState.teleop.keyboardEnabled ? "待命中" : "离线",
-  );
+  setText("goalStatus", robot.goal_pose ? `x=${fmt(robot.goal_pose.x, 2)}, y=${fmt(robot.goal_pose.y, 2)}` : "未设置");
+  setText("planSummary", `${plan.points ?? 0} 点 · ${fmt(plan.length_m || 0, 2)} m`);
   setText("joystickState", joystickState);
+  setText("activeRuntime", activeRuntime);
+  setText("runtimeMapping", runtimeLabel(runtime.mapping, "建图"));
+  setText("runtimeMappingMeta", runtimeMeta(runtime.mapping));
+  setText("runtimeNavigation", runtimeLabel(runtime.navigation, "导航"));
+  setText("runtimeNavigationMeta", runtimeMeta(runtime.navigation));
+  setText("runtimeRelocate", runtimeLabel(runtime.relocate, "重定位"));
+  setText("runtimeRelocateMeta", runtimeMeta(runtime.relocate));
+  setText("mappingReady", mappingReady ? "可以开始" : "条件不足");
+  setText("mappingReadyDetail", mappingReady ? "雷达、里程计与基础 TF 正常" : "请检查雷达、里程计与 odom TF");
+  setText("navigationReady", navigationReady ? "可以导航" : "条件不足");
+  setText("navigationReadyDetail", navigationReady ? "地图、定位 TF 与传感器正常" : "请检查地图与 map → odom TF");
+  setText("overallHealth", overallOk ? "运行正常" : "需要检查");
+  setText("overallHealthDetail", activeRuntime);
+  setText("streamRate", streamActive ? `${fmt(appState.stream.measuredHz || transport.stream_hz, 1)} Hz` : "已暂停");
+  setText("streamLatency", streamActive
+    ? `延迟 ${appState.stream.latencyMs === null ? "--" : fmt(appState.stream.latencyMs, 0)} ms · ${formatBytes(transport.bytes_per_sec || 0)}/s`
+    : "状态中心打开时暂停画面传输");
+  setText("dockHealthSummary", `${activeRuntime} · ${overallOk ? "数据链路正常" : "存在异常数据"}`);
+  setText("statusCenterSummary", `${activeRuntime}；${mappingReady ? "建图条件正常" : "建图条件待检查"}，${navigationReady ? "导航条件正常" : "导航条件待检查"}。`);
+
+  ["overallHealthCard", "mappingReadyCard", "navigationReadyCard", "transportHealthCard"].forEach((id) => {
+    $(id)?.classList.remove("ok", "warn");
+  });
+  $("overallHealthCard")?.classList.add(overallOk ? "ok" : "warn");
+  $("mappingReadyCard")?.classList.add(mappingReady ? "ok" : "warn");
+  $("navigationReadyCard")?.classList.add(navigationReady ? "ok" : "warn");
+  $("transportHealthCard")?.classList.add(!streamActive || appState.stream.measuredHz >= 8 ? "ok" : "warn");
+  const healthDot = $("dockHealthDot");
+  if (healthDot) healthDot.className = `health-dot ${overallOk ? "ok" : "warn"}`;
   renderRuntimeControls();
+}
+
+function formatDuration(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  if (value < 60) return `${Math.floor(value)} 秒`;
+  if (value < 3600) return `${Math.floor(value / 60)} 分钟`;
+  return `${Math.floor(value / 3600)} 小时 ${Math.floor(value % 3600 / 60)} 分`;
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${(value / 1024 / 1024).toFixed(2)} MiB`;
 }
 
 function formatExtra(extra) {

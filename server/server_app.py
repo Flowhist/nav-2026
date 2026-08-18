@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import mimetypes
+import socket
 import shutil
 import threading
 import time
@@ -94,16 +95,20 @@ class ServerApp:
 
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
+        self._running = False
 
     def start(self) -> None:
         self.bridge.start()
         handler_cls = self._build_handler()
         self._httpd = ThreadingHTTPServer((self.host, self.port), handler_cls)
+        self._httpd.daemon_threads = True
+        self._running = True
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
         self._thread.start()
         self.state.add_event("info", f"web server listening on http://{self.host}:{self.port}")
 
     def stop(self) -> None:
+        self._running = False
         self.runtime.stop_all()
         if self._httpd:
             self._httpd.shutdown()
@@ -116,6 +121,7 @@ class ServerApp:
 
         class Handler(BaseHTTPRequestHandler):
             server_version = "FinavWeb/0.1"
+            protocol_version = "HTTP/1.1"
 
             def do_GET(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
@@ -126,6 +132,12 @@ class ServerApp:
                     return
                 if path == "/api/status":
                     self._json(HTTPStatus.OK, app.state.snapshot())
+                    return
+                if path == "/api/system":
+                    self._json(HTTPStatus.OK, app.runtime.finav_supervisor_status())
+                    return
+                if path == "/api/stream":
+                    self._stream_scene(parsed)
                     return
                 if path == "/api/scene":
                     query = parse_qs(parsed.query)
@@ -247,30 +259,18 @@ class ServerApp:
                     self._json(HTTPStatus.OK, {"ok": True, "name": name.strip()})
                     return
 
-                if path == "/api/teleop/cmd_vel":
-                    app.bridge.set_teleop_state(
-                        float(body.get("linear_x", 0.0)),
-                        float(body.get("angular_z", 0.0)),
-                    )
-                    self._json(HTTPStatus.OK, {"ok": True})
-                    return
-
-                if path == "/api/teleop/state":
-                    app.bridge.set_teleop_state(
-                        float(body.get("linear_x", 0.0)),
-                        float(body.get("angular_z", 0.0)),
-                    )
-                    self._json(HTTPStatus.OK, {"ok": True})
-                    return
-
-                if path == "/api/teleop/stop":
-                    app.bridge.stop_teleop()
-                    self._json(HTTPStatus.OK, {"ok": True})
-                    return
-
                 if path == "/api/map/save":
                     app.bridge.command({"type": "save_map", "name": body.get("name", "manual_map")})
                     self._json(HTTPStatus.OK, {"ok": True})
+                    return
+                if path in {"/api/system/shutdown", "/api/system/restart"}:
+                    action = path.rsplit("/", 1)[-1]
+                    try:
+                        payload = app.runtime.request_finav_action(action)
+                    except RuntimeError as exc:
+                        self._json(HTTPStatus.CONFLICT, {"ok": False, "error": str(exc)})
+                        return
+                    self._json(HTTPStatus.ACCEPTED, payload)
                     return
                 if path.startswith("/api/maps/") and path.endswith("/locations"):
                     name = unquote(path.removeprefix("/api/maps/").removesuffix("/locations")).strip("/")
@@ -365,6 +365,83 @@ class ServerApp:
 
                 self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"unknown endpoint: {path}"})
 
+            def _stream_scene(self, parsed) -> None:
+                query = parse_qs(parsed.query)
+                mode = str(query.get("mode", ["mapping"])[0]).strip().lower()
+                if mode not in {"mapping", "navigation"}:
+                    self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid stream mode"})
+                    return
+                try:
+                    map_version = int(query.get("map_version", [-1])[0])
+                    plan_version = int(query.get("plan_version", [-1])[0])
+                except (TypeError, ValueError):
+                    map_version = -1
+                    plan_version = -1
+
+                target_hz = 10.0 if mode == "mapping" else 15.0
+                interval = 1.0 / target_hz
+                frames = 0
+                bytes_sent = 0
+                stats_started = time.monotonic()
+
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-transform")
+                self.send_header("Connection", "keep-alive")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                try:
+                    self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                except OSError:
+                    pass
+
+                app.state.add_live_viewer(mode)
+                try:
+                    self.wfile.write(b"retry: 1000\n\n")
+                    self.wfile.flush()
+                    while app._running:
+                        started = time.monotonic()
+                        payload = app.state.snapshot_scene(
+                            known_map_version=map_version,
+                            known_plan_version=plan_version,
+                        )
+                        map_version = int(payload.get("map_version", map_version))
+                        plan_version = int(payload.get("plan_version", plan_version))
+                        payload["stream"] = {
+                            "mode": mode,
+                            "target_hz": target_hz,
+                            "server_sent_at": time.time(),
+                        }
+                        encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                        packet = b"data: " + encoded + b"\n\n"
+                        self.wfile.write(packet)
+                        self.wfile.flush()
+                        frames += 1
+                        bytes_sent += len(packet)
+
+                        stats_elapsed = time.monotonic() - stats_started
+                        if stats_elapsed >= 1.0:
+                            app.state.update_status(
+                                {
+                                    "transport": {
+                                        "stream_hz": round(frames / stats_elapsed, 2),
+                                        "bytes_per_sec": round(bytes_sent / stats_elapsed),
+                                        "last_frame_at": time.time(),
+                                    }
+                                }
+                            )
+                            frames = 0
+                            bytes_sent = 0
+                            stats_started = time.monotonic()
+
+                        remaining = interval - (time.monotonic() - started)
+                        if remaining > 0:
+                            time.sleep(remaining)
+                except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+                    pass
+                finally:
+                    app.state.remove_live_viewer(mode)
+
             def _read_json(self) -> Dict[str, Any]:
                 try:
                     size = int(self.headers.get("Content-Length", "0"))
@@ -394,11 +471,12 @@ class ServerApp:
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(content)))
+                self.send_header("Cache-Control", "public, max-age=300")
                 self.end_headers()
                 self.wfile.write(content)
 
             def _json(self, code: HTTPStatus, payload: Dict[str, Any]) -> None:
-                data = json.dumps(payload).encode("utf-8")
+                data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
                 self.send_response(code)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
