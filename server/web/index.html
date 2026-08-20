@@ -3,172 +3,174 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Finav 建图与导航控制台</title>
+  <meta name="theme-color" content="#f4f4f1" />
+  <title>Finav 控制台</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div class="shell">
     <header class="topbar">
-      <div>
-        <p class="eyebrow">Finav Web Console</p>
-        <h1>建图与导航控制台</h1>
-        <p class="subtle">桌面端工作台：实时地图、雷达、导航任务与运行诊断</p>
-      </div>
-      <nav class="tabs" aria-label="页面切换">
-        <button class="tab active" data-page="mapping">建图</button>
-        <button class="tab" data-page="navigation">导航</button>
-        <button class="tab" data-page="preview">地图预览</button>
-        <button class="tab" data-page="configs">配置文件</button>
+      <div class="brand" aria-label="Finav 控制台">FINAV</div>
+      <nav class="tabs" aria-label="主要页面">
+        <button class="tab active" data-page="mapping" type="button">建图</button>
+        <button class="tab" data-page="navigation" type="button">导航</button>
+        <button class="tab" data-page="preview" type="button">地图</button>
+        <button class="tab" data-page="configs" type="button">配置</button>
       </nav>
-      <div id="connectionBadge" class="connection-badge pending" role="status">
-        <span class="connection-dot"></span>
-        <span id="connectionBadgeText">正在连接</span>
+      <div class="header-actions">
+        <div id="connectionBadge" class="connection-badge pending" role="status">
+          <span class="connection-dot"></span>
+          <span id="connectionBadgeText">正在连接</span>
+        </div>
+        <div class="system-menu-wrap">
+          <button id="systemMenuToggle" class="icon-button" type="button" aria-label="打开系统菜单" aria-haspopup="menu" aria-expanded="false">···</button>
+          <div id="systemMenu" class="system-menu hidden" role="menu">
+            <div class="menu-title">系统</div>
+            <span id="systemSupervisorState" class="supervisor-state">正在检查运行状态…</span>
+            <div class="menu-divider"></div>
+            <button id="btnRestartFinav" class="menu-action" type="button" role="menuitem">重启 Finav</button>
+            <button id="btnShutdownFinav" class="menu-action danger-text" type="button" role="menuitem">关闭 Finav</button>
+          </div>
+        </div>
       </div>
     </header>
 
     <main class="workspace">
       <section id="page-mapping" class="page active">
         <div class="page-layout">
-          <section class="map-pane glass">
+          <section class="map-pane">
             <div class="pane-head">
               <div>
-                <h2>实时建图</h2>
-                <p class="subtle">显示 `/map` 与 `/scan`，机器人位置会叠加在地图上</p>
+                <h1>建图</h1>
+                <p class="subtle">实时地图与传感器数据</p>
               </div>
               <div class="pane-tools">
-                <div class="legend">
-                  <span><i class="legend-map"></i>地图</span>
-                  <span><i class="legend-scan"></i>雷达</span>
-                  <span><i class="legend-robot"></i>机器人</span>
+                <div class="legend" aria-label="地图图例">
+                  <span><i class="legend-map"></i>Map</span>
+                  <span><i class="legend-scan"></i>Scan</span>
+                  <span><i class="legend-robot"></i>Robot</span>
                 </div>
                 <div class="help-wrap">
-                  <button class="hint-toggle hint-icon" data-help="mappingHelp" type="button" aria-label="查看地图操作提示">
-                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/>
-                      <path d="M12 10v5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                      <circle cx="12" cy="7" r="1.1" fill="currentColor"/>
-                    </svg>
-                  </button>
+                  <button class="hint-toggle icon-button" data-help="mappingHelp" type="button" aria-label="地图操作帮助">i</button>
                   <div id="mappingHelp" class="map-help hidden">
-                    滚轮缩放，左键拖拽平移，右键拖拽旋转查看局部细节。点击按钮后，在地图上拖拽方向来设置初始位姿或目标点。
+                    <strong>地图操作</strong>
+                    <dl><dt>拖动</dt><dd>平移地图</dd><dt>滚轮 / 双指</dt><dd>缩放</dd><dt>右键拖动</dt><dd>旋转</dd></dl>
                   </div>
                 </div>
               </div>
             </div>
             <div class="canvas-shell">
               <canvas id="mappingCanvas"></canvas>
-              <div id="mappingHint" class="canvas-hint">等待 `/map` 数据...</div>
+              <div id="mappingHint" class="canvas-hint">等待 /map 数据…</div>
+              <div class="canvas-toolbar" data-canvas="mappingCanvas" aria-label="建图视图工具">
+                <button type="button" data-view-action="zoom-out" aria-label="缩小">−</button>
+                <span class="zoom-value">100%</span>
+                <button type="button" data-view-action="zoom-in" aria-label="放大">＋</button>
+                <button type="button" data-view-action="fit">适合</button>
+                <button type="button" data-view-action="reset-rotation" aria-label="重置旋转">复位</button>
+              </div>
             </div>
           </section>
 
-          <aside class="side-pane">
-            <section class="glass panel runtime-panel">
-              <div class="panel-head">
-                <h3>建图会话</h3>
-                <span id="mappingRunState" class="run-state idle">未启动</span>
+          <aside class="side-pane inspector" aria-label="建图控制">
+            <div class="inspector-head">
+              <h2>建图</h2>
+              <span id="mappingRunState" class="run-state idle">未启动</span>
+            </div>
+            <div id="mappingIdleActions" class="session-state">
+              <p class="state-lead">准备就绪</p>
+              <div class="inspector-list preflight-list">
+                <div><span>雷达</span><strong id="mappingSensorScan">检查中</strong></div>
+                <div><span>里程计</span><strong id="mappingSensorOdom">检查中</strong></div>
+                <div><span>TF</span><strong id="mappingSensorTf">检查中</strong></div>
               </div>
-              <div class="mapping-session-section">
-                <h4>新建地图</h4>
-                <button id="btnStartMapping" class="primary wide">开始建图</button>
-                <p class="action-help">启动前请确认雷达、里程计和 TF 数据正常。建图过程中可随时打开底部状态中心检查数据链路。</p>
-              </div>
-              <div class="mapping-session-section">
-                <h4>保存地图</h4>
-                <button id="btnSaveMap" class="primary wide">保存地图</button>
-                <button id="btnStopMapping" class="danger wide">结束建图</button>
-                <p class="action-help">结束建图不会自动保存；尚未保存时请先执行“保存地图”。</p>
-              </div>
-            </section>
+              <button id="btnStartMapping" class="primary wide" type="button">开始建图</button>
+            </div>
+            <div id="mappingActiveActions" class="session-state hidden">
+              <p id="mappingElapsed" class="session-elapsed">已运行 --</p>
+              <button id="btnSaveMap" class="primary wide" type="button">保存地图</button>
+              <div class="inspector-divider"></div>
+              <button id="btnStopMapping" class="tertiary danger-text wide" type="button">结束建图</button>
+            </div>
           </aside>
         </div>
       </section>
 
       <section id="page-navigation" class="page">
         <div class="page-layout">
-          <section class="map-pane glass">
+          <section class="map-pane">
             <div class="pane-head">
-              <div>
-                <h2>导航工作区</h2>
-                <p class="subtle">显示 `/map` 与 `/scan`，机器人位置会叠加在地图上</p>
-              </div>
+              <div><h1>导航</h1><p class="subtle">地图、定位与实时路径</p></div>
               <div class="pane-tools">
-                <div class="legend">
-                  <span><i class="legend-map"></i>地图</span>
-                  <span><i class="legend-scan"></i>雷达</span>
-                  <span><i class="legend-robot"></i>机器人</span>
-                  <span><i class="legend-location"></i>已注册地点</span>
+                <div class="legend" aria-label="地图图例">
+                  <span><i class="legend-map"></i>Map</span><span><i class="legend-scan"></i>Scan</span><span><i class="legend-robot"></i>Robot</span>
                 </div>
                 <div class="help-wrap">
-                  <button class="hint-toggle hint-icon" data-help="navigationHelp" type="button" aria-label="查看地图操作提示">
-                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/>
-                      <path d="M12 10v5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                      <circle cx="12" cy="7" r="1.1" fill="currentColor"/>
-                    </svg>
-                  </button>
-                  <div id="navigationHelp" class="map-help hidden">
-                    滚轮缩放，左键拖拽平移，右键拖拽旋转查看局部细节。
-                    点击按钮后，在地图上拖拽方向来设置初始位姿或目标点。
-                  </div>
+                  <button class="hint-toggle icon-button" data-help="navigationHelp" type="button" aria-label="地图操作帮助">i</button>
+                  <div id="navigationHelp" class="map-help hidden"><strong>地图操作</strong><dl><dt>拖动</dt><dd>平移地图</dd><dt>滚轮 / 双指</dt><dd>缩放</dd><dt>右键拖动</dt><dd>旋转</dd></dl></div>
                 </div>
               </div>
             </div>
             <div class="canvas-shell">
               <canvas id="navigationCanvas"></canvas>
-              <div id="navigationHint" class="canvas-hint">等待 `/map` 数据...</div>
+              <div id="navigationHint" class="canvas-hint">等待 /map 数据…</div>
+              <div class="canvas-toolbar" data-canvas="navigationCanvas" aria-label="导航视图工具">
+                <button type="button" data-view-action="zoom-out" aria-label="缩小">−</button><span class="zoom-value">100%</span><button type="button" data-view-action="zoom-in" aria-label="放大">＋</button><button type="button" data-view-action="fit">适合</button><button type="button" data-view-action="reset-rotation">复位</button>
+              </div>
             </div>
           </section>
 
-          <aside class="side-pane">
-            <section class="glass panel runtime-panel">
-              <div class="panel-head">
-                <h3>导航会话</h3>
-                <span id="navigationRunState" class="run-state idle">未启动</span>
-              </div>
-              <div class="nav-field">
-                <label id="navMapFieldLabel">导航地图</label>
+          <aside class="side-pane inspector" aria-label="导航控制">
+            <section class="inspector-section session-section">
+              <div class="inspector-head"><h2>导航</h2><span id="navigationRunState" class="run-state idle">未启动</span></div>
+              <div id="navIdleSession">
+                <label id="navMapFieldLabel" class="field-label">地图</label>
                 <div id="navMapPanel" class="nav-select" data-control="navMapToggle">
-                  <button id="navMapToggle" class="nav-select-control" type="button" aria-expanded="false" aria-haspopup="listbox" aria-controls="navMapOptions" aria-labelledby="navMapFieldLabel navMapLabel">
-                    <span id="navMapLabel">未发现地图</span>
-                    <span class="nav-select-chevron" aria-hidden="true"></span>
-                  </button>
-                  <div id="navMapMenu" class="nav-select-menu">
-                    <div id="navMapOptions" class="nav-select-options" role="listbox" aria-label="可用导航地图">
-                      <div class="subtle">等待地图列表...</div>
-                    </div>
-                  </div>
+                  <button id="navMapToggle" class="nav-select-control" type="button" aria-expanded="false" aria-haspopup="listbox" aria-controls="navMapOptions" aria-labelledby="navMapFieldLabel navMapLabel"><span id="navMapLabel">未发现地图</span><span class="nav-select-chevron" aria-hidden="true"></span></button>
+                  <div id="navMapMenu" class="nav-select-menu"><div id="navMapOptions" class="nav-select-options" role="listbox" aria-label="可用导航地图"><div class="subtle">等待地图列表…</div></div></div>
                 </div>
+                <button id="btnStartNavigation" class="primary wide section-action" type="button">启动导航</button>
               </div>
-              <div class="runtime-actions">
-                <button id="btnStartNavigation" class="primary wide">开始导航</button>
-                <button id="btnStopNavigation" class="danger wide">结束导航</button>
-              </div>
-              <p class="action-help">启动后先确认定位有效，再发送地点或地图目标。切换到其他页面会提示结束当前会话。</p>
-              <div class="nav-field nav-location">
-                <label for="navLocationInput">按地名导航</label>
-                <div class="nav-location-row">
-                  <div id="navLocationPanel" class="nav-select" data-control="navLocationInput">
-                    <input id="navLocationInput" class="nav-select-control" type="text" placeholder="输入或选择地点" autocomplete="off" role="combobox" aria-autocomplete="none" aria-haspopup="listbox" aria-controls="navLocationOptions" aria-expanded="false" />
-                    <span class="nav-select-chevron" aria-hidden="true"></span>
-                    <div id="navLocationMenu" class="nav-select-menu">
-                      <div id="navLocationOptions" class="nav-select-options" role="listbox" aria-label="当前地图可导航地点"></div>
-                    </div>
-                  </div>
-                  <button id="btnNavLocation" class="primary" type="button">前往</button>
-                </div>
-                <p id="navLocationHint" class="subtle">通过 voice_command 下发地点，需要导航运行中且地图已标注地点。</p>
+              <div id="navActiveSession" class="hidden">
+                <div class="inspector-row"><span>地图</span><strong id="navActiveMap">--</strong></div>
               </div>
             </section>
 
-            <section class="glass panel">
-              <h3>导航指令</h3>
-              <div class="stack">
-                <button id="btnRelocate" class="wide">自动重定位</button>
-                <button id="btnArmInit" class="wide">手动重定位</button>
-                <button id="btnArmGoal" class="wide">手动设置目的地</button>
-                <button id="btnCancelNav" class="danger wide">停止导航</button>
+            <section id="navCommandSections" class="hidden">
+              <div class="inspector-section">
+                <h3>目的地</h3>
+                <div class="nav-location-row">
+                  <div id="navLocationPanel" class="nav-select" data-control="navLocationInput">
+                    <input id="navLocationInput" class="nav-select-control" type="text" placeholder="选择地点" autocomplete="off" role="combobox" aria-autocomplete="none" aria-haspopup="listbox" aria-controls="navLocationOptions" aria-expanded="false" />
+                    <span class="nav-select-chevron" aria-hidden="true"></span>
+                    <div id="navLocationMenu" class="nav-select-menu"><div id="navLocationOptions" class="nav-select-options" role="listbox" aria-label="当前地图可导航地点"></div></div>
+                  </div>
+                  <button id="btnNavLocation" class="primary" type="button">前往</button>
+                </div>
+                <p id="navLocationHint" class="field-help">当前地图尚未标注地点</p>
               </div>
-              <p class="subtle">自动重定位会根据当前地图与雷达估计位姿；手动模式下在地图上拖拽设置方向。</p>
+
+              <div class="inspector-section">
+                <h3>定位</h3>
+                <button id="btnRelocate" class="secondary wide" type="button">自动定位</button>
+                <h3 class="subsection-title">地图工具</h3>
+                <div class="mode-tools">
+                  <button id="btnArmInit" class="mode-tool" type="button"><span class="tool-mark">⌖</span><span>设置机器人位置</span></button>
+                  <button id="btnArmGoal" class="mode-tool" type="button"><span class="tool-mark">＋</span><span>设置目标点</span></button>
+                </div>
+              </div>
+
+              <div id="navCurrentTask" class="inspector-section hidden">
+                <h3>当前任务</h3>
+                <div class="inspector-list compact">
+                  <div><span>前往</span><strong id="navTaskGoal">地图目标</strong></div>
+                  <div><span>规划</span><strong id="navTaskPlan">--</strong></div>
+                  <div><span>状态</span><strong id="navTaskState">导航中</strong></div>
+                </div>
+                <button id="btnCancelNav" class="secondary wide" type="button">取消当前任务</button>
+              </div>
+
+              <div class="inspector-section session-end"><button id="btnStopNavigation" class="tertiary danger-text wide" type="button">关闭导航服务</button></div>
             </section>
           </aside>
         </div>
@@ -176,50 +178,28 @@
 
       <section id="page-preview" class="page">
         <div class="preview-layout">
-          <aside class="preview-side glass">
-            <div class="panel-head">
-              <h3>已有地图</h3>
-              <button id="btnRefreshMaps">刷新</button>
-            </div>
+          <aside class="preview-side inspector">
+            <div class="inspector-head"><h1>地图</h1><button id="btnRefreshMaps" class="icon-button" type="button" aria-label="刷新地图">↻</button></div>
             <div id="mapList" class="map-list"></div>
-            <button id="btnDeletePreviewMap" class="danger wide" disabled>删除所选地图</button>
+            <div class="inspector-divider"></div>
             <div class="location-editor">
-              <div class="panel-head">
-                <h3>地点标注</h3>
-                <span id="previewLocationMeta" class="subtle">未选择地图</span>
-              </div>
-              <div class="location-actions">
-                <button id="btnAddPreviewLocation" disabled>添加地点</button>
-                <button id="btnCancelPreviewLocation" disabled>取消</button>
-              </div>
+              <div class="section-heading"><h3>地点</h3><span id="previewLocationMeta" class="count-label">0</span></div>
               <div id="previewLocationList" class="location-list"></div>
-              <div class="location-actions single">
-                <button id="btnDeletePreviewLocation" class="danger" disabled>删除选中</button>
-              </div>
+              <button id="btnAddPreviewLocation" class="tertiary align-left" type="button" disabled>＋ 添加地点</button>
+              <button id="btnCancelPreviewLocation" class="secondary wide hidden" type="button" disabled>取消添加</button>
+              <button id="btnDeletePreviewLocation" class="tertiary danger-text align-left" type="button" disabled>删除选中地点</button>
             </div>
+            <div class="inspector-divider push-bottom"></div>
+            <button id="btnDeletePreviewMap" class="tertiary danger-text align-left" type="button" disabled>删除地图</button>
           </aside>
-          <section class="preview-main glass">
+          <section class="preview-main map-pane">
             <div class="pane-head">
-              <div>
-                <h2 id="previewTitle">地图预览</h2>
-                <p id="previewMeta" class="subtle">从 `maps/` 目录读取 `.pgm` 与 `.yaml`</p>
-              </div>
-              <div class="help-wrap">
-                <button class="hint-toggle hint-icon" data-help="previewHelp" type="button" aria-label="查看地图操作提示">
-                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/>
-                    <path d="M12 10v5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                    <circle cx="12" cy="7" r="1.1" fill="currentColor"/>
-                  </svg>
-                </button>
-                <div id="previewHelp" class="map-help hidden">
-                  地图预览支持滚轮缩放、左键平移和右键旋转。添加地点时左键拖拽设定朝向，松开后输入名称。
-                </div>
-              </div>
+              <div><h1 id="previewTitle">地图预览</h1><p id="previewMeta" class="subtle">请选择地图</p></div>
+              <div class="help-wrap"><button class="hint-toggle icon-button" data-help="previewHelp" type="button" aria-label="地图操作帮助">i</button><div id="previewHelp" class="map-help hidden"><strong>地图操作</strong><dl><dt>拖动</dt><dd>平移地图</dd><dt>滚轮 / 双指</dt><dd>缩放</dd><dt>右键拖动</dt><dd>旋转</dd></dl></div></div>
             </div>
             <div class="canvas-shell">
-              <canvas id="previewCanvas"></canvas>
-              <div id="previewHint" class="canvas-hint">请选择左侧地图</div>
+              <canvas id="previewCanvas"></canvas><div id="previewHint" class="canvas-hint">请选择地图</div>
+              <div class="canvas-toolbar" data-canvas="previewCanvas" aria-label="预览视图工具"><button type="button" data-view-action="zoom-out" aria-label="缩小">−</button><span class="zoom-value">100%</span><button type="button" data-view-action="zoom-in" aria-label="放大">＋</button><button type="button" data-view-action="fit">适合</button><button type="button" data-view-action="reset-rotation">复位</button></div>
             </div>
           </section>
         </div>
@@ -227,179 +207,57 @@
 
       <section id="page-configs" class="page">
         <div id="configOverview" class="configs-layout">
-          <section class="glass configs-board">
-            <div class="pane-head">
-              <div>
-                <h2>配置文件</h2>
-                <p class="subtle">点击卡片查看并直接修改 `config/` 下的 YAML 参数</p>
-              </div>
-              <button id="btnRefreshConfigs">刷新</button>
-            </div>
+          <section class="configs-board">
+            <div class="pane-head"><div><h1>配置文件</h1><p class="subtle">Finav 运行参数</p></div><button id="btnRefreshConfigs" class="icon-button" type="button" aria-label="刷新配置">↻</button></div>
+            <div class="config-table-head"><span>文件</span><span>大小</span><span></span></div>
             <div id="configCards" class="config-cards"></div>
-            <div id="configApplyPanel" class="config-apply-panel hidden">
-              <div id="configRestartActions" class="config-restart-actions"></div>
-              <span id="configRestartNotice" class="save-notice hidden"></span>
-            </div>
-          </section>
-
-          <section class="system-power-panel" aria-labelledby="systemPowerTitle">
-            <div>
-              <h3 id="systemPowerTitle">Finav 服务控制</h3>
-              <p class="subtle">管理由 `start_finav.sh` 启动的底盘、手柄、路由、Web、建图和导航相关进程，不会关闭 Jetson 系统。</p>
-              <span id="systemSupervisorState" class="supervisor-state">正在检查监督进程…</span>
-            </div>
-            <div class="system-power-actions">
-              <button id="btnRestartFinav" class="primary" type="button">一键重启 Finav</button>
-              <button id="btnShutdownFinav" class="danger" type="button">关闭 Finav</button>
-            </div>
+            <div id="configApplyPanel" class="config-apply-panel hidden"><div id="configRestartActions" class="config-restart-actions"></div><span id="configRestartNotice" class="save-notice hidden"></span></div>
           </section>
         </div>
 
         <div id="configEditorView" class="config-editor-view hidden">
-          <section class="glass config-editor-shell">
+          <section class="config-editor-shell">
             <div class="config-editor-head">
-              <button id="configBackBtn" class="icon-back" type="button" aria-label="返回配置列表">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                  <path d="M14 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </button>
-              <div>
-                <h2 id="configEditorTitle">配置文件</h2>
-                <p id="configEditorMeta" class="subtle">config/</p>
-              </div>
+              <button id="configBackBtn" class="icon-button" type="button" aria-label="返回配置列表">←</button>
+              <div><h1 id="configEditorTitle">配置文件</h1><p id="configEditorMeta" class="subtle">config/</p></div>
+              <div class="editor-save-group"><span id="configSaveNotice" class="save-notice hidden"></span><button id="configSaveBtn" class="primary" type="button">保存</button></div>
             </div>
-            <div class="editor-wrap">
-              <div class="code-editor">
-                <pre id="configLineNumbers" class="line-numbers" aria-hidden="true">1</pre>
-                <pre id="configHighlight" class="code-highlight" aria-hidden="true"></pre>
-                <textarea id="configEditor" spellcheck="false"></textarea>
-              </div>
-            </div>
-            <div class="config-editor-actions">
-              <span id="configSaveNotice" class="save-notice hidden"></span>
-              <button id="configSaveBtn" class="primary">保存</button>
-            </div>
+            <div class="editor-wrap"><div class="code-editor"><pre id="configLineNumbers" class="line-numbers" aria-hidden="true">1</pre><pre id="configHighlight" class="code-highlight" aria-hidden="true"></pre><textarea id="configEditor" spellcheck="false" aria-label="配置内容"></textarea></div></div>
           </section>
         </div>
       </section>
     </main>
+
+    <footer id="statusDock" class="status-dock collapsed" aria-label="系统状态中心">
+      <button id="statusToggle" class="dock-toggle" type="button" aria-expanded="false">
+        <span class="dock-toggle-health"><span id="dockHealthDot" class="health-dot pending"></span><strong id="dockHealthLabel">系统检查中</strong></span>
+        <span id="dockHealthSummary">正在获取数据…</span>
+        <span id="dockToggleText">状态中心 ›</span>
+      </button>
+      <div class="dock-body">
+      <div class="status-center-head"><div><h2>系统状态</h2><div class="status-summary"><span id="drawerHealthDot" class="health-dot pending"></span><strong id="overallHealth">检查中</strong></div><p id="statusCenterSummary" class="subtle">正在获取系统状态…</p></div><button id="statusClose" class="icon-button" type="button" aria-label="关闭状态中心">×</button></div>
+      <div class="status-tabs" role="tablist" aria-label="状态内容">
+        <button class="status-tab active" data-status-panel="overview" type="button" role="tab">概览</button>
+        <button class="status-tab" data-status-panel="data" type="button" role="tab">数据链路</button>
+        <button class="status-tab" data-status-panel="logs" type="button" role="tab">日志</button>
+      </div>
+      <div id="statusPanelOverview" class="status-panel active">
+        <section id="overallHealthCard" class="diagnostic-section"><h3>运行状态</h3><div class="diagnostic-rows"><div><span>建图</span><strong id="runtimeMapping">未运行</strong></div><div><span>导航</span><strong id="runtimeNavigation">未运行</strong></div><div><span>重定位</span><strong id="runtimeRelocate">未运行</strong></div></div></section>
+        <section class="diagnostic-section"><h3>连接</h3><div class="diagnostic-rows"><div><span>ROS</span><strong id="rosConnected">--</strong></div><div><span>手柄</span><strong id="joystickState">--</strong></div></div></section>
+        <section id="mappingReadyCard" class="diagnostic-section"><h3>关键数据</h3><div class="diagnostic-rows"><div><span>Scan</span><strong id="overviewScanHz">--</strong></div><div><span>Odom</span><strong id="overviewOdomHz">--</strong></div><div><span>TF</span><strong id="overviewTfState">--</strong></div></div></section>
+      </div>
+      <div id="statusPanelData" class="status-panel">
+        <div class="status-table"><div class="status-table-head"><span>数据</span><span>频率</span><span>最近更新</span><span>状态</span></div><div><strong>/map</strong><span id="hzMap">Event</span><span id="ageMap">--</span><span id="stateMap" class="state-pill">--</span></div><div><strong>/scan</strong><span id="hzScan">--</span><span id="ageScan">--</span><span id="stateScan" class="state-pill">--</span></div><div><strong>/odom</strong><span id="hzOdom">--</span><span id="ageOdom">--</span><span id="stateOdom" class="state-pill">--</span></div><div><strong>map → odom</strong><span id="tfMapOdom">--</span><span id="ageTfMap">--</span><span id="stateTfMap" class="state-pill">--</span></div><div><strong>odom → base_link</strong><span id="tfOdomBase">--</span><span id="ageTfOdom">--</span><span id="stateTfOdom" class="state-pill">--</span></div><div><strong>/plan</strong><span id="hzPlan">--</span><span id="agePlan">--</span><span id="statePlan" class="state-pill">--</span></div></div>
+      </div>
+      <div id="statusPanelLogs" class="status-panel">
+        <div class="dock-log-toolbar"><div class="dock-log-tabs" role="tablist" aria-label="日志切换"><button id="dockTabEvents" class="dock-tab active" type="button" data-log-view="events">事件</button><button id="dockTabMappingLog" class="dock-tab" type="button" data-log-view="mapping">建图</button><button id="dockTabNavigationLog" class="dock-tab" type="button" data-log-view="navigation">导航</button></div><button id="btnClearDockPane" class="tertiary" type="button">清空</button></div><h3 id="dockLogTitle" class="sr-only">事件</h3><div id="dockStreamMeta" class="dock-meta">显示后端事件流</div><div id="dockStream" class="dock-stream events"></div>
+      </div>
+      </div>
+    </footer>
   </div>
 
-  <footer id="statusDock" class="status-dock collapsed" aria-label="运行状态中心">
-    <button id="statusToggle" class="dock-toggle" aria-expanded="false">
-      <span class="dock-toggle-summary">
-        <span id="dockHealthDot" class="health-dot pending"></span>
-        <strong>运行状态中心</strong>
-        <span id="dockHealthSummary">正在获取 ROS 数据…</span>
-      </span>
-      <span id="dockToggleText">展开</span>
-    </button>
-    <div class="dock-body">
-      <div class="status-center-head">
-        <div>
-          <p class="eyebrow">FINAV LIVE DIAGNOSTICS</p>
-          <h2>运行状态中心</h2>
-          <p id="statusCenterSummary" class="subtle">汇总运行条件、实时数据链路和诊断日志。</p>
-        </div>
-        <button id="statusClose" type="button">收起状态中心</button>
-      </div>
-
-      <div class="status-overview-grid">
-        <article class="health-card" id="overallHealthCard">
-          <span>总体状态</span><strong id="overallHealth">检查中</strong><small id="overallHealthDetail">等待服务数据</small>
-        </article>
-        <article class="health-card" id="mappingReadyCard">
-          <span>建图条件</span><strong id="mappingReady">检查中</strong><small id="mappingReadyDetail">--</small>
-        </article>
-        <article class="health-card" id="navigationReadyCard">
-          <span>导航条件</span><strong id="navigationReady">检查中</strong><small id="navigationReadyDetail">--</small>
-        </article>
-        <article class="health-card" id="transportHealthCard">
-          <span>画面传输</span><strong id="streamRate">-- Hz</strong><small id="streamLatency">延迟 -- ms</small>
-        </article>
-      </div>
-
-      <div class="status-detail-grid">
-        <section class="dock-panel status-data-panel">
-          <div class="dock-panel-title"><h3>数据链路</h3><span class="subtle">频率与新鲜度</span></div>
-          <div class="status-table">
-            <div class="status-table-head"><span>数据</span><span>频率</span><span>最后更新</span><span>判断</span></div>
-            <div><strong>地图 /map</strong><span id="hzMap">按变化</span><span id="ageMap">--</span><span id="stateMap" class="state-pill">--</span></div>
-            <div><strong>雷达 /scan</strong><span id="hzScan">--</span><span id="ageScan">--</span><span id="stateScan" class="state-pill">--</span></div>
-            <div><strong>里程计 /odom</strong><span id="hzOdom">--</span><span id="ageOdom">--</span><span id="stateOdom" class="state-pill">--</span></div>
-            <div><strong>map → odom</strong><span id="tfMapOdom">--</span><span id="ageTfMap">--</span><span id="stateTfMap" class="state-pill">--</span></div>
-            <div><strong>odom → base_link</strong><span id="tfOdomBase">--</span><span id="ageTfOdom">--</span><span id="stateTfOdom" class="state-pill">--</span></div>
-            <div><strong>规划 /plan</strong><span id="hzPlan">--</span><span id="agePlan">--</span><span id="statePlan" class="state-pill">--</span></div>
-          </div>
-        </section>
-
-        <section class="dock-panel status-robot-panel">
-          <div class="dock-panel-title"><h3>机器人与任务</h3></div>
-          <div class="kv compact">
-            <div>ROS 桥接</div><div id="rosConnected">--</div>
-            <div>当前任务</div><div id="activeRuntime">--</div>
-            <div>地图位姿</div><div id="poseMap">--</div>
-            <div>里程计位姿</div><div id="poseOdom">--</div>
-            <div>当前速度</div><div id="velOdom">--</div>
-            <div>当前目标</div><div id="goalStatus">--</div>
-            <div>规划路径</div><div id="planSummary">--</div>
-            <div>手柄链路</div><div id="joystickState">--</div>
-          </div>
-        </section>
-
-        <section class="dock-panel status-runtime-panel">
-          <div class="dock-panel-title"><h3>运行进程</h3></div>
-          <div class="runtime-status-list">
-            <div><span>建图</span><strong id="runtimeMapping">未运行</strong><small id="runtimeMappingMeta">--</small></div>
-            <div><span>导航</span><strong id="runtimeNavigation">未运行</strong><small id="runtimeNavigationMeta">--</small></div>
-            <div><span>重定位</span><strong id="runtimeRelocate">未运行</strong><small id="runtimeRelocateMeta">--</small></div>
-          </div>
-        </section>
-      </div>
-
-      <section class="dock-panel dock-log-panel">
-        <div class="panel-head">
-          <div class="dock-log-head">
-            <h3 id="dockLogTitle">事件 / 日志</h3>
-            <div class="dock-log-tabs" role="tablist" aria-label="日志切换">
-              <button id="dockTabEvents" class="dock-tab active" type="button" data-log-view="events">事件</button>
-              <button id="dockTabMappingLog" class="dock-tab" type="button" data-log-view="mapping">建图日志</button>
-              <button id="dockTabNavigationLog" class="dock-tab" type="button" data-log-view="navigation">导航日志</button>
-            </div>
-          </div>
-          <button id="btnClearDockPane">清空显示</button>
-        </div>
-        <div id="dockStreamMeta" class="dock-meta subtle">显示后端事件流</div>
-        <div id="dockStream" class="dock-stream events"></div>
-      </section>
-    </div>
-  </footer>
-
-  <div id="blockingModal" class="blocking-modal hidden" aria-live="polite">
-    <div class="blocking-card">
-      <div class="blocking-spinner"></div>
-      <p id="blockingModalText">正在处理，请稍候…</p>
-    </div>
-  </div>
-
-  <div id="annotationDialog" class="annotation-dialog hidden" aria-hidden="true">
-    <div class="annotation-card" role="dialog" aria-modal="true" aria-labelledby="annotationDialogTitle">
-      <div class="annotation-head">
-        <h3 id="annotationDialogTitle">地点标注</h3>
-        <p id="annotationDialogMeta" class="subtle"></p>
-      </div>
-      <label id="annotationNameLabel" class="annotation-name-field">
-        <span>地点名称</span>
-        <input id="annotationNameInput" type="text" autocomplete="off" />
-      </label>
-      <p id="annotationDialogMessage" class="annotation-message subtle"></p>
-      <div class="annotation-actions">
-        <button id="annotationDialogCancel" type="button">取消</button>
-        <button id="annotationDialogConfirm" class="primary" type="button">确定</button>
-      </div>
-    </div>
-  </div>
-
+  <div id="blockingModal" class="blocking-modal hidden" aria-live="polite"><div class="blocking-card"><div class="blocking-spinner"></div><p id="blockingModalText">正在处理，请稍候…</p></div></div>
+  <div id="annotationDialog" class="annotation-dialog hidden" aria-hidden="true"><div class="annotation-card" role="dialog" aria-modal="true" aria-labelledby="annotationDialogTitle"><div class="annotation-head"><h2 id="annotationDialogTitle">地点标注</h2><p id="annotationDialogMeta" class="subtle"></p></div><label id="annotationNameLabel" class="annotation-name-field"><span>地点名称</span><input id="annotationNameInput" type="text" autocomplete="off" /></label><p id="annotationDialogMessage" class="annotation-message subtle"></p><div class="annotation-actions"><button id="annotationDialogCancel" type="button">取消</button><button id="annotationDialogConfirm" class="primary" type="button">确定</button></div></div></div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script src="/app-core.js"></script>

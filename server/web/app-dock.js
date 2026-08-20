@@ -128,7 +128,7 @@ async function pollStatus() {
 
 async function pollEvents() {
   try {
-    if (isLivePage() && !$("statusDock").classList.contains("collapsed")) {
+    if (appState.statusPanel === "logs" && !$("statusDock").classList.contains("collapsed")) {
       const data = await api(`/api/history?since=${appState.lastSeq}&limit=200`);
       addEvents(data.events || []);
     }
@@ -142,7 +142,7 @@ async function pollEvents() {
 async function pollDockLogs() {
   try {
     if (
-      isLivePage()
+      appState.statusPanel === "logs"
       && !$("statusDock").classList.contains("collapsed")
       && (appState.dockView === "mapping" || appState.dockView === "navigation")
     ) {

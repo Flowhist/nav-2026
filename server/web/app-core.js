@@ -27,6 +27,7 @@ const appState = {
   navMapName: "",
   navLocations: [],
   navLocationsFor: "",
+  statusPanel: "overview",
   dockView: "events",
   dockAutoFollow: {
     events: true,
@@ -56,8 +57,11 @@ const appState = {
     sampleStartedAt: performance.now(),
   },
   navPlacementMode: null,
+  navDestinationName: "",
   navDrag: null,
   viewportGesture: null,
+  touchPointers: new Map(),
+  touchGesture: null,
   viewports: {
     mappingCanvas: createViewport(),
     navigationCanvas: createViewport(),
@@ -110,7 +114,7 @@ function setConnectionState(state) {
   if (!badge || !label) return;
   badge.classList.remove("pending", "online", "offline");
   badge.classList.add(state);
-  label.textContent = state === "online" ? "服务在线" : state === "offline" ? "连接中断" : "正在连接";
+  label.textContent = state === "online" ? "在线" : state === "offline" ? "连接中断" : "正在连接";
 }
 
 async function readApiError(res) {
@@ -173,7 +177,7 @@ function resizeCanvas(canvas) {
   if (!canvas) return false;
   const rect = canvas.getBoundingClientRect();
   if (rect.width < 1 || rect.height < 1) return false;
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const width = Math.round(rect.width * dpr);
   const height = Math.round(rect.height * dpr);
   if (canvas.width !== width || canvas.height !== height) {
@@ -576,15 +580,10 @@ function renderStatus(status) {
   const robot = status.robot || {};
   const tf = ros.tf_hz || {};
   const hz = ros.topic_hz || {};
-  const poseMap = robot.pose_map || {};
-  const poseOdom = robot.pose_odom || {};
-  const vel = robot.velocity || {};
   const plan = robot.plan || {};
   const control = status.control || {};
   const runtime = status.runtime || {};
   const lastSeen = ros.last_seen || {};
-  const transport = status.transport || {};
-  const streamActive = Number(transport.active_streams || 0) > 0;
   const joystickState = control.joystick_online ? (control.joystick_active ? "正在接管" : "在线") : "离线";
   const age = (key) => Number(lastSeen[key]);
   const fresh = (key, limit = 1.5) => Number.isFinite(age(key)) && age(key) <= limit;
@@ -595,11 +594,7 @@ function renderStatus(status) {
     node.textContent = idle ? "待命" : ok ? "正常" : "异常";
     node.dataset.state = idle ? "idle" : ok ? "ok" : "error";
   };
-  const runtimeLabel = (item, label) => item?.stopping ? `${label}停止中` : item?.running ? `${label}运行中` : "未运行";
-  const runtimeMeta = (item) => item?.running
-    ? `PID ${item.pid || "--"} · 已运行 ${formatDuration(Date.now() / 1000 - Number(item.started_at || Date.now() / 1000))}`
-    : "当前无进程";
-
+  const runtimeLabel = (item) => item?.stopping ? "停止中" : item?.running ? "运行中" : "未运行";
   const mapReceived = Number.isFinite(age("map"));
   const mappingReady = !!ros.connected && fresh("scan") && fresh("odom") && fresh("tf_odom_base_link");
   const navigationReady = mappingReady && mapReceived && fresh("tf_map_odom", 3.0);
@@ -614,7 +609,7 @@ function renderStatus(status) {
   setText("hzOdom", `${fmt(hz.odom)} Hz`);
   setText("hzPlan", `${fmt(hz.plan)} Hz`);
   setText("hzScan", `${fmt(hz.scan)} Hz`);
-  setText("hzMap", "事件驱动");
+  setText("hzMap", "Event");
   setText("ageMap", ageText("map"));
   setText("ageScan", ageText("scan"));
   setText("ageOdom", ageText("odom"));
@@ -627,56 +622,50 @@ function renderStatus(status) {
   setDataState("stateTfMap", fresh("tf_map_odom", 3.0), !runtime.mapping?.running && !runtime.navigation?.running);
   setDataState("stateTfOdom", fresh("tf_odom_base_link"), !runtime.mapping?.running && !runtime.navigation?.running);
   setDataState("statePlan", fresh("plan", 3.0), !runtime.navigation?.running || Number(plan.points || 0) === 0);
-  setText("poseMap", `x=${fmt(poseMap.x, 3)}, y=${fmt(poseMap.y, 3)}, yaw=${fmt(poseMap.yaw_deg, 1)}°`);
-  setText("poseOdom", `x=${fmt(poseOdom.x, 3)}, y=${fmt(poseOdom.y, 3)}, yaw=${fmt(poseOdom.yaw_deg, 1)}°`);
-  setText("velOdom", `vx=${fmt(vel.vx, 3)} m/s, wz=${fmt(vel.wz, 3)} rad/s`);
-  setText("goalStatus", robot.goal_pose ? `x=${fmt(robot.goal_pose.x, 2)}, y=${fmt(robot.goal_pose.y, 2)}` : "未设置");
-  setText("planSummary", `${plan.points ?? 0} 点 · ${fmt(plan.length_m || 0, 2)} m`);
   setText("joystickState", joystickState);
-  setText("activeRuntime", activeRuntime);
-  setText("runtimeMapping", runtimeLabel(runtime.mapping, "建图"));
-  setText("runtimeMappingMeta", runtimeMeta(runtime.mapping));
-  setText("runtimeNavigation", runtimeLabel(runtime.navigation, "导航"));
-  setText("runtimeNavigationMeta", runtimeMeta(runtime.navigation));
-  setText("runtimeRelocate", runtimeLabel(runtime.relocate, "重定位"));
-  setText("runtimeRelocateMeta", runtimeMeta(runtime.relocate));
-  setText("mappingReady", mappingReady ? "可以开始" : "条件不足");
-  setText("mappingReadyDetail", mappingReady ? "雷达、里程计与基础 TF 正常" : "请检查雷达、里程计与 odom TF");
-  setText("navigationReady", navigationReady ? "可以导航" : "条件不足");
-  setText("navigationReadyDetail", navigationReady ? "地图、定位 TF 与传感器正常" : "请检查地图与 map → odom TF");
+  setText("runtimeMapping", runtimeLabel(runtime.mapping));
+  setText("runtimeNavigation", runtimeLabel(runtime.navigation));
+  setText("runtimeRelocate", runtimeLabel(runtime.relocate));
   setText("overallHealth", overallOk ? "运行正常" : "需要检查");
-  setText("overallHealthDetail", activeRuntime);
-  setText("streamRate", streamActive ? `${fmt(appState.stream.measuredHz || transport.stream_hz, 1)} Hz` : "已暂停");
-  setText("streamLatency", streamActive
-    ? `延迟 ${appState.stream.latencyMs === null ? "--" : fmt(appState.stream.latencyMs, 0)} ms · ${formatBytes(transport.bytes_per_sec || 0)}/s`
-    : "状态中心打开时暂停画面传输");
-  setText("dockHealthSummary", `${activeRuntime} · ${overallOk ? "数据链路正常" : "存在异常数据"}`);
+  setText("dockHealthSummary", `Scan ${fmt(hz.scan, 0)} Hz · Odom ${fmt(hz.odom, 0)} Hz · TF ${fresh("tf_odom_base_link") ? "正常" : "异常"}`);
+  setText("dockHealthLabel", overallOk ? "系统正常" : "需要检查");
   setText("statusCenterSummary", `${activeRuntime}；${mappingReady ? "建图条件正常" : "建图条件待检查"}，${navigationReady ? "导航条件正常" : "导航条件待检查"}。`);
-
-  ["overallHealthCard", "mappingReadyCard", "navigationReadyCard", "transportHealthCard"].forEach((id) => {
-    $(id)?.classList.remove("ok", "warn");
+  setText("overviewScanHz", `${fmt(hz.scan)} Hz`);
+  setText("overviewOdomHz", `${fmt(hz.odom)} Hz`);
+  setText("overviewTfState", fresh("tf_odom_base_link") ? "正常" : "异常");
+  setText("mappingSensorScan", fresh("scan") ? "正常" : "异常");
+  setText("mappingSensorOdom", fresh("odom") ? "正常" : "异常");
+  setText("mappingSensorTf", fresh("tf_odom_base_link") ? "正常" : "异常");
+  [
+    ["mappingSensorScan", fresh("scan")],
+    ["mappingSensorOdom", fresh("odom")],
+    ["mappingSensorTf", fresh("tf_odom_base_link")],
+  ].forEach(([id, ok]) => {
+    const node = $(id);
+    if (node) node.dataset.state = ok ? "ok" : "error";
   });
-  $("overallHealthCard")?.classList.add(overallOk ? "ok" : "warn");
-  $("mappingReadyCard")?.classList.add(mappingReady ? "ok" : "warn");
-  $("navigationReadyCard")?.classList.add(navigationReady ? "ok" : "warn");
-  $("transportHealthCard")?.classList.add(!streamActive || appState.stream.measuredHz >= 8 ? "ok" : "warn");
+  if (runtime.mapping?.running) {
+    setText("mappingElapsed", `已运行 ${formatClockDuration(Date.now() / 1000 - Number(runtime.mapping.started_at || Date.now() / 1000))}`);
+  }
+  setText("navTaskGoal", appState.navDestinationName || (robot.goal_pose ? "地图目标" : "等待目标"));
+  setText("navTaskPlan", Number(plan.length_m) > 0 ? `${fmt(plan.length_m, 1)} m` : "规划中");
+  setText("navTaskState", robot.goal_pose || Number(plan.points || 0) > 0 ? "导航中" : "等待目标");
+
   const healthDot = $("dockHealthDot");
   if (healthDot) healthDot.className = `health-dot ${overallOk ? "ok" : "warn"}`;
+  const drawerHealthDot = $("drawerHealthDot");
+  if (drawerHealthDot) drawerHealthDot.className = `health-dot ${overallOk ? "ok" : "warn"}`;
   renderRuntimeControls();
 }
 
-function formatDuration(seconds) {
-  const value = Math.max(0, Number(seconds) || 0);
-  if (value < 60) return `${Math.floor(value)} 秒`;
-  if (value < 3600) return `${Math.floor(value / 60)} 分钟`;
-  return `${Math.floor(value / 3600)} 小时 ${Math.floor(value % 3600 / 60)} 分`;
-}
-
-function formatBytes(bytes) {
-  const value = Number(bytes) || 0;
-  if (value < 1024) return `${Math.round(value)} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
-  return `${(value / 1024 / 1024).toFixed(2)} MiB`;
+function formatClockDuration(seconds) {
+  const value = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor(value % 3600 / 60);
+  const secs = value % 60;
+  return hours > 0
+    ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
 function formatExtra(extra) {

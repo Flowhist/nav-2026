@@ -79,6 +79,84 @@ function updateNavDrag(event) {
   renderLiveCanvases();
 }
 
+function updateViewportDisplay(canvasId) {
+  const viewport = appState.viewports[canvasId];
+  const toolbar = document.querySelector(`.canvas-toolbar[data-canvas="${canvasId}"]`);
+  if (!viewport || !toolbar) return;
+  const value = toolbar.querySelector(".zoom-value");
+  if (value) value.textContent = `${Math.round(viewport.zoom * 100)}%`;
+}
+
+function changeViewport(canvasId, action) {
+  const canvas = $(canvasId);
+  const viewport = getViewport(canvas);
+  if (!canvas || !viewport) return;
+  if (action === "fit") {
+    resetViewport(canvasId);
+  } else if (action === "reset-rotation") {
+    viewport.rotation = 0;
+  } else {
+    const factor = action === "zoom-in" ? 1.2 : 1 / 1.2;
+    viewport.zoom = clamp(viewport.zoom * factor, 0.45, 10);
+  }
+  renderCanvasById(canvasId);
+}
+
+function trackTouchPointer(canvas, event) {
+  if (event.pointerType !== "touch") return false;
+  appState.touchPointers.set(event.pointerId, { canvasId: canvas.id, x: event.clientX, y: event.clientY });
+  const points = [...appState.touchPointers.entries()].filter(([, point]) => point.canvasId === canvas.id);
+  if (points.length > 1 && (appState.navDrag || appState.previewAnnotationDraft)) return true;
+  if (points.length !== 2) return false;
+  const [[idA, a], [idB, b]] = points;
+  const viewport = getViewport(canvas);
+  appState.viewportGesture = null;
+  appState.touchGesture = {
+    canvasId: canvas.id,
+    pointerIds: [idA, idB],
+    startDistance: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)),
+    startCenterX: (a.x + b.x) / 2,
+    startCenterY: (a.y + b.y) / 2,
+    startZoom: viewport.zoom,
+    startPanX: viewport.panX,
+    startPanY: viewport.panY,
+  };
+  event.preventDefault();
+  return true;
+}
+
+function updateTouchPointer(event) {
+  const point = appState.touchPointers.get(event.pointerId);
+  if (!point) return false;
+  point.x = event.clientX;
+  point.y = event.clientY;
+  const gesture = appState.touchGesture;
+  if (!gesture || !gesture.pointerIds.includes(event.pointerId)) return false;
+  const a = appState.touchPointers.get(gesture.pointerIds[0]);
+  const b = appState.touchPointers.get(gesture.pointerIds[1]);
+  if (!a || !b) return false;
+  const canvas = $(gesture.canvasId);
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+  const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+  const distance = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
+  const viewport = getViewport(canvas);
+  viewport.zoom = clamp(gesture.startZoom * distance / gesture.startDistance, 0.45, 10);
+  viewport.panX = gesture.startPanX + (((a.x + b.x) / 2) - gesture.startCenterX) * scaleX;
+  viewport.panY = gesture.startPanY + (((a.y + b.y) / 2) - gesture.startCenterY) * scaleY;
+  renderCanvasById(canvas.id);
+  event.preventDefault();
+  return true;
+}
+
+function endTouchPointer(event) {
+  const gesture = appState.touchGesture;
+  const wasPinching = !!gesture?.pointerIds.includes(event.pointerId);
+  appState.touchPointers.delete(event.pointerId);
+  if (wasPinching) appState.touchGesture = null;
+  return wasPinching;
+}
+
 async function finishNavDrag(event) {
   if (!appState.navDrag || appState.navDrag.pointerId !== event.pointerId) return;
   const drag = appState.navDrag;
@@ -101,6 +179,7 @@ async function finishNavDrag(event) {
 
   try {
     await api(endpoint, "POST", body);
+    if (appState.navPlacementMode === "goal") appState.navDestinationName = "地图目标";
     showToast(appState.navPlacementMode === "initial" ? "初始位姿已发送" : "导航目标已发送", "ok");
   } catch (err) {
     reportActionError(err, "位姿指令发送失败");
@@ -125,7 +204,7 @@ function findPreviewLocationAt(canvas, event) {
       bestName = loc.name;
     }
   });
-  return bestDist <= 18 * (window.devicePixelRatio || 1) ? bestName : "";
+  return bestDist <= 18 * Math.min(window.devicePixelRatio || 1, 2) ? bestName : "";
 }
 
 function selectPreviewLocation(name) {
@@ -214,7 +293,7 @@ function showAnnotationDialog(options) {
       if (event.key === "Escape") {
         event.preventDefault();
         onCancel();
-      } else if (event.key === "Enter") {
+      } else if (event.key === "Enter" && !options.danger) {
         event.preventDefault();
         onConfirm();
       }
@@ -225,7 +304,7 @@ function showAnnotationDialog(options) {
     dialog.addEventListener("keydown", onKeydown);
     dialog.classList.remove("hidden");
     dialog.setAttribute("aria-hidden", "false");
-    window.setTimeout(() => (isNameMode ? input : confirm).focus(), 0);
+    window.setTimeout(() => (isNameMode ? input : options.danger ? cancel : confirm).focus(), 0);
   });
 }
 
@@ -374,6 +453,7 @@ function bindCanvasInteractions(canvasId, options = {}) {
   }, { passive: false });
 
   canvas.addEventListener("pointerdown", (event) => {
+    if (trackTouchPointer(canvas, event)) return;
     if (event.button === 2) {
       startViewportGesture(canvas, event, "rotate");
       return;
@@ -395,6 +475,16 @@ function bindCanvasInteractions(canvasId, options = {}) {
 
     startViewportGesture(canvas, event, "pan");
   });
+}
+
+function setStatusPanel(panel) {
+  appState.statusPanel = panel;
+  document.querySelectorAll(".status-tab").forEach((button) => {
+    button.classList.toggle("active", button.dataset.statusPanel === panel);
+    button.setAttribute("aria-selected", String(button.dataset.statusPanel === panel));
+  });
+  document.querySelectorAll(".status-panel").forEach((node) => node.classList.toggle("active", node.id === `statusPanel${panel[0].toUpperCase()}${panel.slice(1)}`));
+  if (panel === "logs" && appState.dockView !== "events") loadRuntimeLog(appState.dockView).catch(console.error);
 }
 
 function toggleHelp(helpId) {
@@ -455,7 +545,6 @@ async function setPage(page) {
   document.querySelectorAll(".page").forEach((node) => {
     node.classList.toggle("active", node.id === `page-${page}`);
   });
-  $("statusDock").classList.toggle("hidden", page === "preview" || page === "configs");
   if (!isLivePage()) setStatusExpanded(false);
   if (page === "preview") loadSavedMaps().catch(console.error);
   if (page === "navigation" && !appState.savedMaps.length) loadSavedMaps().catch(console.error);
@@ -473,7 +562,7 @@ function setStatusExpanded(expanded) {
   const dock = $("statusDock");
   dock.classList.toggle("collapsed", !expanded);
   $("statusToggle").setAttribute("aria-expanded", String(expanded));
-  $("dockToggleText").textContent = expanded ? "收起" : "展开";
+  $("dockToggleText").textContent = expanded ? "收起" : "状态中心 ›";
   if (expanded) {
     stopSceneStream();
     if (appState.dockView !== "events") loadRuntimeLog(appState.dockView).catch(console.error);
@@ -495,11 +584,22 @@ function bind() {
     if (!appState.savedMaps.length) loadSavedMaps().catch(console.error);
     toggleNavSelect("navMapPanel");
   });
+  $("systemMenuToggle").addEventListener("click", (event) => {
+    event.stopPropagation();
+    const menu = $("systemMenu");
+    const opening = menu.classList.contains("hidden");
+    menu.classList.toggle("hidden", !opening);
+    $("systemMenuToggle").setAttribute("aria-expanded", String(opening));
+    if (opening) loadSystemSupervisor().catch(console.error);
+  });
   document.addEventListener("click", (event) => {
-    if (event.target.closest(".help-wrap")) return;
-    document.querySelectorAll(".map-help").forEach((panel) => panel.classList.add("hidden"));
+    if (!event.target.closest(".help-wrap")) document.querySelectorAll(".map-help").forEach((panel) => panel.classList.add("hidden"));
     if (!event.target.closest("#navMapPanel")) toggleNavSelect("navMapPanel", false);
     if (!event.target.closest("#navLocationPanel")) toggleNavSelect("navLocationPanel", false);
+    if (!event.target.closest(".system-menu-wrap")) {
+      $("systemMenu").classList.add("hidden");
+      $("systemMenuToggle").setAttribute("aria-expanded", "false");
+    }
   });
 
   $("btnStartMapping").addEventListener("click", () => startRuntime("mapping").catch(console.error));
@@ -562,8 +662,14 @@ function bind() {
       setNavPlacementMode(null);
       appState.navDrag = null;
       await api("/api/nav/cancel", "POST", {});
+      appState.navDestinationName = "";
+      if (appState.status?.robot) {
+        appState.status.robot.goal_pose = null;
+        appState.status.robot.plan = { points: 0, length_m: 0 };
+      }
       renderLiveCanvases();
-      showToast("已发送停止导航指令", "ok");
+      renderRuntimeControls();
+      showToast("已取消当前任务", "ok");
     } catch (err) {
       reportActionError(err, "导航取消失败");
     }
@@ -576,6 +682,8 @@ function bind() {
     toggleNavSelect("navLocationPanel", false);
     try {
       await api("/api/nav/location", "POST", { name });
+      appState.navDestinationName = name;
+      renderRuntimeControls();
       showToast(`已发送地点“${name}”`, "ok");
     } catch (err) {
       reportActionError(err, "地点导航失败");
@@ -609,6 +717,9 @@ function bind() {
 
   $("statusToggle").addEventListener("click", () => setStatusExpanded($("statusDock").classList.contains("collapsed")));
   $("statusClose").addEventListener("click", () => setStatusExpanded(false));
+  document.querySelectorAll(".status-tab").forEach((button) => {
+    button.addEventListener("click", () => setStatusPanel(button.dataset.statusPanel));
+  });
 
   document.querySelectorAll(".dock-tab").forEach((btn) => {
     btn.addEventListener("click", () => setDockView(btn.dataset.logView));
@@ -627,7 +738,7 @@ function bind() {
   $("configSaveBtn").addEventListener("click", () => saveConfigEditor().catch(console.error));
   $("configEditor").addEventListener("input", () => {
     renderConfigHighlight();
-    setConfigSaveNotice("");
+    setConfigSaveNotice($("configEditor").value === appState.configEditor.content ? "" : "● 未保存", "dirty");
   });
   $("configEditor").addEventListener("scroll", syncConfigEditorScroll);
   $("btnRestartFinav").addEventListener("click", (event) => requestFinavPowerAction("restart", event.currentTarget));
@@ -637,19 +748,29 @@ function bind() {
   bindCanvasInteractions("navigationCanvas", { allowPlacement: true });
   bindCanvasInteractions("previewCanvas", { allowPreviewAnnotation: true });
 
+  document.querySelectorAll(".canvas-toolbar").forEach((toolbar) => {
+    toolbar.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-view-action]");
+      if (button) changeViewport(toolbar.dataset.canvas, button.dataset.viewAction);
+    });
+  });
+
   window.addEventListener("pointermove", (event) => {
+    if (updateTouchPointer(event)) return;
     updateViewportGesture(event);
     updateNavDrag(event);
     updatePreviewAnnotationDrag(event);
   });
 
   window.addEventListener("pointerup", (event) => {
+    if (endTouchPointer(event)) return;
     endViewportGesture(event);
     finishNavDrag(event).catch(console.error);
     finishPreviewAnnotationDrag(event).catch(console.error);
   });
 
   window.addEventListener("pointercancel", (event) => {
+    if (endTouchPointer(event)) return;
     endViewportGesture(event);
     finishNavDrag(event).catch(console.error);
     finishPreviewAnnotationDrag(event).catch(console.error);
@@ -668,6 +789,8 @@ function bind() {
   renderDockStream();
   renderRuntimeControls();
   loadSavedMaps().catch(console.error);
+  loadSystemSupervisor().catch(console.error);
+  setStatusPanel("overview");
   setPage("mapping").catch(console.error);
 }
 

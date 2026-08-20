@@ -78,29 +78,28 @@ function resetLiveScene() {
 function updateSceneHints() {
   const map = appState.scene.map;
   const hasMap = !!map;
-  const cameraHint = "滚轮缩放｜左键平移｜右键旋转";
   $("mappingHint").textContent = appState.page === "mapping" && appState.navPlacementMode === "initial"
-    ? "手动重定位中：在地图上拖拽设置车体位置和朝向。"
+    ? "拖拽设置机器人位置与朝向"
     : hasMap
-      ? `${cameraHint}｜地图 ${map.width} × ${map.height}｜雷达点 ${appState.scene.scan?.count || 0}｜画面 ${fmt(appState.stream.measuredHz, 1)} Hz`
-      : "等待 `/map` 数据...";
+      ? `Scan ${fmt(appState.status?.ros?.topic_hz?.scan, 0)} Hz · Map ${map.width}×${map.height} · Stream ${fmt(appState.stream.measuredHz, 1)} Hz`
+      : "等待 /map 数据…";
 
   if (appState.navPlacementMode === "initial") {
-    $("navigationHint").textContent = "手动重定位中：左键拖拽方向，右键仍可旋转视图。";
+    $("navigationHint").textContent = "拖拽设置机器人位置与朝向";
   } else if (appState.navPlacementMode === "goal") {
-    $("navigationHint").textContent = "手动设置目的地中：左键拖拽方向，右键仍可旋转视图。";
+    $("navigationHint").textContent = "拖拽设置目标点与朝向";
   } else {
     $("navigationHint").textContent = hasMap
-      ? `${cameraHint}｜路径点 ${appState.scene.plan?.points || 0}｜雷达点 ${appState.scene.scan?.count || 0}｜画面 ${fmt(appState.stream.measuredHz, 1)} Hz`
-      : "等待 `/map` 数据...";
+      ? `Scan ${fmt(appState.status?.ros?.topic_hz?.scan, 0)} Hz · Plan ${appState.scene.plan?.points || 0} pts · Stream ${fmt(appState.stream.measuredHz, 1)} Hz`
+      : "等待 /map 数据…";
   }
 
   if (appState.previewAnnotationMode) {
-    $("previewHint").textContent = "添加地点中：左键拖拽方向，松开后输入名称；右键仍可旋转视图。";
+    $("previewHint").textContent = "拖拽设置地点与朝向";
   } else {
     $("previewHint").textContent = appState.previewMap
-      ? `${cameraHint}｜标注 ${appState.previewLocations.length} 个｜${appState.previewMap.width} × ${appState.previewMap.height}`
-      : "请选择左侧地图";
+      ? `${appState.previewMap.width}×${appState.previewMap.height} · ${appState.previewLocations.length} 个地点`
+      : "请选择地图";
   }
 }
 
@@ -148,6 +147,7 @@ function renderPreviewCanvas() {
 function renderCanvasById(canvasId) {
   if (canvasId === "previewCanvas") renderPreviewCanvas();
   else renderLiveCanvases();
+  if (typeof updateViewportDisplay === "function") updateViewportDisplay(canvasId);
 }
 
 function renderCurrentPageCanvases() {
@@ -170,7 +170,7 @@ function renderMapList() {
   const box = $("mapList");
   box.innerHTML = "";
   if (!appState.savedMaps.length) {
-    box.innerHTML = `<div class="subtle">未发现可预览地图</div>`;
+    box.innerHTML = `<div class="empty-state"><strong>尚无地图</strong><span>完成一次建图并保存后，地图会显示在这里。</span></div>`;
     $("btnDeletePreviewMap").disabled = true;
     return;
   }
@@ -264,14 +264,14 @@ function renderNavLocationList() {
   if (list) {
     list.innerHTML = "";
     if (!appState.navLocations.length) {
-      list.innerHTML = `<div class="subtle">当前地图没有可选地点</div>`;
+      list.innerHTML = `<div class="empty-state compact"><strong>尚无地点</strong><span>请先在地图页添加地点。</span></div>`;
     } else {
       const selected = input.value.trim();
       appState.navLocations.forEach((loc) => {
         const btn = createInfoButton(
           "nav-select-option" + (loc.name === selected ? " active" : ""),
           loc.name,
-          `x=${fmt(loc.x, 2)} · y=${fmt(loc.y, 2)} · yaw=${fmt(loc.yaw_deg, 1)}°`,
+          `x ${fmt(loc.x, 2)} · y ${fmt(loc.y, 2)} · ${fmt(loc.yaw_deg, 1)}°`,
         );
         btn.type = "button";
         btn.setAttribute("role", "option");
@@ -291,10 +291,9 @@ function renderNavLocationList() {
     if (!appState.navMapName) {
       hint.textContent = "请先选择导航地图。";
     } else if (!appState.navLocations.length) {
-      hint.textContent = `地图“${appState.navMapName}”未标注地点，可直接输入地名尝试下发。`;
+      hint.textContent = "当前地图尚未标注地点";
     } else {
-      const names = appState.navLocations.map((loc) => loc.name).join("、");
-      hint.textContent = `可用地点：${names}`;
+      hint.textContent = `${appState.navLocations.length} 个可用地点`;
     }
   }
 }
@@ -344,8 +343,18 @@ function renderRuntimeControls() {
   const mappingBusy = mapping.running || mapping.stopping;
   const navigationBusy = navigation.running || navigation.stopping;
   const navCommandsEnabled = navigation.running && !navigation.stopping;
-  applyRunState("mappingRunState", mapping, "运行中");
-  applyRunState("navigationRunState", navigation, "运行中");
+  applyRunState("mappingRunState", mapping, "正在建图");
+  applyRunState("navigationRunState", navigation, "正在运行");
+
+  setHidden("mappingIdleActions", mappingBusy);
+  setHidden("mappingActiveActions", !mappingBusy);
+  setHidden("navIdleSession", navigationBusy);
+  setHidden("navActiveSession", !navigationBusy);
+  setHidden("navCommandSections", !navCommandsEnabled);
+  setText("navActiveMap", activeMap || appState.navMapName || "--");
+  const plan = appState.status?.robot?.plan || {};
+  const hasTask = navCommandsEnabled && (!!appState.status?.robot?.goal_pose || Number(plan.points || 0) > 0 || !!appState.navDestinationName);
+  setHidden("navCurrentTask", !hasTask);
 
   $("btnStartMapping").disabled = mappingBusy;
   $("btnStopMapping").disabled = !mappingBusy;
@@ -368,6 +377,7 @@ function renderRuntimeControls() {
   if (!navCommandsEnabled && appState.navPlacementMode && typeof setNavPlacementMode === "function") {
     setNavPlacementMode(null);
   }
+  if (!navCommandsEnabled) appState.navDestinationName = "";
 
   const navLocationInput = $("navLocationInput");
   const btnNavLocation = $("btnNavLocation");
@@ -514,7 +524,7 @@ function renderConfigRestartActions() {
   targets.forEach((target) => {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "danger";
+    btn.className = "secondary";
     btn.dataset.restartMode = target.mode;
     btn.textContent = `重启${target.label || target.mode}`;
     btn.addEventListener("click", () => restartRuntimeTarget(target.mode, btn).catch(console.error));
@@ -537,6 +547,7 @@ function setConfigSaveNotice(text = "", kind = "ok") {
   node.textContent = text;
   node.dataset.kind = kind;
   node.classList.remove("hidden");
+  if (kind === "dirty") return;
   configSaveNoticeTimer = window.setTimeout(() => {
     node.classList.add("hidden");
     node.dataset.kind = "";
@@ -555,15 +566,20 @@ function renderConfigCards() {
   const box = $("configCards");
   box.innerHTML = "";
   if (!appState.configs.length) {
-    box.innerHTML = `<div class="subtle">未发现可编辑的配置文件</div>`;
+    box.innerHTML = `<div class="empty-state"><strong>尚无配置文件</strong><span>config/ 中可编辑的 YAML 文件会显示在这里。</span></div>`;
     return;
   }
 
   appState.configs.forEach((file) => {
-    const card = createInfoButton("config-card", file.name, file.path);
+    const card = document.createElement("button");
+    const name = document.createElement("strong");
     const size = document.createElement("span");
+    card.type = "button";
+    card.className = "config-card";
+    name.textContent = file.name;
+    size.className = "config-size";
     size.textContent = formatFileSize(file.size);
-    card.appendChild(size);
+    card.append(name, size);
     card.addEventListener("click", () => openConfigEditor(file.name));
     box.appendChild(card);
   });
@@ -889,7 +905,7 @@ function renderPreviewLocationList() {
       const btn = document.createElement("button");
       btn.className = "location-item" + (loc.name === appState.previewSelectedLocation ? " active" : "");
       btn.type = "button";
-      btn.innerHTML = `<strong>${escapeHtml(loc.name)}</strong><span>x=${fmt(loc.x, 3)}, y=${fmt(loc.y, 3)}, yaw=${fmt(loc.yaw_deg, 1)}°</span>`;
+      btn.innerHTML = `<strong>${escapeHtml(loc.name)}</strong><span>x ${fmt(loc.x, 2)} · y ${fmt(loc.y, 2)} · ${fmt(loc.yaw_deg, 0)}°</span>`;
       btn.addEventListener("click", () => {
         appState.previewSelectedLocation = loc.name;
         renderPreviewLocationList();
@@ -902,12 +918,13 @@ function renderPreviewLocationList() {
   setText(
     "previewLocationMeta",
     appState.previewMapName
-      ? `${appState.previewLocations.length} 个地点`
-      : "未选择地图",
+      ? String(appState.previewLocations.length)
+      : "0",
   );
   $("btnAddPreviewLocation").disabled = !appState.previewMapName;
   $("btnAddPreviewLocation").classList.toggle("active", appState.previewAnnotationMode);
   $("btnCancelPreviewLocation").disabled = !appState.previewAnnotationMode;
+  $("btnCancelPreviewLocation").classList.toggle("hidden", !appState.previewAnnotationMode);
   $("btnDeletePreviewLocation").disabled = !appState.previewSelectedLocation;
 }
 
