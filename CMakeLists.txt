@@ -201,6 +201,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_base_control_profile tests/test_base_control_profile.py)
   ament_add_pytest_test(test_base_control_dispatch tests/test_base_control_dispatch.py)
   ament_add_pytest_test(test_base_driver_worker tests/test_base_driver_worker.py)
+  ament_add_pytest_test(test_manual_web_control tests/test_manual_web_control.py)
 endif()
 
 ament_export_dependencies(${dependencies})

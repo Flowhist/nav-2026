@@ -31,6 +31,11 @@ class StateStore:
                 "joystick_active": False,
                 "joystick_online": False,
                 "joystick_updated_at": None,
+                "gear": None,
+                "gear_online": False,
+                "gear_updated_at": None,
+                "manual_locked": False,
+                "manual_lock_reason": None,
             },
             "runtime": {
                 "mapping": {"running": False, "stopping": False, "started_at": None, "pid": None, "log_path": None},

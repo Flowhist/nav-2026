@@ -89,6 +89,7 @@ class BaseControlRouter(Node):
 
         self._source = Source.NONE
         self._joystick_stop_latched = False
+        self._web_reset_required = False
         self._last_cmd_time = 0.0
         self._last_lock_msg_time = 0.0
         self._last_nav_clear_time = 0.0
@@ -195,6 +196,7 @@ class BaseControlRouter(Node):
     def _clear_control_state(self, *, clear_nav: bool = True, nav_clear_reason: str = "control_state_clear"):
         self._source = Source.NONE
         self._joystick_stop_latched = False
+        self._web_reset_required = False
         self._kb_linear = 0.0
         self._kb_angular = 0.0
         self._web_cmd = Twist()
@@ -224,6 +226,7 @@ class BaseControlRouter(Node):
 
     def _enter_joystick_stop_lock(self, interrupted: Source):
         self._joystick_stop_latched = True
+        self._web_reset_required = interrupted == Source.WEB
         self._source = Source.NONE
         self._kb_linear = 0.0
         self._kb_angular = 0.0
@@ -243,10 +246,21 @@ class BaseControlRouter(Node):
         self._js_time = time.monotonic()
 
     def _on_web_cmd(self, msg: Twist):
+        if self._joystick_stop_latched:
+            if self._nonzero(msg):
+                self._web_reset_required = True
+            elif self._web_reset_required:
+                self._web_reset_required = False
+            self._warn_reset_required("web ignored")
+            return
+        if self._web_reset_required:
+            if self._nonzero(msg):
+                self._warn_reset_required("web neutral required")
+                return
+            self._web_reset_required = False
+            self._publish_status("web_reset")
         self._web_cmd = msg
         self._web_time = time.monotonic()
-        if self._joystick_stop_latched:
-            self._warn_reset_required("web ignored")
 
     def _on_nav_cmd(self, msg: Twist):
         self._nav_cmd = msg
@@ -326,8 +340,12 @@ class BaseControlRouter(Node):
             if js_reset:
                 self._joystick_stop_latched = False
                 self._source = Source.NONE
-                self._publish_status("joystick_reset")
-                self.get_logger().info("摇杆已复位，允许新的控制指令")
+                if self._web_reset_required:
+                    self._publish_status("web_reset_required")
+                    self.get_logger().info("摇杆已复位，等待网页控制回中")
+                else:
+                    self._publish_status("joystick_reset")
+                    self.get_logger().info("摇杆已复位，允许新的控制指令")
             return
 
         if js_nonzero:

@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_navigation_goal_button_uses_standard_button_style():
     html = (ROOT / "server" / "web" / "index.html").read_text(encoding="utf-8")
 
-    assert 'id="btnArmGoal" class="wide"' in html
+    assert 'id="btnArmGoal" class="mode-tool"' in html
+    assert 'id="btnArmInit" class="mode-tool"' in html
     assert 'id="btnArmGoal" class="primary wide"' not in html
 
 

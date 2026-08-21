@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import math
 import mimetypes
 import socket
 import shutil
@@ -90,7 +91,7 @@ class ServerApp:
         self.config_dir = self.repo_dir / "config"
 
         self.state = StateStore()
-        self.bridge = RosBridge(self.state)
+        self.bridge = RosBridge(self.state, self.config_dir / "handle.yaml")
         self.runtime = RuntimeManager(self.repo_dir, self.state)
 
         self._httpd: Optional[ThreadingHTTPServer] = None
@@ -220,6 +221,37 @@ class ServerApp:
                         }
                     )
                     self._json(HTTPStatus.OK, {"ok": True})
+                    return
+
+                if path == "/api/control/manual":
+                    try:
+                        linear = float(body.get("linear", 0.0))
+                        angular = float(body.get("angular", 0.0))
+                    except (TypeError, ValueError):
+                        self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "控制量必须是数字"})
+                        return
+                    if not math.isfinite(linear) or not math.isfinite(angular):
+                        self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "控制量必须是有限数字"})
+                        return
+
+                    magnitude = math.hypot(linear, angular)
+                    if magnitude > 1.0:
+                        linear /= magnitude
+                        angular /= magnitude
+                    is_stop = abs(linear) <= 1e-6 and abs(angular) <= 1e-6
+                    control = app.state.snapshot().get("control", {})
+                    if not is_stop and control.get("manual_locked"):
+                        self._json(HTTPStatus.CONFLICT, {"ok": False, "error": "手柄抢停后，请先将网页控制回中"})
+                        return
+                    if not is_stop and not control.get("gear_online"):
+                        self._json(HTTPStatus.CONFLICT, {"ok": False, "error": "未读取到手柄档位，已禁止网页移动"})
+                        return
+
+                    app.bridge.command({"type": "manual_drive", "linear": linear, "angular": angular})
+                    self._json(
+                        HTTPStatus.OK,
+                        {"ok": True, "linear": linear, "angular": angular, "gear": control.get("gear")},
+                    )
                     return
 
                 if path == "/api/nav/initialpose":

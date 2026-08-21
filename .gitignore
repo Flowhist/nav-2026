@@ -4,6 +4,7 @@ maps/
 # Build and dependencies
 build/
 tests/*
+!tests/test_manual_web_control.py
 devel/
 Doc/plans
 install/

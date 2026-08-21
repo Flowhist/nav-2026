@@ -11,12 +11,60 @@ from array import array
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+import yaml
+
 from state_store import StateStore
 
 
+HANDLE_MODULE_DIR = Path(__file__).resolve().parent.parent / "scripts" / "handle"
+if str(HANDLE_MODULE_DIR) not in sys.path:
+    sys.path.insert(0, str(HANDLE_MODULE_DIR))
+
+from handle_hid import HidMappingConfig, command_from_axes  # noqa: E402
+from handle_protocol import gear_scale  # noqa: E402
+
+
+def load_handle_mapping(config_path: Path) -> HidMappingConfig:
+    """Load the same axis shaping and speed limits used by handle_control."""
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        params = raw.get("handle_control", {}).get("ros__parameters", {})
+        return HidMappingConfig(
+            linear_axis=max(0, int(params.get("linear_axis", 1))),
+            angular_axis=max(0, int(params.get("angular_axis", 0))),
+            linear_direction=float(params.get("linear_direction", 1.0)),
+            angular_direction=float(params.get("angular_direction", 1.0)),
+            dead_zone=float(params.get("dead_zone", 0.05)),
+            saturation=float(params.get("saturation", 1.0)),
+            max_linear_speed=float(params.get("max_linear_speed", 0.6)),
+            max_angular_speed=float(params.get("max_angular_speed", 0.5)),
+        )
+    except (AttributeError, OSError, TypeError, ValueError, yaml.YAMLError):
+        return HidMappingConfig()
+
+
+def manual_drive_command(
+    linear: float,
+    angular: float,
+    gear: Optional[int],
+    mapping: HidMappingConfig,
+):
+    """Convert a normalized Web vector with the physical handle's current gear."""
+    scale = gear_scale(gear) if gear is not None else None
+    if scale is None:
+        return None
+    axis_count = max(mapping.linear_axis, mapping.angular_axis, 0) + 1
+    axes = [0.0] * axis_count
+    axes[mapping.linear_axis] = float(linear)
+    axes[mapping.angular_axis] = float(angular)
+    return command_from_axes(axes, mapping, scale)
+
+
 class RosBridge:
-    def __init__(self, state_store: StateStore) -> None:
+    def __init__(self, state_store: StateStore, handle_config_path: Optional[Path] = None) -> None:
         self.state_store = state_store
+        config_path = handle_config_path or (Path(__file__).resolve().parent.parent / "config" / "handle.yaml")
+        self.handle_mapping = load_handle_mapping(config_path)
         self._cmd_q: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=200)
         self._thread: Optional[threading.Thread] = None
 
@@ -77,7 +125,7 @@ class _BridgeNode:
             HistoryPolicy,
         )
         from sensor_msgs.msg import LaserScan
-        from std_msgs.msg import Bool, Empty, String
+        from std_msgs.msg import Bool, Empty, String, UInt16
         from tf2_msgs.msg import TFMessage
         from tf2_ros import Buffer, TransformListener
 
@@ -90,6 +138,7 @@ class _BridgeNode:
         self.Twist = Twist
         self.Empty = Empty
         self.String = String
+        self.handle_mapping = bridge.handle_mapping
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -118,6 +167,11 @@ class _BridgeNode:
         self.create_subscription(LaserScan, "/scan", lambda m: _BridgeNode._on_scan(self, m), scan_qos)
 
         self.create_subscription(Bool, "/js_state", lambda m: _BridgeNode._on_js_state(self, m), 10)
+        self.create_subscription(Twist, "/js_cmd_vel", lambda m: _BridgeNode._on_js_cmd(self, m), 10)
+        self.create_subscription(UInt16, "/handle/gear", lambda m: _BridgeNode._on_gear(self, m), 10)
+        self.create_subscription(
+            String, "/base_control_router/status", lambda m: _BridgeNode._on_router_status(self, m), 10
+        )
         self.create_subscription(TFMessage, "/tf", lambda m: _BridgeNode._on_tf(self, m), 50)
         self.create_subscription(
             String, "/nav_voice_bridge/status", lambda m: _BridgeNode._on_voice_status(self, m), 10
@@ -135,7 +189,9 @@ class _BridgeNode:
         self._last_map_signature: Optional[Tuple[object, ...]] = None
         self._next_web_scan_at = 0.0
 
+        self._joystick_online = False
         self._joystick_active = False
+        self._handle_gear: Optional[int] = None
 
         self.create_timer(0.02, lambda: _BridgeNode._process_commands(self))
         self.create_timer(0.25, lambda: _BridgeNode._refresh_pose_map(self))
@@ -325,17 +381,36 @@ class _BridgeNode:
 
     @staticmethod
     def _on_js_state(self: Any, msg: Any) -> None:
-        self._joystick_active = bool(msg.data)
+        self._joystick_online = bool(msg.data)
         _BridgeNode._touch(self, "js_state")
-        self.state_store.update_status(
-            {
-                "control": {
-                    "joystick_active": self._joystick_active,
-                    "joystick_online": True,
-                    "joystick_updated_at": time.time(),
-                }
-            }
-        )
+
+    @staticmethod
+    def _on_js_cmd(self: Any, msg: Any) -> None:
+        self._joystick_active = abs(float(msg.linear.x)) > 1e-6 or abs(float(msg.angular.z)) > 1e-6
+        _BridgeNode._touch(self, "js_cmd")
+
+    @staticmethod
+    def _on_gear(self: Any, msg: Any) -> None:
+        gear = int(msg.data)
+        if gear_scale(gear) is None:
+            return
+        self._handle_gear = gear
+        _BridgeNode._touch(self, "handle_gear")
+
+    @staticmethod
+    def _on_router_status(self: Any, msg: Any) -> None:
+        status = str(msg.data).strip()
+        patch: Dict[str, Any] = {}
+        if (
+            status.startswith("joystick_stop:")
+            or status.startswith("joystick_reset_required:")
+            or status in {"web_reset_required", "base_fault_active"}
+        ):
+            patch = {"manual_locked": True, "manual_lock_reason": status}
+        elif status in {"joystick_reset", "web_reset", "base_fault_cleared"}:
+            patch = {"manual_locked": False, "manual_lock_reason": None}
+        if patch:
+            self.state_store.update_status({"control": patch})
 
     @staticmethod
     def _refresh_pose_map(self: Any) -> None:
@@ -351,6 +426,24 @@ class _BridgeNode:
         msg = self.Twist()
         msg.linear.x = 0.0
         msg.angular.z = 0.0
+        self.pub_web_cmd.publish(msg)
+
+    @staticmethod
+    def _publish_manual_drive(self: Any, linear: float, angular: float) -> None:
+        gear = self._handle_gear
+        gear_age = time.time() - self._last_seen.get("handle_gear", 0.0)
+        command = manual_drive_command(
+            linear,
+            angular,
+            gear if gear_age <= 2.0 else None,
+            self.handle_mapping,
+        )
+        if command is None:
+            _BridgeNode._publish_web_stop(self)
+            return
+        msg = self.Twist()
+        msg.linear.x = command.linear
+        msg.angular.z = command.angular
         self.pub_web_cmd.publish(msg)
 
     @staticmethod
@@ -379,7 +472,14 @@ class _BridgeNode:
     @staticmethod
     def _handle_command(self: Any, cmd: Dict[str, Any]) -> None:
         ctype = cmd.get("type", "")
-        if ctype == "set_goal":
+        if ctype == "manual_drive":
+            _BridgeNode._publish_manual_drive(
+                self,
+                float(cmd.get("linear", 0.0)),
+                float(cmd.get("angular", 0.0)),
+            )
+
+        elif ctype == "set_goal":
             x = float(cmd.get("x", 0.0))
             y = float(cmd.get("y", 0.0))
             yaw_deg = float(cmd.get("yaw_deg", 0.0))
@@ -470,13 +570,21 @@ class _BridgeNode:
         for k, ts in self._last_seen.items():
             last_seen_age[k] = round(now_wall - ts, 3)
         js_age = last_seen_age.get("js_state")
-        joystick_online = js_age is not None and js_age <= 2.0
+        js_cmd_age = last_seen_age.get("js_cmd")
+        gear_age = last_seen_age.get("handle_gear")
+        joystick_online = self._joystick_online and js_age is not None and js_age <= 2.0
+        joystick_active = self._joystick_active and js_cmd_age is not None and js_cmd_age <= 0.5
+        gear_online = self._handle_gear is not None and gear_age is not None and gear_age <= 2.0
 
         self.state_store.update_status(
             {
                 "control": {
-                    "joystick_active": self._joystick_active if joystick_online else False,
+                    "joystick_active": joystick_active,
                     "joystick_online": joystick_online,
+                    "joystick_updated_at": self._last_seen.get("js_state"),
+                    "gear": self._handle_gear if gear_online else None,
+                    "gear_online": gear_online,
+                    "gear_updated_at": self._last_seen.get("handle_gear"),
                 },
                 "ros": {
                     "tf_hz": {

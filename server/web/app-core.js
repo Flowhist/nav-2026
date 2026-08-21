@@ -582,6 +582,7 @@ function renderStatus(status) {
   const hz = ros.topic_hz || {};
   const plan = robot.plan || {};
   const control = status.control || {};
+  if (typeof renderManualControlStatus === "function") renderManualControlStatus(control);
   const runtime = status.runtime || {};
   const lastSeen = ros.last_seen || {};
   const joystickState = control.joystick_online ? (control.joystick_active ? "正在接管" : "在线") : "离线";

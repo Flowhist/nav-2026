@@ -59,7 +59,7 @@
                 </div>
               </div>
             </div>
-            <div class="canvas-shell">
+            <div class="canvas-shell live-canvas-shell">
               <canvas id="mappingCanvas"></canvas>
               <div id="mappingHint" class="canvas-hint">等待 /map 数据…</div>
               <div class="canvas-toolbar" data-canvas="mappingCanvas" aria-label="建图视图工具">
@@ -68,6 +68,19 @@
                 <button type="button" data-view-action="zoom-in" aria-label="放大">＋</button>
                 <button type="button" data-view-action="fit">适合</button>
                 <button type="button" data-view-action="reset-rotation" aria-label="重置旋转">复位</button>
+              </div>
+              <div id="manualDrive" class="manual-drive">
+                <button class="manual-drive-trigger" type="button" aria-controls="manualDrivePanel" aria-expanded="false"><span aria-hidden="true">⌁</span>手动控制</button>
+                <section id="manualDrivePanel" class="manual-drive-panel hidden" aria-label="手动控制面板">
+                  <header class="manual-drive-head"><div><strong>手动控制</strong><span class="manual-drive-state">尚未启用</span></div><button class="manual-drive-close" type="button" aria-label="关闭手动控制">×</button></header>
+                  <div class="manual-gear"><span>当前档位</span><strong>--</strong></div>
+                  <div class="manual-front" aria-hidden="true">↑&nbsp; 车头</div>
+                  <div class="manual-stick" aria-label="连续方向与速度控制">
+                    <span class="manual-stick-axis horizontal"></span><span class="manual-stick-axis vertical"></span><span class="manual-stick-knob"></span>
+                  </div>
+                  <p class="manual-key-hint">键盘：WASD / 方向键，可组合 8 向</p>
+                  <button class="manual-enable secondary wide" type="button">启用控制</button>
+                </section>
               </div>
             </div>
           </section>
@@ -111,7 +124,7 @@
                 </div>
               </div>
             </div>
-            <div class="canvas-shell">
+            <div class="canvas-shell live-canvas-shell">
               <canvas id="navigationCanvas"></canvas>
               <div id="navigationHint" class="canvas-hint">等待 /map 数据…</div>
               <div class="canvas-toolbar" data-canvas="navigationCanvas" aria-label="导航视图工具">
@@ -263,6 +276,7 @@
   <script src="/app-core.js"></script>
   <script src="/app-dock.js"></script>
   <script src="/app-pages.js"></script>
+  <script src="/app-manual-control.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

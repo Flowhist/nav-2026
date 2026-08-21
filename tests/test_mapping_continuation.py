@@ -51,17 +51,19 @@ def test_mapping_page_removes_continue_flow_but_keeps_core_controls():
     assert 'id="btnStopMapping"' in html
     assert 'id="mapName"' not in html
     assert "showMapSaveDialog" in app_js
-    assert ".teleop-panel .dpad" in css
+    assert ".manual-stick" in css
+    assert ".teleop-panel .dpad" not in css
 
 
-def test_navigation_buttons_use_requested_names_and_order():
+def test_navigation_buttons_use_current_names_and_order():
     html = (ROOT / "server" / "web" / "index.html").read_text(encoding="utf-8")
 
     labels = [
-        "自动重定位",
-        "手动重定位",
-        "手动设置目的地",
-        "停止导航",
+        "自动定位",
+        "设置机器人位置",
+        "设置目标点",
+        "取消当前任务",
+        "关闭导航服务",
     ]
     positions = [html.index(label) for label in labels]
     assert positions == sorted(positions)

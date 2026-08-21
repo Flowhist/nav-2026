@@ -537,6 +537,7 @@ async function setPage(page) {
   }
 
   appState.page = page;
+  manualControlOnPageChange(page);
   toggleNavSelect("navMapPanel", false);
   toggleNavSelect("navLocationPanel", false);
   document.querySelectorAll(".tab").forEach((btn) => {
@@ -572,6 +573,7 @@ function setStatusExpanded(expanded) {
 }
 
 function bind() {
+  bindManualControl();
   document.querySelectorAll(".tab").forEach((btn) => {
     btn.addEventListener("click", () => setPage(btn.dataset.page).catch(console.error));
   });
@@ -780,10 +782,16 @@ function bind() {
     renderCurrentPageCanvases();
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) stopSceneStream();
+    if (document.hidden) {
+      stopManualControl("页面已隐藏");
+      stopSceneStream();
+    }
     else if (isLivePage() && $("statusDock").classList.contains("collapsed")) startSceneStream();
   });
-  window.addEventListener("pagehide", stopSceneStream);
+  window.addEventListener("pagehide", () => {
+    emergencyStopManualControl();
+    stopSceneStream();
+  });
 
   updateSceneHints();
   renderDockStream();
