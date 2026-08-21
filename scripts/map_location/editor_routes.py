@@ -173,21 +173,6 @@ def smooth_route(
     closed = bool(route.get("closed", False))
     traversable = build_clearance_mask(map_data, keepouts, clearance_m)
     validation_spacing = map_data.resolution * 0.5
-    collisions = []
-    segment_count = len(points) if closed else len(points) - 1
-    for segment_index in range(segment_count):
-        start = points[segment_index]
-        end = points[(segment_index + 1) % len(points)]
-        for point in _sample_line(start, end, validation_spacing):
-            if not is_point_safe(map_data, traversable, point):
-                collisions.append(
-                    {
-                        "segment_index": segment_index,
-                        "x": round(point[0], 3),
-                        "y": round(point[1], 3),
-                    }
-                )
-                break
     input_hash = route_input_sha256(
         map_data.source_sha256, list(keepouts), route, clearance_m
     )
@@ -197,11 +182,9 @@ def smooth_route(
         "sample_spacing_m": round(map_data.resolution, 3),
         "input_sha256": input_hash,
         "fallback_waypoint_ids": [],
-        "collisions": collisions,
+        "collisions": [],
         "points": [],
     }
-    if collisions:
-        return {**base_result, "status": "invalid"}
 
     spacing = map_data.resolution
     fallback_ids = []
@@ -241,10 +224,35 @@ def smooth_route(
         output.extend(first_curve[1:])
         output[-1] = output[0]
 
-    status = "valid_with_fallbacks" if fallback_ids else "valid"
+    collisions = []
+    for segment_index in range(len(output) - 1):
+        start, end = output[segment_index], output[segment_index + 1]
+        collision_point = next(
+            (
+                point
+                for point in _sample_line(start, end, validation_spacing)
+                if not is_point_safe(map_data, traversable, point)
+            ),
+            None,
+        )
+        if collision_point is not None:
+            collisions.append(
+                {
+                    "segment_index": segment_index,
+                    "x": round(collision_point[0], 3),
+                    "y": round(collision_point[1], 3),
+                }
+            )
+
+    status = (
+        "invalid"
+        if collisions
+        else "valid_with_fallbacks" if fallback_ids else "valid"
+    )
     return {
         **base_result,
         "status": status,
         "fallback_waypoint_ids": fallback_ids,
+        "collisions": collisions,
         "points": [_round_point(point) for point in output],
     }

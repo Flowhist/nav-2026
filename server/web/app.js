@@ -189,30 +189,6 @@ async function finishNavDrag(event) {
   }
 }
 
-function findPreviewLocationAt(canvas, event) {
-  if (!appState.previewMap || !canvas._view) return "";
-  const pointer = getCanvasPointer(canvas, event);
-  if (!pointer) return "";
-
-  let bestName = "";
-  let bestDist = Infinity;
-  appState.previewLocations.forEach((loc) => {
-    const pt = worldToScreen(canvas._view, canvas, loc.x, loc.y);
-    const dist = Math.hypot(pt.x - pointer.x, pt.y - pointer.y);
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestName = loc.name;
-    }
-  });
-  return bestDist <= 18 * Math.min(window.devicePixelRatio || 1, 2) ? bestName : "";
-}
-
-function selectPreviewLocation(name) {
-  appState.previewSelectedLocation = name || "";
-  renderPreviewLocationList();
-  renderPreviewCanvas();
-}
-
 function showAnnotationDialog(options) {
   return new Promise((resolve) => {
     const dialog = $("annotationDialog");
@@ -330,7 +306,11 @@ function bindCanvasInteractions(canvasId, options = {}) {
   }, { passive: false });
 
   canvas.addEventListener("pointerdown", (event) => {
-    if (canvasId === "previewCanvas" && appState.previewEditActive) return;
+    const editorHandlesPointer = canvasId === "previewCanvas"
+      && appState.previewWorkspaceReady
+      && event.pointerType !== "touch"
+      && event.button === 0;
+    if (editorHandlesPointer) return;
     if (trackTouchPointer(canvas, event)) return;
     if (event.button === 2) {
       startViewportGesture(canvas, event, "rotate");
@@ -338,18 +318,11 @@ function bindCanvasInteractions(canvasId, options = {}) {
     }
 
     if (event.button !== 0) return;
+    if (canvasId === "previewCanvas" && appState.previewWorkspaceReady) return;
 
     if (options.allowPlacement && appState.navPlacementMode && appState.scene.map) {
       if (startNavDrag(canvas, event)) return;
     }
-    if (options.allowPreviewSelection && appState.previewMap) {
-      const selected = findPreviewLocationAt(canvas, event);
-      if (selected) {
-        selectPreviewLocation(selected);
-        return;
-      }
-    }
-
     startViewportGesture(canvas, event, "pan");
   });
 }
@@ -420,6 +393,7 @@ async function setPage(page) {
   manualControlOnPageChange(page);
   toggleNavSelect("navMapPanel", false);
   toggleNavSelect("navLocationPanel", false);
+  toggleNavSelect("previewMapPanel", false);
   document.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.page === page);
   });
@@ -466,6 +440,10 @@ function bind() {
     if (!appState.savedMaps.length) loadSavedMaps().catch(console.error);
     toggleNavSelect("navMapPanel");
   });
+  $("previewMapToggle").addEventListener("click", () => {
+    if (!appState.savedMaps.length) loadSavedMaps().catch(console.error);
+    toggleNavSelect("previewMapPanel");
+  });
   $("systemMenuToggle").addEventListener("click", (event) => {
     event.stopPropagation();
     const menu = $("systemMenu");
@@ -478,6 +456,7 @@ function bind() {
     if (!event.target.closest(".help-wrap")) document.querySelectorAll(".map-help").forEach((panel) => panel.classList.add("hidden"));
     if (!event.target.closest("#navMapPanel")) toggleNavSelect("navMapPanel", false);
     if (!event.target.closest("#navLocationPanel")) toggleNavSelect("navLocationPanel", false);
+    if (!event.target.closest("#previewMapPanel")) toggleNavSelect("previewMapPanel", false);
     if (!event.target.closest(".system-menu-wrap")) {
       $("systemMenu").classList.add("hidden");
       $("systemMenuToggle").setAttribute("aria-expanded", "false");
@@ -612,7 +591,6 @@ function bind() {
   });
   $("btnRefreshMaps").addEventListener("click", () => loadSavedMaps().catch(console.error));
   $("btnDeletePreviewMap").addEventListener("click", () => deleteSelectedPreviewMap().catch(console.error));
-  $("btnAddPreviewLocation").addEventListener("click", () => window.finavMapEditor?.enter("location"));
   $("btnRefreshConfigs").addEventListener("click", () => loadConfigs().catch(console.error));
   $("configBackBtn").addEventListener("click", showConfigOverview);
   $("configSaveBtn").addEventListener("click", () => saveConfigEditor().catch(console.error));
@@ -626,7 +604,7 @@ function bind() {
 
   bindCanvasInteractions("mappingCanvas", { allowPlacement: true });
   bindCanvasInteractions("navigationCanvas", { allowPlacement: true });
-  bindCanvasInteractions("previewCanvas", { allowPreviewSelection: true });
+  bindCanvasInteractions("previewCanvas");
 
   document.querySelectorAll(".canvas-toolbar").forEach((toolbar) => {
     toolbar.addEventListener("click", (event) => {

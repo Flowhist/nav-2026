@@ -94,13 +94,8 @@ function updateSceneHints() {
       : "等待 /map 数据…";
   }
 
-  if (appState.previewEditActive) {
-    $("previewHint").textContent = MAP_EDITOR_HINTS[window.finavMapEditor?.tool || "select"];
-  } else {
-    $("previewHint").textContent = appState.previewMap
-      ? `${appState.previewMap.width}×${appState.previewMap.height} · ${appState.previewLocations.length} 个地点`
-      : "请选择地图";
-  }
+  if (window.finavMapEditor?.ready) window.finavMapEditor.updateMapStatus();
+  else $("previewHint").textContent = "请选择地图";
 }
 
 function renderLiveCanvases() {
@@ -135,14 +130,13 @@ function renderLiveCanvases() {
 }
 
 function renderPreviewCanvas() {
-  if (appState.previewEditActive && window.finavMapEditor) {
+  if (appState.page !== "preview") return;
+  if (appState.previewWorkspaceReady && window.finavMapEditor) {
     window.finavMapEditor.draw();
     return;
   }
   drawScene($("previewCanvas"), appState.previewMap, null, {
     prefix: "preview",
-    locations: appState.previewLocations,
-    selectedLocation: appState.previewSelectedLocation,
   });
   updateSceneHints();
 }
@@ -169,25 +163,33 @@ function createInfoButton(className, title, detail) {
   return btn;
 }
 
-function renderMapList() {
-  const box = $("mapList");
+function renderPreviewMapPicker() {
+  const box = $("previewMapOptions");
   box.innerHTML = "";
   if (!appState.savedMaps.length) {
-    box.innerHTML = `<div class="empty-state"><strong>尚无地图</strong><span>完成一次建图并保存后，地图会显示在这里。</span></div>`;
-    $("btnDeletePreviewMap").disabled = true;
-    return;
+    $("previewMapLabel").textContent = "未发现地图";
+    box.innerHTML = '<div class="subtle">请先保存至少一张地图</div>';
+  } else {
+    $("previewMapLabel").textContent = appState.previewMapName || "选择地图";
+    appState.savedMaps.forEach((item) => {
+      const btn = createInfoButton(
+        "nav-select-option" + (item.name === appState.previewMapName ? " active" : ""),
+        item.name,
+        `${item.width} × ${item.height} · ${fmt(item.resolution, 3)} m/px`,
+      );
+      btn.type = "button";
+      btn.setAttribute("role", "option");
+      btn.setAttribute("aria-selected", String(item.name === appState.previewMapName));
+      btn.addEventListener("click", () => {
+        toggleNavSelect("previewMapPanel", false);
+        if (item.name !== appState.previewMapName) loadPreviewMap(item.name).catch(console.error);
+      });
+      box.appendChild(btn);
+    });
   }
-
-  appState.savedMaps.forEach((item) => {
-    const btn = createInfoButton(
-      "map-item" + (item.name === appState.previewMapName ? " active" : ""),
-      item.name,
-      `${item.width} × ${item.height} · ${fmt(item.resolution, 3)} m/px`,
-    );
-    btn.addEventListener("click", () => loadPreviewMap(item.name));
-    box.appendChild(btn);
-  });
+  $("previewMapToggle").disabled = appState.previewEditActive || !appState.savedMaps.length;
   $("btnDeletePreviewMap").disabled = !appState.previewMapName;
+  $("btnEditorExport").disabled = !appState.previewWorkspaceReady;
 }
 
 function renderNavMapPicker() {
@@ -806,16 +808,14 @@ async function loadSavedMaps() {
     if (!appState.savedMaps.length) {
       appState.previewMapName = "";
       appState.previewMap = null;
-      appState.previewLocations = [];
-      appState.previewSelectedLocation = "";
+      appState.previewWorkspaceReady = false;
       appState.navMapName = "";
       appState.navLocations = [];
       appState.navLocationsFor = "";
       $("navLocationInput").value = "";
-      $("previewTitle").textContent = "地图预览";
-      $("previewMeta").textContent = "从 `maps/` 目录读取 `.pgm` 与 `.yaml`";
-      renderMapList();
-      renderPreviewLocationList();
+      $("previewMeta").textContent = "尚无可用地图";
+      window.finavMapEditor?.clear();
+      renderPreviewMapPicker();
       renderNavMapPicker();
       renderNavLocationList();
       renderPreviewCanvas();
@@ -824,12 +824,14 @@ async function loadSavedMaps() {
     if (!appState.previewMapName || !appState.savedMaps.some((item) => item.name === appState.previewMapName)) {
       appState.previewMapName = appState.savedMaps[0].name;
     }
-    renderMapList();
+    renderPreviewMapPicker();
     renderNavMapPicker();
     loadNavLocations().catch(console.error);
-    if (appState.previewMapName) {
-      await loadPreviewMap(appState.previewMapName, false);
-    }
+    if (
+      appState.page === "preview"
+      && appState.previewMapName
+      && !appState.previewEditActive
+    ) await loadPreviewMap(appState.previewMapName);
   } catch (err) {
     reportActionError(err, "地图列表加载失败");
   }
@@ -846,13 +848,12 @@ async function deleteSelectedPreviewMap() {
   });
   if (!confirmed) return;
   try {
+    await window.finavMapEditor?.exit();
     await api(`/api/maps/${encodeURIComponent(name)}/delete`, "POST", {});
     if (appState.navMapName === name) appState.navMapName = "";
     if (appState.previewMapName === name) {
       appState.previewMapName = "";
       appState.previewMap = null;
-      appState.previewLocations = [];
-      appState.previewSelectedLocation = "";
     }
     await loadSavedMaps();
     showToast(`地图“${name}”已删除`, "ok");
@@ -861,63 +862,20 @@ async function deleteSelectedPreviewMap() {
   }
 }
 
-async function loadPreviewMap(name, rerenderList = true) {
+async function loadPreviewMap(name) {
   try {
+    const changed = window.finavMapEditor?.mapName !== name;
     appState.previewMap = await api(`/api/maps/${encodeURIComponent(name)}`);
     appState.previewMapName = name;
-    appState.previewSelectedLocation = "";
-    await loadPreviewLocations(name);
-    resetViewport("previewCanvas");
-    $("previewTitle").textContent = `地图预览 · ${name}`;
-    $("previewMeta").textContent = `尺寸 ${appState.previewMap.width} × ${appState.previewMap.height}，分辨率 ${fmt(appState.previewMap.resolution, 3)} m/px`;
-    if (rerenderList) renderMapList();
-    else $("btnDeletePreviewMap").disabled = false;
-    $("btnEditPreviewMap").disabled = false;
-    renderPreviewLocationList();
+    if (changed) resetViewport("previewCanvas");
+    $("previewMeta").textContent = `${appState.previewMap.width} × ${appState.previewMap.height} · ${fmt(appState.previewMap.resolution, 3)} m/px`;
+    await window.finavMapEditor?.load(name);
+    renderPreviewMapPicker();
     renderPreviewCanvas();
   } catch (err) {
+    window.finavMapEditor?.clear();
+    renderPreviewMapPicker();
+    renderPreviewCanvas();
     reportActionError(err, "地图预览加载失败");
   }
-}
-
-async function loadPreviewLocations(name) {
-  try {
-    const data = await api(`/api/maps/${encodeURIComponent(name)}/locations`);
-    appState.previewLocations = Array.isArray(data.locations) ? data.locations : [];
-  } catch (err) {
-    console.error(err);
-    appState.previewLocations = [];
-  }
-}
-
-function renderPreviewLocationList() {
-  const box = $("previewLocationList");
-  if (!box) return;
-  box.innerHTML = "";
-  if (!appState.previewMapName) {
-    box.innerHTML = `<div class="subtle">请选择地图后标注</div>`;
-  } else if (!appState.previewLocations.length) {
-    box.innerHTML = `<div class="subtle">暂无地点标注</div>`;
-  } else {
-    appState.previewLocations.forEach((loc) => {
-      const btn = document.createElement("button");
-      btn.className = "location-item" + (loc.name === appState.previewSelectedLocation ? " active" : "");
-      btn.type = "button";
-      btn.innerHTML = `<strong>${escapeHtml(loc.name)}</strong><span>x ${fmt(loc.x, 2)} · y ${fmt(loc.y, 2)} · ${fmt(loc.yaw_deg, 0)}°</span>`;
-      btn.addEventListener("click", () => {
-        appState.previewSelectedLocation = loc.name;
-        renderPreviewLocationList();
-        renderPreviewCanvas();
-      });
-      box.appendChild(btn);
-    });
-  }
-
-  setText(
-    "previewLocationMeta",
-    appState.previewMapName
-      ? String(appState.previewLocations.length)
-      : "0",
-  );
-  $("btnAddPreviewLocation").disabled = !appState.previewMapName;
 }

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f4f4f1" />
   <title>Finav 控制台</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/styles.css?v=20260821-map-workspace-6" />
 </head>
 <body>
   <div class="shell">
@@ -191,45 +191,49 @@
 
       <section id="page-preview" class="page">
         <div id="previewLayout" class="preview-layout">
-          <aside class="preview-side inspector">
-            <div id="previewBrowseSidebar">
-              <div class="inspector-head"><h1>地图</h1><button id="btnRefreshMaps" class="icon-button" type="button" aria-label="刷新地图">↻</button></div>
-              <div id="mapList" class="map-list"></div>
-              <div class="inspector-divider"></div>
-              <div class="location-editor">
-                <div class="section-heading"><h3>地点</h3><span id="previewLocationMeta" class="count-label">0</span></div>
-                <div id="previewLocationList" class="location-list"></div>
-                <button id="btnAddPreviewLocation" class="tertiary align-left" type="button" disabled>＋ 添加地点</button>
+          <header class="map-workspace-head">
+            <div class="map-workspace-primary">
+              <div class="map-identity">
+                <div id="previewMapPanel" class="nav-select map-picker" data-control="previewMapToggle">
+                  <button id="previewMapToggle" class="nav-select-control" type="button" aria-expanded="false" aria-haspopup="listbox" aria-controls="previewMapOptions" disabled><span id="previewMapLabel">请选择地图</span><span class="nav-select-chevron" aria-hidden="true"></span></button>
+                  <div id="previewMapMenu" class="nav-select-menu"><div id="previewMapOptions" class="nav-select-options" role="listbox" aria-label="可用地图"><div class="subtle">等待地图列表…</div></div></div>
+                </div>
+                <p id="previewMeta" class="subtle">请选择地图</p>
               </div>
-              <div class="inspector-divider push-bottom"></div>
-              <button id="btnDeletePreviewMap" class="tertiary danger-text align-left" type="button" disabled>删除地图</button>
+              <div class="editor-more-wrap map-primary-more"><button id="btnEditorMore" class="editor-icon-button" type="button" aria-label="更多地图操作" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button><div id="editorMoreMenu" class="editor-more-menu hidden"><span>地图操作</span><button id="btnEditorExport" type="button" disabled>导出衍生地图</button><button id="btnDeletePreviewMap" class="danger-text" type="button" disabled>删除地图</button></div></div>
             </div>
-            <div id="previewEditorSidebar" class="editor-sidebar hidden">
-              <div class="inspector-head"><h1>编辑</h1><span id="editorObjectCount" class="count-label">0 个对象</span></div>
-              <div class="editor-tools" role="toolbar" aria-label="地图编辑工具">
+            <div class="map-workspace-actions">
+              <div id="previewEditActions" class="editor-head-actions hidden"><button id="btnEditorUndo" class="editor-icon-button" type="button" aria-label="撤销" title="撤销 Ctrl+Z" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 7-5 5 5 5"/><path d="M4 12h8a8 8 0 0 1 8 8"/></svg></button><button id="btnEditorRedo" class="editor-icon-button" type="button" aria-label="重做" title="重做 Ctrl+Shift+Z" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 7 5 5-5 5"/><path d="M20 12h-8a8 8 0 0 0-8 8"/></svg></button></div>
+              <span id="editorSaveState" class="editor-save-state hidden">已保存</span>
+              <div class="map-mode-switch" role="group" aria-label="地图工作模式">
+                <button id="btnMapViewMode" class="active" type="button" aria-pressed="true">查看</button>
+                <button id="btnMapEditMode" type="button" aria-pressed="false" disabled>编辑</button>
+              </div>
+              <button id="btnRefreshMaps" class="editor-icon-button" type="button" aria-label="刷新地图">↻</button>
+              <div class="help-wrap"><button class="hint-toggle icon-button" data-help="previewHelp" type="button" aria-label="地图操作帮助">i</button><div id="previewHelp" class="map-help hidden"><strong>地图操作</strong><dl><dt>拖动</dt><dd>平移地图</dd><dt>滚轮 / 双指</dt><dd>缩放</dd><dt>右键拖动</dt><dd>旋转</dd></dl></div></div>
+            </div>
+          </header>
+          <aside class="preview-side inspector">
+            <div id="previewObjectSidebar" class="editor-sidebar">
+              <div id="editorTools" class="editor-tool-section hidden"><h3>编辑工具</h3><div class="editor-tools" role="toolbar" aria-label="地图编辑工具">
                 <button class="editor-tool active" data-editor-tool="select" type="button" title="选择和移动对象"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 8-6 2-3 6z"/></svg><span>选择</span></button>
                 <button class="editor-tool" data-editor-tool="location" type="button" title="添加地点"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span>地点</span></button>
                 <button class="editor-tool" data-editor-tool="keepout" type="button" title="绘制禁行区"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 2"/><path d="m7 17 10-10"/></svg><span>禁行区</span></button>
                 <button class="editor-tool" data-editor-tool="route" type="button" title="绘制巡航路线"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h3a3 3 0 0 0 3-3v-6a3 3 0 0 1 3-3"/></svg><span>路线</span></button>
-              </div>
-              <div class="editor-section-head"><h3>地图对象</h3><button id="btnToggleObjectSearch" class="editor-icon-button" type="button" aria-label="搜索地图对象"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></button></div>
+              </div></div>
+              <div class="editor-section-head"><div><h1>地图对象</h1><span id="editorObjectCount" class="count-label">0 个对象</span></div><button id="btnToggleObjectSearch" class="editor-icon-button" type="button" aria-label="搜索地图对象"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></button></div>
               <input id="editorObjectSearch" class="editor-search hidden" type="search" placeholder="搜索地图对象…" autocomplete="off" />
               <div id="editorObjectTree" class="editor-object-tree"></div>
             </div>
           </aside>
           <section class="preview-main map-pane">
-            <div class="pane-head">
-              <div><h1 id="previewTitle">地图预览</h1><p id="previewMeta" class="subtle">请选择地图</p></div>
-              <div id="previewBrowseActions" class="pane-tools"><button id="btnEditPreviewMap" class="secondary editor-entry" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>编辑地图</button><div class="help-wrap"><button class="hint-toggle icon-button" data-help="previewHelp" type="button" aria-label="地图操作帮助">i</button><div id="previewHelp" class="map-help hidden"><strong>地图操作</strong><dl><dt>拖动</dt><dd>平移地图</dd><dt>滚轮 / 双指</dt><dd>缩放</dd><dt>右键拖动</dt><dd>旋转</dd></dl></div></div></div>
-              <div id="previewEditActions" class="editor-head-actions hidden"><span id="editorSaveState" class="editor-save-state">已保存</span><button id="btnEditorUndo" class="editor-icon-button" type="button" aria-label="撤销" title="撤销 Ctrl+Z" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 7-5 5 5 5"/><path d="M20 17a8 8 0 0 0-8-8H4"/></svg></button><button id="btnEditorRedo" class="editor-icon-button" type="button" aria-label="重做" title="重做 Ctrl+Shift+Z" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 7 5 5-5 5"/><path d="M4 17a8 8 0 0 1 8-8h8"/></svg></button><div class="editor-more-wrap"><button id="btnEditorMore" class="editor-icon-button" type="button" aria-label="更多地图操作" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button><div id="editorMoreMenu" class="editor-more-menu hidden"><span>地图操作</span><button id="btnEditorExport" type="button">导出衍生地图</button></div></div><button id="btnFinishMapEdit" class="secondary" type="button">完成编辑</button></div>
-            </div>
             <div class="canvas-shell">
               <canvas id="previewCanvas"></canvas><div id="previewHint" class="canvas-hint">请选择地图</div>
               <div id="editorCoordinates" class="editor-coordinates hidden"></div>
               <div class="canvas-toolbar" data-canvas="previewCanvas" aria-label="预览视图工具"><button type="button" data-view-action="zoom-out" aria-label="缩小">−</button><span class="zoom-value">100%</span><button type="button" data-view-action="zoom-in" aria-label="放大">＋</button><button type="button" data-view-action="fit">适合</button><button type="button" data-view-action="reset-rotation">复位</button></div>
             </div>
           </section>
-          <aside id="editorPropertyInspector" class="editor-properties inspector hidden"><div class="inspector-head"><h1>属性</h1><span id="editorSelectionType" class="count-label">未选择</span></div><div id="editorPropertyPanel" class="editor-property-panel"><p class="editor-no-selection">未选择对象</p></div></aside>
+          <aside id="editorPropertyInspector" class="editor-properties inspector"><div class="inspector-head"><h1 id="editorInspectorTitle">详情</h1><span id="editorSelectionType" class="count-label">地图</span></div><div id="editorPropertyPanel" class="editor-property-panel"><p class="editor-no-selection">请选择地图</p></div></aside>
         </div>
       </section>
 
@@ -289,11 +293,11 @@
   <div id="editorExportDialog" class="annotation-dialog hidden" aria-hidden="true"><form id="editorExportForm" class="annotation-card" role="dialog" aria-modal="true" aria-labelledby="editorExportTitle"><div class="annotation-head"><h2 id="editorExportTitle">导出衍生地图</h2><p class="subtle">禁行区将写入新的占据栅格，原地图不会修改；地点和路线会一并复制。</p></div><label class="annotation-name-field"><span>地图名称</span><input id="editorExportName" name="target_name" autocomplete="off" required /></label><p id="editorExportError" class="annotation-message subtle"></p><div class="annotation-actions"><button id="btnCancelEditorExport" type="button">取消</button><button id="btnConfirmEditorExport" class="primary" type="submit">导出</button></div></form></div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="/app-core.js"></script>
-  <script src="/app-dock.js"></script>
-  <script src="/app-pages.js"></script>
-  <script src="/app-manual-control.js"></script>
-  <script src="/map-editor.js"></script>
-  <script src="/app.js"></script>
+  <script src="/app-core.js?v=20260821-map-workspace-6"></script>
+  <script src="/app-dock.js?v=20260821-map-workspace-6"></script>
+  <script src="/app-pages.js?v=20260821-map-workspace-6"></script>
+  <script src="/app-manual-control.js?v=20260821-map-workspace-6"></script>
+  <script src="/map-editor.js?v=20260821-map-workspace-7"></script>
+  <script src="/app.js?v=20260821-map-workspace-6"></script>
 </body>
 </html>

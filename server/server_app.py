@@ -596,7 +596,7 @@ class ServerApp:
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(content)))
-                self.send_header("Cache-Control", "public, max-age=300")
+                self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(content)
 
@@ -650,7 +650,8 @@ class ServerApp:
     def _save_editor_document(
         self, map_name: str, body: object
     ) -> Dict[str, object]:
-        payload = self.editor.save_document(map_name, body)
+        baseline = self._load_editor_document(map_name).get("document", {})
+        payload = self.editor.save_document(map_name, body, baseline)
         document = payload.get("document", {})
         if isinstance(document, dict):
             save_map_locations(

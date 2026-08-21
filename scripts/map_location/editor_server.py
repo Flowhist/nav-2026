@@ -49,17 +49,52 @@ class EditorApplication:
         return refreshed
 
     @staticmethod
-    def _validate_locations(map_data, document: dict[str, object]) -> None:
+    def _validate_locations(
+        map_data,
+        document: dict[str, object],
+        baseline_document: dict[str, object] | None = None,
+    ) -> None:
         clearance = float(document["settings"]["safety_clearance_m"])
         traversable = build_clearance_mask(
             map_data, document["keepouts"], clearance
         )
+        baseline_by_id: dict[str, dict[str, object]] = {}
+        baseline_invalid_ids: set[str] = set()
+        if baseline_document:
+            baseline_locations = baseline_document.get("locations", [])
+            baseline_clearance = float(
+                baseline_document["settings"]["safety_clearance_m"]
+            )
+            baseline_traversable = build_clearance_mask(
+                map_data,
+                baseline_document.get("keepouts", []),
+                baseline_clearance,
+            )
+            for location in baseline_locations:
+                ident = str(location.get("id", ""))
+                baseline_by_id[ident] = location
+                if not is_point_safe(
+                    map_data,
+                    baseline_traversable,
+                    (float(location["x"]), float(location["y"])),
+                ):
+                    baseline_invalid_ids.add(ident)
         for index, location in enumerate(document["locations"]):
             if not is_point_safe(
                 map_data,
                 traversable,
                 (float(location["x"]), float(location["y"])),
             ):
+                ident = str(location.get("id", ""))
+                previous = baseline_by_id.get(ident)
+                unchanged_legacy_location = (
+                    ident in baseline_invalid_ids
+                    and previous is not None
+                    and float(previous["x"]) == float(location["x"])
+                    and float(previous["y"]) == float(location["y"])
+                )
+                if unchanged_legacy_location:
+                    continue
                 raise DocumentError(
                     "invalid_location_position",
                     f"Target location is not safely traversable: {location['name']}",
@@ -107,7 +142,12 @@ class EditorApplication:
             "source_changed": source_changed,
         }
 
-    def save_document(self, map_name: str, payload: object) -> dict[str, object]:
+    def save_document(
+        self,
+        map_name: str,
+        payload: object,
+        baseline_document: dict[str, object] | None = None,
+    ) -> dict[str, object]:
         if not isinstance(payload, dict):
             raise ApiError(400, "invalid_json", "Request body must be an object")
         if "expected_revision" not in payload or "document" not in payload:
@@ -120,7 +160,7 @@ class EditorApplication:
             raise ApiError(400, "invalid_document", "document must be an object")
         document = self._refresh_map_state(document, map_data)
         normalized = normalize_document(document, map_name)
-        self._validate_locations(map_data, normalized)
+        self._validate_locations(map_data, normalized, baseline_document)
         saved = self.store.save(
             map_name, normalized, int(payload["expected_revision"])
         )
