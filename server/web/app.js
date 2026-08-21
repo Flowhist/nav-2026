@@ -106,7 +106,7 @@ function trackTouchPointer(canvas, event) {
   if (event.pointerType !== "touch") return false;
   appState.touchPointers.set(event.pointerId, { canvasId: canvas.id, x: event.clientX, y: event.clientY });
   const points = [...appState.touchPointers.entries()].filter(([, point]) => point.canvasId === canvas.id);
-  if (points.length > 1 && (appState.navDrag || appState.previewAnnotationDraft)) return true;
+  if (points.length > 1 && appState.navDrag) return true;
   if (points.length !== 2) return false;
   const [[idA, a], [idB, b]] = points;
   const viewport = getViewport(canvas);
@@ -213,34 +213,6 @@ function selectPreviewLocation(name) {
   renderPreviewCanvas();
 }
 
-function startPreviewAnnotationDrag(canvas, event) {
-  const world = clientToWorld(canvas, event.clientX, event.clientY);
-  if (!world) return false;
-  appState.previewAnnotationDraft = {
-    canvasId: canvas.id,
-    pointerId: event.pointerId,
-    start: world,
-    current: world,
-    x: world.x,
-    y: world.y,
-    yaw_deg: 0,
-  };
-  if (canvas.setPointerCapture) canvas.setPointerCapture(event.pointerId);
-  renderPreviewCanvas();
-  return true;
-}
-
-function updatePreviewAnnotationDrag(event) {
-  const draft = appState.previewAnnotationDraft;
-  if (!draft || draft.pointerId !== event.pointerId) return;
-  const canvas = $(draft.canvasId);
-  const world = clientToWorld(canvas, event.clientX, event.clientY);
-  if (!world) return;
-  draft.current = world;
-  draft.yaw_deg = Math.atan2(world.y - draft.start.y, world.x - draft.start.x) * 180 / Math.PI;
-  renderPreviewCanvas();
-}
-
 function showAnnotationDialog(options) {
   return new Promise((resolve) => {
     const dialog = $("annotationDialog");
@@ -308,21 +280,6 @@ function showAnnotationDialog(options) {
   });
 }
 
-function showAnnotationNameDialog({ x, y, yawDeg }) {
-  return showAnnotationDialog({
-    mode: "name",
-    title: "添加地点",
-    meta: `坐标 (${x.toFixed(2)}, ${y.toFixed(2)}) · 朝向 ${yawDeg.toFixed(1)}°`,
-    message: "输入后会自动保存到当前地图的 locations 文件。",
-    confirmText: "添加",
-    validate: (value) => {
-      if (!value) return "地点名称不能为空。";
-      if (value.includes(":")) return "地点名称不能包含冒号。";
-      return "";
-    },
-  });
-}
-
 function showMapSaveDialog(initialValue) {
   return showAnnotationDialog({
     mode: "name",
@@ -351,86 +308,6 @@ function showAnnotationConfirmDialog({ title, message, confirmText = "确定", d
   });
 }
 
-async function finishPreviewAnnotationDrag(event) {
-  const draft = appState.previewAnnotationDraft;
-  if (!draft || draft.pointerId !== event.pointerId) return;
-  const canvas = $(draft.canvasId);
-  const world = clientToWorld(canvas, event.clientX, event.clientY) || draft.current || draft.start;
-  const dx = world.x - draft.start.x;
-  const dy = world.y - draft.start.y;
-  const yawDeg = Math.hypot(dx, dy) < 0.03 ? 0 : Math.atan2(dy, dx) * 180 / Math.PI;
-
-  if (canvas.releasePointerCapture) {
-    try {
-      canvas.releasePointerCapture(event.pointerId);
-    } catch (_err) {
-      // ignore
-    }
-  }
-  appState.previewAnnotationDraft = null;
-
-  const cleanName = await showAnnotationNameDialog({
-    x: draft.start.x,
-    y: draft.start.y,
-    yawDeg,
-  });
-  if (!cleanName) {
-    renderPreviewCanvas();
-    return;
-  }
-  const existing = appState.previewLocations.findIndex((loc) => loc.name === cleanName);
-  if (existing >= 0) {
-    const overwrite = await showAnnotationConfirmDialog({
-      title: "覆盖地点",
-      message: `地点“${cleanName}”已存在，是否用新的坐标和朝向覆盖？`,
-      confirmText: "覆盖",
-    });
-    if (!overwrite) {
-      renderPreviewCanvas();
-      return;
-    }
-  }
-
-  const loc = {
-    name: cleanName,
-    x: Number(draft.start.x.toFixed(3)),
-    y: Number(draft.start.y.toFixed(3)),
-    yaw_deg: Number(yawDeg.toFixed(1)),
-  };
-  if (existing >= 0) appState.previewLocations.splice(existing, 1, loc);
-  else appState.previewLocations.push(loc);
-  appState.previewSelectedLocation = cleanName;
-  appState.previewAnnotationMode = false;
-  renderPreviewLocationList();
-  renderPreviewCanvas();
-  savePreviewLocations();
-}
-
-function setPreviewAnnotationMode(enabled) {
-  appState.previewAnnotationMode = !!enabled && !!appState.previewMapName;
-  appState.previewAnnotationDraft = null;
-  if (appState.previewAnnotationMode) appState.previewSelectedLocation = "";
-  renderPreviewLocationList();
-  renderPreviewCanvas();
-}
-
-async function deletePreviewSelectedLocation() {
-  const name = appState.previewSelectedLocation;
-  if (!name) return;
-  const confirmed = await showAnnotationConfirmDialog({
-    title: "删除地点",
-    message: `确认删除地点“${name}”吗？删除后会自动保存。`,
-    confirmText: "删除",
-    danger: true,
-  });
-  if (!confirmed) return;
-  appState.previewLocations = appState.previewLocations.filter((loc) => loc.name !== name);
-  appState.previewSelectedLocation = "";
-  renderPreviewLocationList();
-  renderPreviewCanvas();
-  savePreviewLocations();
-}
-
 function bindCanvasInteractions(canvasId, options = {}) {
   const canvas = $(canvasId);
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
@@ -453,6 +330,7 @@ function bindCanvasInteractions(canvasId, options = {}) {
   }, { passive: false });
 
   canvas.addEventListener("pointerdown", (event) => {
+    if (canvasId === "previewCanvas" && appState.previewEditActive) return;
     if (trackTouchPointer(canvas, event)) return;
     if (event.button === 2) {
       startViewportGesture(canvas, event, "rotate");
@@ -464,8 +342,7 @@ function bindCanvasInteractions(canvasId, options = {}) {
     if (options.allowPlacement && appState.navPlacementMode && appState.scene.map) {
       if (startNavDrag(canvas, event)) return;
     }
-    if (options.allowPreviewAnnotation && appState.previewMap) {
-      if (appState.previewAnnotationMode && startPreviewAnnotationDrag(canvas, event)) return;
+    if (options.allowPreviewSelection && appState.previewMap) {
       const selected = findPreviewLocationAt(canvas, event);
       if (selected) {
         selectPreviewLocation(selected);
@@ -523,6 +400,9 @@ function confirmPageSwitchStop(mode, page) {
 }
 
 async function setPage(page) {
+  if (appState.page === "preview" && page !== "preview" && appState.previewEditActive) {
+    await window.finavMapEditor?.exit();
+  }
   if (page !== appState.page) {
     if (appState.page === "mapping" && page !== "mapping" && getRuntime("mapping").running) {
       const confirmed = await confirmPageSwitchStop("mapping", page);
@@ -732,9 +612,7 @@ function bind() {
   });
   $("btnRefreshMaps").addEventListener("click", () => loadSavedMaps().catch(console.error));
   $("btnDeletePreviewMap").addEventListener("click", () => deleteSelectedPreviewMap().catch(console.error));
-  $("btnAddPreviewLocation").addEventListener("click", () => setPreviewAnnotationMode(true));
-  $("btnCancelPreviewLocation").addEventListener("click", () => setPreviewAnnotationMode(false));
-  $("btnDeletePreviewLocation").addEventListener("click", () => deletePreviewSelectedLocation().catch(console.error));
+  $("btnAddPreviewLocation").addEventListener("click", () => window.finavMapEditor?.enter("location"));
   $("btnRefreshConfigs").addEventListener("click", () => loadConfigs().catch(console.error));
   $("configBackBtn").addEventListener("click", showConfigOverview);
   $("configSaveBtn").addEventListener("click", () => saveConfigEditor().catch(console.error));
@@ -748,7 +626,7 @@ function bind() {
 
   bindCanvasInteractions("mappingCanvas", { allowPlacement: true });
   bindCanvasInteractions("navigationCanvas", { allowPlacement: true });
-  bindCanvasInteractions("previewCanvas", { allowPreviewAnnotation: true });
+  bindCanvasInteractions("previewCanvas", { allowPreviewSelection: true });
 
   document.querySelectorAll(".canvas-toolbar").forEach((toolbar) => {
     toolbar.addEventListener("click", (event) => {
@@ -761,21 +639,18 @@ function bind() {
     if (updateTouchPointer(event)) return;
     updateViewportGesture(event);
     updateNavDrag(event);
-    updatePreviewAnnotationDrag(event);
   });
 
   window.addEventListener("pointerup", (event) => {
     if (endTouchPointer(event)) return;
     endViewportGesture(event);
     finishNavDrag(event).catch(console.error);
-    finishPreviewAnnotationDrag(event).catch(console.error);
   });
 
   window.addEventListener("pointercancel", (event) => {
     if (endTouchPointer(event)) return;
     endViewportGesture(event);
     finishNavDrag(event).catch(console.error);
-    finishPreviewAnnotationDrag(event).catch(console.error);
   });
 
   window.addEventListener("resize", () => {

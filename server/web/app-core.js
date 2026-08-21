@@ -22,8 +22,7 @@ const appState = {
   previewMapName: "",
   previewLocations: [],
   previewSelectedLocation: "",
-  previewAnnotationMode: false,
-  previewAnnotationDraft: null,
+  previewEditActive: false,
   navMapName: "",
   navLocations: [],
   navLocationsFor: "",
@@ -120,7 +119,11 @@ function setConnectionState(state) {
 async function readApiError(res) {
   try {
     const data = await res.json();
-    if (data && data.error) return String(data.error);
+    if (data && data.error) {
+      return typeof data.error === "object"
+        ? String(data.error.message || data.error.code || res.statusText)
+        : String(data.error);
+    }
   } catch (_err) {
     // fall through to HTTP status text
   }

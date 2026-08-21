@@ -139,7 +139,6 @@ install(PROGRAMS
   scripts/tool/save_map.sh
   scripts/tool/save_map.py
   scripts/map_location/location_visualizer.py
-  scripts/map_location/map_editor.py
   sim/scripts/sim_relocate.py
   sim/scripts/sim_relocate.sh
   sim/scripts/sim_chassis_sensor_pub.py
@@ -163,11 +162,6 @@ install(FILES
   scripts/map_location/editor_routes.py
   scripts/map_location/editor_export.py
   DESTINATION lib/${PROJECT_NAME}
-)
-
-install(
-  DIRECTORY scripts/map_location/editor_web/
-  DESTINATION lib/${PROJECT_NAME}/editor_web
 )
 
 install(DIRECTORY

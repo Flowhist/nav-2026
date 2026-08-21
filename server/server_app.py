@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 import math
 import mimetypes
 import socket
 import shutil
+import sys
 import threading
 import time
 from http import HTTPStatus
@@ -12,6 +14,14 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
+MAP_EDITOR_DIR = Path(__file__).resolve().parent.parent / "scripts" / "map_location"
+if str(MAP_EDITOR_DIR) not in sys.path:
+    sys.path.insert(0, str(MAP_EDITOR_DIR))
+
+from editor_export import ExportError
+from editor_map_io import MapFormatError
+from editor_server import ApiError, EditorApplication
+from editor_store import DocumentError, RevisionConflict
 from map_utils import list_saved_maps, load_map_preview, load_map_locations, save_map_locations
 from process_manager import RuntimeManager
 from ros_bridge import RosBridge
@@ -89,6 +99,10 @@ class ServerApp:
         self.repo_dir = self.base_dir.parent
         self.maps_dir = self.repo_dir / "maps"
         self.config_dir = self.repo_dir / "config"
+        self.editor = EditorApplication(
+            self.maps_dir,
+            self.config_dir / "path_plan.yaml",
+        )
 
         self.state = StateStore()
         self.bridge = RosBridge(self.state, self.config_dir / "handle.yaml")
@@ -166,6 +180,14 @@ class ServerApp:
                 if path == "/api/maps":
                     self._json(HTTPStatus.OK, {"maps": list_saved_maps(app.maps_dir)})
                     return
+                parts = self._path_segments(path)
+                if (
+                    len(parts) == 4
+                    and parts[:2] == ["api", "maps"]
+                    and parts[3] == "editor"
+                ):
+                    self._editor_json(lambda: app._load_editor_document(parts[2]))
+                    return
                 if path.startswith("/api/maps/") and path.endswith("/locations"):
                     name = unquote(path.removeprefix("/api/maps/").removesuffix("/locations")).strip("/")
                     if app._resolve_map_dir(name) is None:
@@ -210,6 +232,25 @@ class ServerApp:
                 parsed = urlparse(self.path)
                 path = parsed.path
                 body = self._read_json()
+
+                parts = self._path_segments(path)
+                if (
+                    len(parts) == 6
+                    and parts[:2] == ["api", "maps"]
+                    and parts[3] == "routes"
+                    and parts[5] == "smooth"
+                ):
+                    self._editor_json(
+                        lambda: app.editor.smooth(parts[2], parts[4], body)
+                    )
+                    return
+                if (
+                    len(parts) == 4
+                    and parts[:2] == ["api", "maps"]
+                    and parts[3] == "export"
+                ):
+                    self._editor_json(lambda: app.editor.export(parts[2], body))
+                    return
 
                 if path == "/api/nav/goal":
                     app.bridge.command(
@@ -397,6 +438,58 @@ class ServerApp:
 
                 self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"unknown endpoint: {path}"})
 
+            def do_PUT(self) -> None:  # noqa: N802
+                parsed = urlparse(self.path)
+                parts = self._path_segments(parsed.path)
+                if (
+                    len(parts) == 4
+                    and parts[:2] == ["api", "maps"]
+                    and parts[3] == "editor"
+                ):
+                    body = self._read_json()
+                    self._editor_json(
+                        lambda: app._save_editor_document(parts[2], body)
+                    )
+                    return
+                self._json(
+                    HTTPStatus.NOT_FOUND,
+                    {"ok": False, "error": f"unknown endpoint: {parsed.path}"},
+                )
+
+            @staticmethod
+            def _path_segments(path: str) -> list[str]:
+                return [unquote(part) for part in path.split("/") if part]
+
+            def _editor_json(self, operation) -> None:
+                try:
+                    payload = operation()
+                except ApiError as error:
+                    status, code, field = error.status, error.code, error.field
+                    message = str(error)
+                except RevisionConflict as error:
+                    status, code, field = 409, "revision_conflict", error.field
+                    message = str(error)
+                except DocumentError as error:
+                    status, code, field = 422, error.code, error.field
+                    message = str(error)
+                except MapFormatError as error:
+                    status = 404 if error.code == "missing_map" else 422
+                    code, field = error.code, None
+                    message = str(error)
+                except ExportError as error:
+                    status, code, field = 409, "export_failed", "target_name"
+                    message = str(error)
+                except (TypeError, ValueError) as error:
+                    status, code, field = 400, "invalid_request", None
+                    message = str(error)
+                else:
+                    self._json(HTTPStatus.OK, payload)
+                    return
+                detail = {"code": code, "message": message}
+                if field:
+                    detail["field"] = field
+                self._json(status, {"ok": False, "error": detail})
+
             def _stream_scene(self, parsed) -> None:
                 query = parse_qs(parsed.query)
                 mode = str(query.get("mode", ["mapping"])[0]).strip().lower()
@@ -532,6 +625,40 @@ class ServerApp:
         if not str(target).startswith(str(self.config_dir.resolve())):
             return None
         return target
+
+    def _load_editor_document(self, map_name: str) -> Dict[str, object]:
+        payload = self.editor.load_document(map_name)
+        # The map raster is already loaded by the Finav map page. Avoid sending
+        # a second multi-megabyte pixels + occupancy payload on editor entry.
+        payload.pop("map", None)
+        document = payload.get("document", {})
+        editor_path = self.maps_dir / map_name / f"{map_name}.editor.yaml"
+        if (
+            isinstance(document, dict)
+            and not editor_path.exists()
+            and not document.get("locations")
+        ):
+            locations = []
+            for item in load_map_locations(self.maps_dir, map_name):
+                digest = hashlib.sha1(
+                    f"{map_name}\0{item['name']}".encode("utf-8")
+                ).hexdigest()[:16]
+                locations.append({"id": f"location-{digest}", **item})
+            document["locations"] = locations
+        return payload
+
+    def _save_editor_document(
+        self, map_name: str, body: object
+    ) -> Dict[str, object]:
+        payload = self.editor.save_document(map_name, body)
+        document = payload.get("document", {})
+        if isinstance(document, dict):
+            save_map_locations(
+                self.maps_dir,
+                map_name,
+                document.get("locations", []),
+            )
+        return payload
 
     def _resolve_map_dir(self, name: str) -> Optional[Path]:
         if not name or "/" in name or "\\" in name:

@@ -98,6 +98,12 @@ def _normalize_locations(items: object) -> list[dict[str, object]]:
         prefix = f"locations[{index}]"
         ident = _identity(item.get("id"), f"{prefix}.id")
         name = _name(item.get("name"), f"{prefix}.name")
+        if ":" in name:
+            raise DocumentError(
+                "invalid_location_name",
+                "Location names cannot contain a colon",
+                f"{prefix}.name",
+            )
         if ident in ids or name in names:
             raise DocumentError("duplicate_location", f"Duplicate location: {name}", prefix)
         ids.add(ident)
