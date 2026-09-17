@@ -18,6 +18,7 @@
   dist(robot, path_end) < goal_tolerance -> 停止重置
 """
 
+import json
 import math
 import time
 from enum import Enum, auto
@@ -26,7 +27,7 @@ from typing import List, Optional, Tuple
 import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Path
-from std_msgs.msg import Empty, String
+from std_msgs.msg import Empty, Float32, String, UInt16
 from rclpy.node import Node
 from rclpy.time import Time
 from tf2_ros import Buffer, TransformException, TransformListener
@@ -47,6 +48,7 @@ class ChassisControlNav(Node):
         self.declare_parameter("output_cmd_vel_topic", "/nav_cmd_vel")
         self.declare_parameter("path_topic", "/plan")
         self.declare_parameter("nav_clear_reason_topic", "/nav_clear_reason")
+        self.declare_parameter("tracker_status_topic", "/nav_task/tracker_status")
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("accept_replanned_path", True)
@@ -77,6 +79,9 @@ class ChassisControlNav(Node):
         self.output_topic = str(self.get_parameter("output_cmd_vel_topic").value)
         self.path_topic = str(self.get_parameter("path_topic").value)
         self.nav_clear_reason_topic = str(self.get_parameter("nav_clear_reason_topic").value)
+        self.tracker_status_topic = str(
+            self.get_parameter("tracker_status_topic").value
+        )
         self.base_frame = str(self.get_parameter("base_frame").value)
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.accept_replanned_path = bool(
@@ -130,14 +135,22 @@ class ChassisControlNav(Node):
         self._last_nav_clear_reason = ""
         self._last_nav_clear_reason_time = 0.0
         self._nav_clear_reason_window_s = 1.0
+        self._task_token = ""
+        self._gear_scale = 1.0
+        self._route_speed_limit = 0.0
 
         # 订阅与发布
         self.pub = self.create_publisher(Twist, self.output_topic, 10)
+        self.tracker_status_pub = self.create_publisher(
+            String, self.tracker_status_topic, 10
+        )
         self.create_subscription(Path, self.path_topic, self._on_path, 10)  # 订阅 /path
         self.create_subscription(
             String, self.nav_clear_reason_topic, self._on_nav_clear_reason, 10
         )
         self.create_subscription(Empty, "/nav_clear", self._on_nav_clear, 10)
+        self.create_subscription(UInt16, "/handle/gear", self._on_gear, 10)
+        self.create_subscription(Float32, "/nav_task/speed_limit", self._on_speed_limit, 10)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -168,13 +181,36 @@ class ChassisControlNav(Node):
 
     def _pub(self, lin: float, ang: float):
         """发布底盘速度指令。"""
-        self._cmd_msg.linear.x = float(lin)
-        self._cmd_msg.angular.z = float(ang)
+        scale = self._gear_scale
+        if self._route_speed_limit > 0.0 and abs(lin) > self._route_speed_limit:
+            scale *= self._route_speed_limit / abs(lin)
+        self._cmd_msg.linear.x = float(lin * scale)
+        self._cmd_msg.angular.z = float(ang * scale)
         self.pub.publish(self._cmd_msg)
+
+    def _on_gear(self, message: UInt16):
+        if 1 <= message.data <= 5:
+            self._gear_scale = message.data / 5.0
+
+    def _on_speed_limit(self, message: Float32):
+        self._route_speed_limit = max(0.0, float(message.data))
 
     def _stop(self):
         """发布零速度，立即停车。"""
         self._pub(0.0, 0.0)
+
+    def _publish_tracker_status(self, stage: str, reason: str = "") -> None:
+        message = String()
+        message.data = json.dumps(
+            {
+                "stage": stage.upper(),
+                "reason": reason,
+                "task_token": self._task_token,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        self.tracker_status_pub.publish(message)
 
     def _log_wait_reason(self, reason: str, interval_s: float = 2.0):
         """低频打印等待/停顿原因，避免控制循环刷屏。"""
@@ -260,6 +296,7 @@ class ChassisControlNav(Node):
             for point in msg.poses
         ]
         new_frame = msg.header.frame_id or self.map_frame
+        self._task_token = f"{int(msg.header.stamp.sec)}.{int(msg.header.stamp.nanosec):09d}"
 
         if not self.has_started:
             self.path_points = new_points
@@ -510,6 +547,7 @@ class ChassisControlNav(Node):
                 f"导航停止原因: 到达终点，距终点={dist_goal:.2f}m <= {self.goal_tol:.2f}m"
             )
             self._reset()
+            self._publish_tracker_status("REACHED", "goal_tolerance")
             return
 
         # 纯追踪目标点

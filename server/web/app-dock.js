@@ -117,7 +117,10 @@ async function withBlockingModal(task, message) {
 
 async function pollStatus() {
   try {
-    appState.status = await api("/api/status");
+    const status = await api("/api/status");
+    const control = appState.status?.control;
+    appState.status = { ...status, control };
+    applyManualControlStatus(status.control);
     renderStatus(appState.status);
   } catch (err) {
     console.error(err);

@@ -74,6 +74,7 @@
                 <section id="manualDrivePanel" class="manual-drive-panel hidden" aria-label="手动控制面板">
                   <header class="manual-drive-head"><div><strong>手动控制</strong><span class="manual-drive-state">尚未启用</span></div><button class="manual-drive-close" type="button" aria-label="关闭手动控制">×</button></header>
                   <div class="manual-gear"><span>当前档位</span><strong>--</strong></div>
+                  <p class="manual-override-warning hidden">测试模式：已忽略实体摇杆抢停</p>
                   <div class="manual-front" aria-hidden="true">↑&nbsp; 车头</div>
                   <div class="manual-stick" aria-label="连续方向与速度控制">
                     <span class="manual-stick-axis horizontal"></span><span class="manual-stick-axis vertical"></span><span class="manual-stick-knob"></span>
@@ -116,7 +117,7 @@
               <div><h1>导航</h1><p class="subtle">地图、定位与实时路径</p></div>
               <div class="pane-tools">
                 <div class="legend" aria-label="地图图例">
-                  <span><i class="legend-map"></i>Map</span><span><i class="legend-scan"></i>Scan</span><span><i class="legend-robot"></i>Robot</span>
+                  <span><i class="legend-map"></i>地图</span><span><i class="legend-scan"></i>点云</span><span><i class="legend-robot"></i>车身</span>
                 </div>
                 <div class="help-wrap">
                   <button class="hint-toggle icon-button" data-help="navigationHelp" type="button" aria-label="地图操作帮助">i</button>
@@ -127,13 +128,35 @@
             <div class="canvas-shell live-canvas-shell">
               <canvas id="navigationCanvas"></canvas>
               <div id="navigationHint" class="canvas-hint">等待 /map 数据…</div>
+              <div class="nav-map-overlays">
+                <details id="navLayers" class="nav-map-popover nav-layers">
+                  <summary title="地图图层"><span>图层</span><span class="nav-select-chevron disclosure-icon" aria-hidden="true"></span></summary>
+                  <div class="nav-layer-options">
+                    <label><input type="checkbox" data-nav-layer="inflation" checked /><i class="layer-swatch inflation"></i><span>安全膨胀区</span><small id="navInflationState"></small></label>
+                    <label><input type="checkbox" data-nav-layer="keepouts" checked /><i class="layer-swatch keepouts"></i><span>人工禁行区</span></label>
+                    <label><input type="checkbox" data-nav-layer="routes" checked /><i class="layer-swatch routes"></i><span>巡航路线</span></label>
+                    <label><input type="checkbox" data-nav-layer="locations" checked /><i class="layer-swatch locations"></i><span>导航地点</span></label>
+                    <label><input type="checkbox" data-nav-layer="plan" checked /><i class="layer-swatch plan"></i><span>规划路径</span></label>
+                    <label><input type="checkbox" data-nav-layer="scan" checked /><i class="layer-swatch scan"></i><span>激光点云</span></label>
+                  </div>
+                </details>
+                <details id="navCurrentTask" class="nav-map-popover nav-task hidden">
+                  <summary><span>任务状态</span><span class="nav-select-chevron disclosure-icon" aria-hidden="true"></span></summary>
+                  <div class="nav-task-details">
+                    <div><span>目标</span><strong id="navTaskGoal">等待目标</strong></div>
+                    <div><span>路径长度</span><strong id="navTaskPlan">--</strong></div>
+                    <div><span>任务状态</span><strong id="navTaskState">待命</strong></div>
+                    <div><span>状态说明</span><strong id="navTaskReason">--</strong></div>
+                  </div>
+                </details>
+              </div>
               <div class="canvas-toolbar" data-canvas="navigationCanvas" aria-label="导航视图工具">
                 <button type="button" data-view-action="zoom-out" aria-label="缩小">−</button><span class="zoom-value">100%</span><button type="button" data-view-action="zoom-in" aria-label="放大">＋</button><button type="button" data-view-action="fit">适合</button><button type="button" data-view-action="reset-rotation">复位</button>
               </div>
             </div>
           </section>
 
-          <aside class="side-pane inspector" aria-label="导航控制">
+          <aside class="side-pane inspector navigation-inspector" aria-label="导航控制">
             <section class="inspector-section session-section">
               <div class="inspector-head"><h2>导航</h2><span id="navigationRunState" class="run-state idle">未启动</span></div>
               <div id="navIdleSession">
@@ -150,8 +173,9 @@
             </section>
 
             <section id="navCommandSections" class="hidden">
-              <div class="inspector-section">
-                <h3>目的地</h3>
+              <div class="inspector-section nav-task-commands">
+                <h3>导航任务</h3>
+                <label class="field-label" for="navLocationInput">目的地导航</label>
                 <div class="nav-location-row">
                   <div id="navLocationPanel" class="nav-select" data-control="navLocationInput">
                     <input id="navLocationInput" class="nav-select-control" type="text" placeholder="选择地点" autocomplete="off" role="combobox" aria-autocomplete="none" aria-haspopup="listbox" aria-controls="navLocationOptions" aria-expanded="false" />
@@ -161,29 +185,32 @@
                   <button id="btnNavLocation" class="primary" type="button">前往</button>
                 </div>
                 <p id="navLocationHint" class="field-help">当前地图尚未标注地点</p>
+                <label class="field-label" for="navRouteSelect">巡线导航</label>
+                <div class="nav-location-row">
+                  <div id="navRoutePanel" class="nav-select" data-control="navRouteSelect">
+                    <button id="navRouteSelect" class="nav-select-control" type="button" value="" aria-haspopup="listbox" aria-expanded="false" aria-controls="navRouteOptions"><span id="navRouteLabel">暂无开放路线</span><span class="nav-select-chevron" aria-hidden="true"></span></button>
+                    <div class="nav-select-menu"><div id="navRouteOptions" class="nav-select-options" role="listbox" aria-label="巡线导航路线"></div></div>
+                  </div>
+                  <button id="btnStartRoute" class="primary" type="button" disabled>前往</button>
+                </div>
+                <div class="field-label">自定义导航</div>
+                <button id="btnArmGoal" class="mode-tool wide" type="button">地图选点</button>
+                <div class="nav-task-actions">
+                  <button id="btnPauseRoute" class="secondary hidden" type="button">暂停巡线</button>
+                  <button id="btnResumeRoute" class="secondary hidden" type="button">继续巡线</button>
+                  <button id="btnCancelNav" class="secondary danger-text" type="button">取消任务</button>
+                </div>
               </div>
 
               <div class="inspector-section">
-                <h3>定位</h3>
-                <button id="btnRelocate" class="secondary wide" type="button">自动定位</button>
-                <h3 class="subsection-title">地图工具</h3>
+                <h3>重定位</h3>
                 <div class="mode-tools">
-                  <button id="btnArmInit" class="mode-tool" type="button"><span class="tool-mark">⌖</span><span>设置机器人位置</span></button>
-                  <button id="btnArmGoal" class="mode-tool" type="button"><span class="tool-mark">＋</span><span>设置目标点</span></button>
+                  <button id="btnRelocate" class="mode-tool" type="button"><span id="navRelocateLabel">自动重定位</span></button>
+                  <button id="btnArmInit" class="mode-tool" type="button">手动重定位</button>
                 </div>
               </div>
 
-              <div id="navCurrentTask" class="inspector-section hidden">
-                <h3>当前任务</h3>
-                <div class="inspector-list compact">
-                  <div><span>前往</span><strong id="navTaskGoal">地图目标</strong></div>
-                  <div><span>规划</span><strong id="navTaskPlan">--</strong></div>
-                  <div><span>状态</span><strong id="navTaskState">导航中</strong></div>
-                </div>
-                <button id="btnCancelNav" class="secondary wide" type="button">取消当前任务</button>
-              </div>
-
-              <div class="inspector-section session-end"><button id="btnStopNavigation" class="tertiary danger-text wide" type="button">关闭导航服务</button></div>
+              <div class="inspector-section session-end"><button id="btnStopNavigation" class="tertiary danger-text wide" type="button">停止导航</button></div>
             </section>
           </aside>
         </div>
@@ -297,7 +324,7 @@
   <script src="/app-dock.js?v=20260821-map-workspace-6"></script>
   <script src="/app-pages.js?v=20260821-map-workspace-6"></script>
   <script src="/app-manual-control.js?v=20260821-map-workspace-6"></script>
-  <script src="/map-editor.js?v=20260821-map-workspace-7"></script>
+  <script src="/map-editor.js?v=20260824-route-segment-1"></script>
   <script src="/app.js?v=20260821-map-workspace-6"></script>
 </body>
 </html>

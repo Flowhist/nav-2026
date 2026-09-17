@@ -4,6 +4,7 @@ import json
 import math
 import mimetypes
 import socket
+import subprocess
 import shutil
 import sys
 import threading
@@ -22,8 +23,9 @@ from editor_export import ExportError
 from editor_map_io import MapFormatError
 from editor_server import ApiError, EditorApplication
 from editor_store import DocumentError, RevisionConflict
+from base_control.paths import config_dir as base_config_dir
 from map_utils import list_saved_maps, load_map_preview, load_map_locations, save_map_locations
-from process_manager import RuntimeManager
+from systemd_runtime import create_runtime
 from ros_bridge import RosBridge
 from state_store import StateStore
 
@@ -99,14 +101,19 @@ class ServerApp:
         self.repo_dir = self.base_dir.parent
         self.maps_dir = self.repo_dir / "maps"
         self.config_dir = self.repo_dir / "config"
+        self.base_config_dir = base_config_dir()
         self.editor = EditorApplication(
             self.maps_dir,
             self.config_dir / "path_plan.yaml",
         )
 
         self.state = StateStore()
-        self.bridge = RosBridge(self.state, self.config_dir / "handle.yaml")
-        self.runtime = RuntimeManager(self.repo_dir, self.state)
+        self.bridge = RosBridge(
+            self.state,
+            self.base_config_dir / "handle.yaml",
+            self.base_config_dir / "base_control.yaml",
+        )
+        self.runtime = create_runtime(self.repo_dir, self.state)
 
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -124,7 +131,7 @@ class ServerApp:
 
     def stop(self) -> None:
         self._running = False
-        self.runtime.stop_all()
+        self.runtime.close()
         if self._httpd:
             self._httpd.shutdown()
             self._httpd.server_close()
@@ -157,7 +164,16 @@ class ServerApp:
                 if path == "/api/scene":
                     query = parse_qs(parsed.query)
                     map_version = int(query.get("map_version", [-1])[0])
-                    self._json(HTTPStatus.OK, app.state.snapshot_scene(known_map_version=map_version))
+                    planning_map_version = int(
+                        query.get("planning_map_version", [-1])[0]
+                    )
+                    self._json(
+                        HTTPStatus.OK,
+                        app.state.snapshot_scene(
+                            known_map_version=map_version,
+                            known_planning_map_version=planning_map_version,
+                        ),
+                    )
                     return
                 if path == "/api/history":
                     query = parse_qs(parsed.query)
@@ -252,6 +268,10 @@ class ServerApp:
                     self._editor_json(lambda: app.editor.export(parts[2], body))
                     return
 
+                if path == "/api/nav/route":
+                    self._editor_json(lambda: app._route_command(body))
+                    return
+
                 if path == "/api/nav/goal":
                     app.bridge.command(
                         {
@@ -317,7 +337,7 @@ class ServerApp:
                     params = {"map_file": map_file} if isinstance(map_file, str) and map_file.strip() else {}
                     try:
                         runtime = app.runtime.run_relocate(params=params)
-                    except RuntimeError as exc:
+                    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
                         self._json(HTTPStatus.CONFLICT, {"ok": False, "error": str(exc)})
                         return
                     self._json(HTTPStatus.OK, {"ok": True, "runtime": runtime})
@@ -340,7 +360,7 @@ class ServerApp:
                     action = path.rsplit("/", 1)[-1]
                     try:
                         payload = app.runtime.request_finav_action(action)
-                    except RuntimeError as exc:
+                    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
                         self._json(HTTPStatus.CONFLICT, {"ok": False, "error": str(exc)})
                         return
                     self._json(HTTPStatus.ACCEPTED, payload)
@@ -376,29 +396,18 @@ class ServerApp:
                     self._json(HTTPStatus.OK, {"ok": True, "name": name})
                     return
                 if path == "/api/runtime/mapping/start":
-                    self._json(
-                        HTTPStatus.OK,
-                        {
-                            "ok": True,
-                            "runtime": app.runtime.start(
-                                "mapping", launch_args={}
-                            ),
-                        },
-                    )
+                    self._runtime_json(lambda: app.runtime.start("mapping", launch_args={}))
                     return
                 if path == "/api/runtime/mapping/stop":
-                    self._json(HTTPStatus.OK, {"ok": True, "runtime": app.runtime.stop("mapping")})
+                    self._runtime_json(lambda: app.runtime.stop("mapping"))
                     return
                 if path == "/api/runtime/navigation/start":
                     map_file = body.get("map_file", "")
                     launch_args = {"map_file": map_file} if isinstance(map_file, str) and map_file.strip() else {}
-                    self._json(
-                        HTTPStatus.OK,
-                        {"ok": True, "runtime": app.runtime.start("navigation", launch_args=launch_args)},
-                    )
+                    self._runtime_json(lambda: app.runtime.start("navigation", launch_args=launch_args))
                     return
                 if path == "/api/runtime/navigation/stop":
-                    self._json(HTTPStatus.OK, {"ok": True, "runtime": app.runtime.stop("navigation")})
+                    self._runtime_json(lambda: app.runtime.stop("navigation"))
                     return
                 if path.startswith("/api/runtime/logs/") and path.endswith("/clear"):
                     mode = unquote(path.removeprefix("/api/runtime/logs/").removesuffix("/clear")).strip("/")
@@ -411,12 +420,7 @@ class ServerApp:
                     return
                 if path.startswith("/api/runtime/") and path.endswith("/restart"):
                     mode = unquote(path.removeprefix("/api/runtime/").removesuffix("/restart")).strip("/")
-                    try:
-                        runtime = app.runtime.restart(mode)
-                    except ValueError as exc:
-                        self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
-                        return
-                    self._json(HTTPStatus.OK, {"ok": True, "runtime": runtime})
+                    self._runtime_json(lambda: app.runtime.restart(mode))
                     return
                 if path.startswith("/api/configs/"):
                     rel_name = unquote(path.removeprefix("/api/configs/")).strip("/")
@@ -460,6 +464,17 @@ class ServerApp:
             def _path_segments(path: str) -> list[str]:
                 return [unquote(part) for part in path.split("/") if part]
 
+            def _runtime_json(self, operation) -> None:
+                try:
+                    payload = operation()
+                except ValueError as exc:
+                    self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+                    return
+                except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                    self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": str(exc)})
+                    return
+                self._json(HTTPStatus.OK, {"ok": True, "runtime": payload})
+
             def _editor_json(self, operation) -> None:
                 try:
                     payload = operation()
@@ -498,9 +513,13 @@ class ServerApp:
                     return
                 try:
                     map_version = int(query.get("map_version", [-1])[0])
+                    planning_map_version = int(
+                        query.get("planning_map_version", [-1])[0]
+                    )
                     plan_version = int(query.get("plan_version", [-1])[0])
                 except (TypeError, ValueError):
                     map_version = -1
+                    planning_map_version = -1
                     plan_version = -1
 
                 target_hz = 10.0 if mode == "mapping" else 15.0
@@ -528,9 +547,13 @@ class ServerApp:
                         started = time.monotonic()
                         payload = app.state.snapshot_scene(
                             known_map_version=map_version,
+                            known_planning_map_version=planning_map_version,
                             known_plan_version=plan_version,
                         )
                         map_version = int(payload.get("map_version", map_version))
+                        planning_map_version = int(
+                            payload.get("planning_map_version", planning_map_version)
+                        )
                         plan_version = int(payload.get("plan_version", plan_version))
                         payload["stream"] = {
                             "mode": mode,
@@ -607,7 +630,10 @@ class ServerApp:
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
-                self.wfile.write(data)
+                try:
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    pass
 
             def log_message(self, fmt: str, *args: Any) -> None:
                 return
@@ -621,10 +647,35 @@ class ServerApp:
             return None
         if not rel_name.endswith((".yaml", ".yml")):
             return None
-        target = (self.config_dir / rel_name).resolve()
-        if not str(target).startswith(str(self.config_dir.resolve())):
+        root = self.base_config_dir if rel_name in {"base_control.yaml", "handle.yaml"} else self.config_dir
+        target = (root / rel_name).resolve()
+        if target.parent != root.resolve():
             return None
         return target
+
+    def _route_command(self, body: Dict[str, object]) -> Dict[str, object]:
+        action = body.get("action")
+        if action not in {"start", "pause", "resume", "cancel"}:
+            raise ApiError(400, "invalid_action", "Invalid route action")
+        runtime = self.runtime.snapshot().get("navigation", {})
+        if not runtime.get("running") or runtime.get("stopping"):
+            raise ApiError(409, "navigation_not_running", "Navigation service is not running")
+        if action == "start":
+            map_name = str(body.get("map_name", ""))
+            active_map = str(runtime.get("launch_args", {}).get("map_file", ""))
+            if map_name != active_map:
+                raise ApiError(409, "route_map_mismatch", "Route map differs from active navigation map")
+            data = self._load_editor_document(map_name)
+            if data.get("read_only"):
+                raise ApiError(409, "invalid_editor_document", "Route document cannot be executed")
+            route = next((item for item in data["document"]["routes"] if item["id"] == body.get("route_id")), None)
+            if route is None:
+                raise ApiError(404, "route_not_found", "Route not found")
+            if route["closed"]:
+                raise ApiError(400, "closed_route_not_supported", "Only open routes can be executed")
+        self.bridge.command({"type": "route_command", "action": action,
+                             "map_name": body.get("map_name", ""), "route_id": body.get("route_id", "")})
+        return {"ok": True, "accepted": True}
 
     def _load_editor_document(self, map_name: str) -> Dict[str, object]:
         payload = self.editor.load_document(map_name)
@@ -674,14 +725,15 @@ class ServerApp:
             return []
 
         files = []
-        for path in sorted(self.config_dir.iterdir()):
+        paths = list(self.config_dir.iterdir()) + [self.base_config_dir / name for name in ("base_control.yaml", "handle.yaml")]
+        for path in sorted(paths, key=lambda item: item.name):
             if not path.is_file() or path.suffix not in {".yaml", ".yml"}:
                 continue
             stat = path.stat()
             files.append(
                 {
                     "name": path.name,
-                    "path": f"config/{path.name}",
+                    "path": f"{'base_control' if path.parent == self.base_config_dir else 'finav'}/config/{path.name}",
                     "size": stat.st_size,
                     "modified_at": stat.st_mtime,
                     "impact": describe_config_impact(path.name),

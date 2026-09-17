@@ -6,6 +6,7 @@ nav_control:
     # ==================== 话题 & 坐标系 ====================
     output_cmd_vel_topic: '/nav_cmd_vel'
     path_topic:           '/plan'
+    tracker_status_topic: '/nav_task/tracker_status'
     base_frame:           'base_link'
     map_frame:            'map'
     # 是否接受运行中新的 /plan（适配 nav_path_plan 重规划）

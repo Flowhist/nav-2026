@@ -1,0 +1,10 @@
+nav_task_manager:
+  ros__parameters:
+    goal_topic: "/goal_pose"
+    planner_goal_topic: "/nav_task/planner_goal"
+    planner_path_topic: "/nav_task/planner_path"
+    planner_status_topic: "/nav_task/planner_status"
+    tracker_status_topic: "/nav_task/tracker_status"
+    path_topic: "/plan"
+    status_topic: "/nav_status"
+    nav_clear_topic: "/nav_clear"

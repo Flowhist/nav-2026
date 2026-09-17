@@ -25,6 +25,13 @@ class StateStore:
                 "velocity": None,
                 "plan": {"points": 0, "length_m": 0.0, "updated_at": None},
                 "goal_pose": None,
+                "navigation": {
+                    "task_id": 0,
+                    "task_type": "none",
+                    "stage": "IDLE",
+                    "reason": "",
+                    "goal": None,
+                },
                 "initial_pose": None,
             },
             "control": {
@@ -36,6 +43,7 @@ class StateStore:
                 "gear_updated_at": None,
                 "manual_locked": False,
                 "manual_lock_reason": None,
+                "joystick_preemption_enabled": True,
             },
             "runtime": {
                 "mapping": {"running": False, "stopping": False, "started_at": None, "pid": None, "log_path": None},
@@ -51,11 +59,13 @@ class StateStore:
             },
         }
         self._scene_map_version = 0
+        self._scene_planning_map_version = 0
         self._scene_plan_version = 0
         self._live_viewers = 0
         self._viewer_modes = {"mapping": 0, "navigation": 0}
         self._scene: Dict[str, Any] = {
             "map": None,
+            "planning_map": None,
             "scan": {
                 "frame_id": "base_link",
                 "encoding": "uint16-mm-base64",
@@ -83,6 +93,10 @@ class StateStore:
         with self._lock:
             self._status["server_time"] = time.time()
             self._deep_update(self._status, patch)
+            if "control" in patch:
+                control = self._status["control"]
+                # Keep versions ordered across Web service restarts as well.
+                control["version"] = max(control.get("version", 0) + 1, time.time_ns() // 1000)
 
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
@@ -93,6 +107,7 @@ class StateStore:
         patch: Dict[str, Any],
         *,
         map_changed: bool = False,
+        planning_map_changed: bool = False,
         plan_changed: bool = False,
     ) -> None:
         with self._lock:
@@ -101,24 +116,35 @@ class StateStore:
             self._scene = self._merge_dict(self._scene, patch)
             if map_changed:
                 self._scene_map_version += 1
+            if planning_map_changed:
+                self._scene_planning_map_version += 1
             if plan_changed:
                 self._scene_plan_version += 1
 
     def snapshot_scene(
         self,
         known_map_version: int = -1,
+        known_planning_map_version: int = -1,
         known_plan_version: int = -1,
     ) -> Dict[str, Any]:
         with self._lock:
             payload = dict(self._scene)
+            payload["control"] = self._deep_copy(self._status["control"])
             current_map_version = self._scene_map_version
+            current_planning_map_version = self._scene_planning_map_version
             current_plan_version = self._scene_plan_version
             payload["map_version"] = current_map_version
             payload["map_changed"] = current_map_version != known_map_version
+            payload["planning_map_version"] = current_planning_map_version
+            payload["planning_map_changed"] = (
+                current_planning_map_version != known_planning_map_version
+            )
             payload["plan_version"] = current_plan_version
             payload["plan_changed"] = current_plan_version != known_plan_version
             if not payload["map_changed"]:
                 payload["map"] = None
+            if not payload["planning_map_changed"]:
+                payload["planning_map"] = None
             if not payload["plan_changed"]:
                 payload["plan"] = None
             return payload

@@ -2,6 +2,8 @@
 
 本文面向新加入开发人员，用于快速理解 Finav 的系统组成、运行链路、关键文件位置和常见开发入口。项目是一个基于 ROS 2 Humble 的实机导航系统，包含底盘控制、Hinson HE-3051 激光雷达、DM-IMU、EKF 融合、SLAM Toolbox 建图/定位、自研路径规划/路径跟踪、Web 调试后台和仿真环境。
 
+底盘、手柄和仲裁已迁移至同级独立仓库 `base_control`。下文 `../base_control/` 路径均相对本仓库；参见 [底盘仓库拆分](底盘仓库拆分.md)。导航、传感器和 Web 仍在本仓库维护。
+
 ## 1. 系统总览
 
 Finav 的实机主链路可以概括为：
@@ -52,6 +54,9 @@ server/ros_bridge.py 订阅 ROS 状态并提供 Web 页面调试、建图、导�
 
 ## 2. 主要运行入口
 
+独立服务部署参见 [服务部署.md](服务部署.md)：底层和 Web 分开开机启动，建图/导航由网页按需管理。
+安装服务后不再使用下面的旧一键脚本启动，以免重复占用设备；未安装服务的开发环境保留原入口。
+
 ### 2.1 一键实机调试入口
 
 文件：`start_finav.sh`
@@ -61,7 +66,7 @@ server/ros_bridge.py 订阅 ROS 状态并提供 Web 页面调试、建图、导�
 - 加载 ROS 2 和工作区环境。
 - 设置 `FASTRTPS_DEFAULT_PROFILES_FILE`、`FINAV_REPO_DIR`、`FINAV_MAPS_DIR`。
 - 启动底盘驱动 `base_control.py`。
-- 启动 STM32 手柄链路 `launch/sub/handle.launch.py`。
+- 启动 STM32 手柄链路 `../base_control/launch/handle.launch.py`。
 - 启动 Web 后台 `server/run_server.py`。
 - 启动键盘/手柄路由 `base_control_router.py`。
 - 退出时清理建图/导航相关进程。
@@ -146,13 +151,13 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 相关文件：
 
-- `scripts/control/base_control.py`
-- `scripts/handle/handle_control.py`
-- `scripts/handle/handle_modbus.py`
-- `scripts/handle/handle_protocol.py`
-- `scripts/control/base_control_router.py`
-- `config/base_control.yaml`
-- `config/handle.yaml`
+- `../base_control/base_control/base_control.py`
+- `../base_control/base_control/handle_control.py`
+- `../base_control/base_control/handle_modbus.py`
+- `../base_control/base_control/handle_protocol.py`
+- `../base_control/base_control/base_control_router.py`
+- `../base_control/config/base_control.yaml`
+- `../base_control/config/handle.yaml`
 - `base_drive.sh`
 - `start_finav.sh`
 
@@ -192,11 +197,11 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 开发入口：
 
-- 改底盘速度上限、轮距、CAN 通道：`config/base_control.yaml`。
-- 改底盘驱动和里程计逻辑：`scripts/control/base_control.py`。
-- 改故障检测频率或冷却期：`scripts/control/base_control.py` 中 `_monitor_fault` 定时器周期和 `_fault_monitor_cooldown_until`。
-- 改 STM32 串口、摇杆标定、方向和五档最高速度：`config/handle.yaml`。
-- 改键盘/Web 仲裁：`scripts/control/base_control_router.py`。
+- 改底盘速度上限、轮距、CAN 通道：`../base_control/config/base_control.yaml`。
+- 改底盘驱动和里程计逻辑：`../base_control/base_control/base_control.py`。
+- 改故障检测频率或冷却期：`../base_control/base_control/base_control.py` 中 `_monitor_fault` 定时器周期和 `_fault_monitor_cooldown_until`。
+- 改 STM32 串口、摇杆标定、方向和五档最高速度：`../base_control/config/handle.yaml`。
+- 改键盘/Web 仲裁：`../base_control/base_control/base_control_router.py`。
 
 ### 3.2 Hinson HE-3051 雷达模块
 
@@ -460,8 +465,8 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 ## 4. 配置文件索引
 
-- `config/base_control.yaml`：底盘和键盘控制参数。
-- `config/handle.yaml`：STM32 手柄串口、Modbus、摇杆标定、方向和五档速度参数。
+- `../base_control/config/base_control.yaml`：底盘和键盘控制参数。
+- `../base_control/config/handle.yaml`：STM32 手柄串口、Modbus、摇杆标定、方向和五档速度参数。
 - `config/lidar.yaml`：左右 HE-3051 的 IP、端口、驱动参数和融合参数。
 - `config/imu.yaml`：DM-IMU 串口、零偏、发布参数。
 - `config/ekf.yaml`：robot_localization EKF 融合参数。
@@ -477,14 +482,14 @@ python3 server/run_server.py --host 0.0.0.0 --port 8010
 
 ```bash
 source /opt/ros/humble/setup.bash
-colcon build --packages-select finav
+colcon build --base-paths src/base_control src/finav --packages-select base_control finav
 source install/setup.bash
 ```
 
 如果同一工作区存在同名包，需要限制构建路径：
 
 ```bash
-colcon build --base-paths src/finav --packages-select finav
+colcon build --base-paths src/base_control src/finav --packages-select base_control finav
 source install/setup.bash
 ```
 
@@ -500,7 +505,7 @@ CMake 安装内容：
 1. 阅读本文，先理解整体数据流。
 2. 阅读 `README.md`，了解 Web 后台接口和页面工作流。
 3. 根据职责选择模块：
-   - 底盘：`scripts/control/base_control.py`、`config/base_control.yaml`。
+   - 底盘：`../base_control/base_control/base_control.py`、`../base_control/config/base_control.yaml`。
    - 雷达：`third_party/hinson_he_lidar/`、`src/rosnode/scan_fusion_node.cpp`、`config/lidar.yaml`。
    - IMU/EKF：`scripts/imu/dm_imu_publisher.py`、`config/imu.yaml`、`config/ekf.yaml`。
    - 建图定位：`launch/sub/slam_toolbox.launch.py`、`config/slam_toolbox_*.yaml`。
@@ -606,8 +611,8 @@ ros2 run tf2_ros tf2_echo map base_link
 | IMU | `scripts/imu/dm_imu_publisher.py`, `third_party/dm_imu/`, `config/imu.yaml` |
 | EKF | `launch/sub/ekf.launch.py`, `config/ekf.yaml` |
 | 机器人模型 | `urdf/whillcar.urdf`, `launch/sub/robot_model.launch.py` |
-| 底盘控制 | `scripts/control/base_control.py`, `config/base_control.yaml` | 故障检测 `/base_fault` |
-| 手柄/键盘 | `scripts/handle/handle_control.py`, `scripts/handle/handle_modbus.py`, `scripts/handle/handle_protocol.py`, `launch/sub/handle.launch.py`, `config/handle.yaml`, `scripts/control/base_control_router.py` |
+| 底盘控制 | `../base_control/base_control/base_control.py`, `../base_control/config/base_control.yaml` | 故障检测 `/base_fault` |
+| 手柄/键盘 | `../base_control/base_control/handle_control.py`, `../base_control/base_control/handle_modbus.py`, `../base_control/base_control/handle_protocol.py`, `../base_control/launch/handle.launch.py`, `../base_control/config/handle.yaml`, `../base_control/base_control/base_control_router.py` |
 | 路径规划 | `scripts/control/nav_path_plan.py`, `config/path_plan.yaml` |
 | 路径跟踪 | `scripts/control/nav_control.py`, `config/nav.yaml` |
 | Web 后台 | `server/`, `server/web/` |

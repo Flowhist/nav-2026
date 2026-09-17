@@ -4,9 +4,14 @@ path_plan:
     # 地图输入（OccupancyGrid）
     map_topic: "/map"
     # 目标点输入（PoseStamped）
-    goal_topic: "/goal_pose"
+    goal_topic: "/nav_task/planner_goal"
     # 规划结果输出（nav_msgs/Path）
-    path_topic: "/plan"
+    path_topic: "/nav_task/planner_path"
+    planner_status_topic: "/nav_task/planner_status"
+    # 叠加禁行区和安全膨胀后的实际规划栅格，仅供调试显示
+    planning_map_topic: "/planning_map"
+    # 是否加载当前地图的 <map>.editor.yaml 禁行区和安全净空
+    use_editor_constraints: true
     # 全局坐标系（通常是 map）
     map_frame: "map"
     # 机器人基座坐标系（通常是 base_link）

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import base64
+import json
 import math
 import queue
 import subprocess
@@ -16,12 +17,9 @@ import yaml
 from state_store import StateStore
 
 
-HANDLE_MODULE_DIR = Path(__file__).resolve().parent.parent / "scripts" / "handle"
-if str(HANDLE_MODULE_DIR) not in sys.path:
-    sys.path.insert(0, str(HANDLE_MODULE_DIR))
-
-from handle_hid import HidMappingConfig, command_from_axes  # noqa: E402
-from handle_protocol import gear_scale  # noqa: E402
+from base_control.handle_hid import HidMappingConfig, command_from_axes
+from base_control.handle_protocol import gear_scale
+from base_control.paths import config_dir as base_config_dir
 
 
 def load_handle_mapping(config_path: Path) -> HidMappingConfig:
@@ -38,9 +36,28 @@ def load_handle_mapping(config_path: Path) -> HidMappingConfig:
             saturation=float(params.get("saturation", 1.0)),
             max_linear_speed=float(params.get("max_linear_speed", 0.6)),
             max_angular_speed=float(params.get("max_angular_speed", 0.5)),
+            invert_angular_while_reversing=bool(
+                params.get("invert_angular_while_reversing", True)
+            ),
         )
     except (AttributeError, OSError, TypeError, ValueError, yaml.YAMLError):
         return HidMappingConfig()
+
+
+def load_joystick_preemption_enabled(config_path: Path) -> bool:
+    """Read the router safety switch, defaulting to enabled on any error."""
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        value = raw.get("base_control_router", {}).get("ros__parameters", {}).get(
+            "joystick_preemption_enabled", True
+        )
+    except (AttributeError, OSError, TypeError, ValueError, yaml.YAMLError):
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(value)
 
 
 def manual_drive_command(
@@ -60,11 +77,39 @@ def manual_drive_command(
     return command_from_axes(axes, mapping, scale)
 
 
+def encode_blocked_ranges(values, threshold: int = 65) -> list[list[int]]:
+    """Run-length encode blocked cells for the lightweight Web planning overlay."""
+    ranges: list[list[int]] = []
+    start = -1
+    for index, value in enumerate(values):
+        blocked = int(value) >= threshold
+        if blocked and start < 0:
+            start = index
+        elif not blocked and start >= 0:
+            ranges.append([start, index - start])
+            start = -1
+    if start >= 0:
+        ranges.append([start, len(values) - start])
+    return ranges
+
+
 class RosBridge:
-    def __init__(self, state_store: StateStore, handle_config_path: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        state_store: StateStore,
+        handle_config_path: Optional[Path] = None,
+        router_config_path: Optional[Path] = None,
+    ) -> None:
         self.state_store = state_store
-        config_path = handle_config_path or (Path(__file__).resolve().parent.parent / "config" / "handle.yaml")
+        config_path = handle_config_path or (base_config_dir() / "handle.yaml")
         self.handle_mapping = load_handle_mapping(config_path)
+        router_path = router_config_path or (
+            base_config_dir() / "base_control.yaml"
+        )
+        self.joystick_preemption_enabled = load_joystick_preemption_enabled(router_path)
+        self.state_store.update_status(
+            {"control": {"joystick_preemption_enabled": self.joystick_preemption_enabled}}
+        )
         self._cmd_q: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=200)
         self._thread: Optional[threading.Thread] = None
 
@@ -139,11 +184,13 @@ class _BridgeNode:
         self.Empty = Empty
         self.String = String
         self.handle_mapping = bridge.handle_mapping
+        self.joystick_preemption_enabled = bridge.joystick_preemption_enabled
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.pub_goal = self.create_publisher(PoseStamped, "/goal_pose", 10)
+        self.pub_route_command = self.create_publisher(String, "/nav_task/command", 10)
         self.pub_web_cmd = self.create_publisher(Twist, "/web_cmd_vel", 10)
         self.pub_initial = self.create_publisher(PoseWithCovarianceStamped, "/initialpose", 10)
         self.pub_nav_clear = self.create_publisher(Empty, "/nav_clear", 10)
@@ -156,8 +203,17 @@ class _BridgeNode:
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
         self.create_subscription(OccupancyGrid, "/map", lambda m: _BridgeNode._on_map(self, m), map_qos)
+        self.create_subscription(
+            OccupancyGrid,
+            "/planning_map",
+            lambda m: _BridgeNode._on_planning_map(self, m),
+            map_qos,
+        )
         self.create_subscription(Odometry, "/odom", lambda m: _BridgeNode._on_odom(self, m), 20)
         self.create_subscription(Path, "/plan", lambda m: _BridgeNode._on_plan(self, m), 10)
+        self.create_subscription(
+            String, "/nav_status", lambda m: _BridgeNode._on_nav_status(self, m), map_qos
+        )
         scan_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
@@ -187,6 +243,7 @@ class _BridgeNode:
         self._last_tick = time.monotonic()
         self._last_seen: Dict[str, float] = {}
         self._last_map_signature: Optional[Tuple[object, ...]] = None
+        self._last_planning_map_signature: Optional[Tuple[object, ...]] = None
         self._next_web_scan_at = 0.0
 
         self._joystick_online = False
@@ -263,6 +320,50 @@ class _BridgeNode:
         )
 
     @staticmethod
+    def _on_planning_map(self: Any, msg: Any) -> None:
+        """Stream the effective planner grid as a versioned Web overlay."""
+        _BridgeNode._touch(self, "planning_map")
+        try:
+            raw_map = bytes(msg.data)
+        except (TypeError, ValueError):
+            raw_map = array("b", (int(value) for value in msg.data)).tobytes()
+        origin_yaw = round(
+            math.degrees(_BridgeNode._yaw_from_quat(msg.info.origin.orientation)), 2
+        )
+        signature = (
+            int(msg.info.width),
+            int(msg.info.height),
+            round(float(msg.info.resolution), 9),
+            round(float(msg.info.origin.position.x), 6),
+            round(float(msg.info.origin.position.y), 6),
+            origin_yaw,
+            zlib.crc32(raw_map),
+        )
+        if self._last_planning_map_signature == signature:
+            return
+        self._last_planning_map_signature = signature
+        self.state_store.update_scene(
+            {
+                "planning_map": {
+                    "source": "planning",
+                    "frame_id": msg.header.frame_id or "map",
+                    "width": int(msg.info.width),
+                    "height": int(msg.info.height),
+                    "resolution": float(msg.info.resolution),
+                    "origin": {
+                        "x": float(msg.info.origin.position.x),
+                        "y": float(msg.info.origin.position.y),
+                        "yaw_deg": origin_yaw,
+                    },
+                    "updated_at": time.time(),
+                    "encoding": "blocked-ranges-v1",
+                    "blocked_ranges": encode_blocked_ranges(msg.data),
+                }
+            },
+            planning_map_changed=True,
+        )
+
+    @staticmethod
     def _on_odom(self: Any, msg: Any) -> None:
         self._counts["odom"] += 1
         _BridgeNode._touch(self, "odom")
@@ -302,12 +403,25 @@ class _BridgeNode:
         )
 
     @staticmethod
-    def _lookup_pose_in_map(self: Any, frame_id: str) -> Optional[Tuple[float, float, float]]:
+    def _on_nav_status(self: Any, msg: Any) -> None:
+        try:
+            status = json.loads(str(msg.data))
+        except (TypeError, ValueError):
+            return
+        if not isinstance(status, dict):
+            return
+        self.state_store.update_status({"robot": {"navigation": status}})
+
+    @staticmethod
+    def _lookup_pose_in_map(
+        self: Any, frame_id: str, stamp: Optional[Any] = None
+    ) -> Optional[Tuple[float, float, float]]:
         from rclpy.time import Time
         from tf2_ros import TransformException
 
         try:
-            tf = self.tf_buffer.lookup_transform("map", frame_id, Time())
+            query_time = Time.from_msg(stamp) if stamp is not None else Time()
+            tf = self.tf_buffer.lookup_transform("map", frame_id, query_time)
         except TransformException:
             return None
 
@@ -335,7 +449,14 @@ class _BridgeNode:
             return
         self._next_web_scan_at += interval
 
-        pose_in_map = _BridgeNode._lookup_pose_in_map(self, msg.header.frame_id or "base_link")
+        # Pair scan geometry with its acquisition-time pose, never the latest TF.
+        if msg.header.stamp.sec == 0 and msg.header.stamp.nanosec == 0:
+            return
+        pose_in_map = _BridgeNode._lookup_pose_in_map(
+            self, msg.header.frame_id or "base_link", msg.header.stamp
+        )
+        if pose_in_map is None:
+            return
         step = max(1, len(msg.ranges) // 720)
         packed_ranges = array("H")
         for i in range(0, len(msg.ranges), step):
@@ -347,14 +468,13 @@ class _BridgeNode:
         if sys.byteorder != "little":
             packed_ranges.byteswap()
 
-        pose_payload = _BridgeNode._pose_dict(*pose_in_map) if pose_in_map is not None else None
-        if pose_payload is not None:
-            self.state_store.update_status({"robot": {"pose_map": pose_payload}})
+        pose_payload = _BridgeNode._pose_dict(*pose_in_map)
 
         self.state_store.update_scene(
             {
                 "scan": {
                     "frame_id": msg.header.frame_id or "base_link",
+                    "stamp": msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
                     "updated_at": time.time(),
                     "pose_map": pose_payload,
                     "encoding": "uint16-mm-base64",
@@ -363,9 +483,9 @@ class _BridgeNode:
                     "count": len(packed_ranges),
                     "ranges_b64": base64.b64encode(packed_ranges.tobytes()).decode("ascii"),
                 },
-                "robot_pose_map": pose_payload,
             }
         )
+        _BridgeNode._refresh_pose_map(self)
 
     @staticmethod
     def _on_tf(self: Any, msg: Any) -> None:
@@ -383,11 +503,18 @@ class _BridgeNode:
     def _on_js_state(self: Any, msg: Any) -> None:
         self._joystick_online = bool(msg.data)
         _BridgeNode._touch(self, "js_state")
+        self.state_store.update_status({"control": {
+            "joystick_online": self._joystick_online,
+            "joystick_updated_at": self._last_seen["js_state"],
+        }})
 
     @staticmethod
     def _on_js_cmd(self: Any, msg: Any) -> None:
         self._joystick_active = abs(float(msg.linear.x)) > 1e-6 or abs(float(msg.angular.z)) > 1e-6
         _BridgeNode._touch(self, "js_cmd")
+        self.state_store.update_status({"control": {
+            "joystick_active": self._joystick_active,
+        }})
 
     @staticmethod
     def _on_gear(self: Any, msg: Any) -> None:
@@ -396,10 +523,20 @@ class _BridgeNode:
             return
         self._handle_gear = gear
         _BridgeNode._touch(self, "handle_gear")
+        self.state_store.update_status({"control": {
+            "gear": gear,
+            "gear_online": True,
+            "gear_updated_at": self._last_seen["handle_gear"],
+        }})
 
     @staticmethod
     def _on_router_status(self: Any, msg: Any) -> None:
         status = str(msg.data).strip()
+        if not self.joystick_preemption_enabled:
+            self.state_store.update_status(
+                {"control": {"manual_locked": False, "manual_lock_reason": None}}
+            )
+            return
         patch: Dict[str, Any] = {}
         if (
             status.startswith("joystick_stop:")
@@ -478,6 +615,12 @@ class _BridgeNode:
                 float(cmd.get("linear", 0.0)),
                 float(cmd.get("angular", 0.0)),
             )
+
+        elif ctype == "route_command":
+            msg = self.String()
+            msg.data = json.dumps({key: cmd.get(key, "") for key in ("action", "map_name", "route_id")})
+            self.pub_route_command.publish(msg)
+            _BridgeNode._event(self, "info", "route command published", {"action": cmd.get("action"), "route_id": cmd.get("route_id")})
 
         elif ctype == "set_goal":
             x = float(cmd.get("x", 0.0))
@@ -585,6 +728,7 @@ class _BridgeNode:
                     "gear": self._handle_gear if gear_online else None,
                     "gear_online": gear_online,
                     "gear_updated_at": self._last_seen.get("handle_gear"),
+                    "joystick_preemption_enabled": self.joystick_preemption_enabled,
                 },
                 "ros": {
                     "tf_hz": {

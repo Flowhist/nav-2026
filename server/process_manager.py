@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from base_control.paths import config_dir as base_config_dir
 from typing import Dict
 
 from state_store import StateStore
@@ -236,6 +237,9 @@ class RuntimeManager:
             self.stop(mode)
         self._stop_relocate()
         return self.snapshot()
+
+    def close(self) -> None:
+        self.stop_all()
 
     def finav_supervisor_status(self) -> Dict[str, object]:
         pid = self._find_start_finav_pid()
@@ -528,7 +532,8 @@ class RuntimeManager:
 
     def _build_launch_command(self, launch_file: str, launch_args: Dict[str, object] | None = None) -> str:
         parts = self._build_ros_env_parts()
-        launch_cmd = ["ros2", "launch", "finav", launch_file]
+        package = "base_control" if launch_file == "handle.launch.py" else "finav"
+        launch_cmd = ["ros2", "launch", package, launch_file]
         for key, value in (launch_args or {}).items():
             if value is None:
                 continue
@@ -538,7 +543,8 @@ class RuntimeManager:
 
     def _build_run_command(self, executable: str, params: Dict[str, object] | None = None) -> str:
         parts = self._build_ros_env_parts()
-        run_cmd = ["ros2", "run", "finav", executable]
+        is_base = executable in {"base_control.py", "base_control_router.py", "handle_control.py"}
+        run_cmd = ["ros2", "run", "base_control" if is_base else "finav", executable]
         ros_args: list[str] = []
         params = dict(params or {})
         params_file = {
@@ -547,7 +553,8 @@ class RuntimeManager:
             "nav_relocate.py": "nav_relocate.yaml",
         }.get(executable)
         if params_file:
-            ros_args.extend(["--params-file", str(self.repo_dir / "config" / params_file)])
+            config = base_config_dir() if is_base else self.repo_dir / "config"
+            ros_args.extend(["--params-file", str(config / params_file)])
         for key, value in (params or {}).items():
             if value is None:
                 continue

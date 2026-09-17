@@ -10,7 +10,7 @@ function startSceneStream() {
 
   const mode = appState.page;
   const source = new EventSource(
-    `/api/stream?mode=${encodeURIComponent(mode)}&map_version=${appState.mapVersion}&plan_version=${appState.planVersion}`,
+    `/api/stream?mode=${encodeURIComponent(mode)}&map_version=${appState.mapVersion}&planning_map_version=${appState.planningMapVersion}&plan_version=${appState.planVersion}`,
   );
   appState.stream.source = source;
   appState.stream.mode = mode;
@@ -21,11 +21,17 @@ function startSceneStream() {
   source.onmessage = (event) => {
     try {
       const payload = JSON.parse(event.data);
+      applyManualControlStatus(payload.control);
       appState.mapVersion = payload.map_version ?? appState.mapVersion;
+      appState.planningMapVersion = payload.planning_map_version ?? appState.planningMapVersion;
       appState.planVersion = payload.plan_version ?? appState.planVersion;
       if (payload.map) {
         appState.scene.map = payload.map;
         [...mapRasterCache.keys()].filter((key) => key.startsWith("live-")).forEach((key) => mapRasterCache.delete(key));
+      }
+      if (payload.planning_map) {
+        appState.scene.planning_map = payload.planning_map;
+        [...mapRasterCache.keys()].filter((key) => key.startsWith("planning-")).forEach((key) => mapRasterCache.delete(key));
       }
       if (payload.scan) appState.scene.scan = payload.scan;
       if (payload.plan) appState.scene.plan = payload.plan;
@@ -63,9 +69,11 @@ function isLivePage() {
 
 function resetLiveScene() {
   appState.mapVersion = -1;
+  appState.planningMapVersion = -1;
   appState.planVersion = -1;
   appState.scene = {
     map: null,
+    planning_map: null,
     scan: { count: 0, ranges_b64: "" },
     plan: { points: 0, points_xy: [] },
     robot_pose_map: null,
@@ -118,11 +126,20 @@ function renderLiveCanvases() {
     });
   }
   if (appState.page === "navigation") {
+    const layers = appState.navLayers;
+    const objectsReady = activeMap && appState.navObjectsFor === activeMap;
+    const task = appState.status?.robot?.navigation || {};
+    setText("navInflationState", appState.scene.planning_map ? "" : "待就绪");
     drawScene($("navigationCanvas"), appState.scene.map, appState.scene, {
       prefix: "live",
-      showPlan: true,
+      showPlan: layers.plan,
+      showPlanningMap: layers.inflation,
+      showScan: layers.scan,
       showTargets: true,
-      locations,
+      locations: layers.locations ? locations : [],
+      keepouts: layers.keepouts && objectsReady ? appState.navKeepouts : [],
+      routes: layers.routes && objectsReady ? appState.navRoutes : [],
+      selectedRoute: ["PLANNING", "FOLLOWING", "PAUSED"].includes(task.stage) ? task.route_id : $("navRouteSelect").value,
       selectedLocation: $("navLocationInput")?.value.trim() || "",
       dragPose,
     });
@@ -239,6 +256,7 @@ function renderNavMapPicker() {
 }
 
 async function loadNavLocations(force = false) {
+  loadNavMapObjects().catch(console.error);
   const map = appState.navMapName;
   if (!map) {
     appState.navLocations = [];
@@ -252,15 +270,81 @@ async function loadNavLocations(force = false) {
   }
   try {
     const data = await api(`/api/maps/${encodeURIComponent(map)}/locations`);
+    if (map !== appState.navMapName) return;
     appState.navLocations = Array.isArray(data.locations) ? data.locations : [];
     appState.navLocationsFor = map;
   } catch (err) {
+    if (map !== appState.navMapName) return;
     console.error(err);
     appState.navLocations = [];
     appState.navLocationsFor = map;
   }
   renderNavLocationList();
   renderLiveCanvases();
+}
+
+async function loadNavMapObjects() {
+  const map = getActiveNavigationMap(appState.navMapName);
+  if (map && appState.navObjectsLoadingMap === map) return;
+  const request = ++appState.navObjectsRequest;
+  if (map !== appState.navObjectsFor) {
+    appState.navRoutes = [];
+    appState.navKeepouts = [];
+    appState.navObjectsFor = "";
+    renderNavRouteList([]);
+  }
+  if (!map) {
+    appState.navRoutes = [];
+    renderNavRouteList([]);
+    return;
+  }
+  appState.navObjectsLoadingMap = map;
+  try {
+    const data = await api(`/api/maps/${encodeURIComponent(map)}/editor`);
+    if (request !== appState.navObjectsRequest || map !== getActiveNavigationMap(appState.navMapName)) return;
+    appState.navRoutes = data.document?.routes || [];
+    appState.navKeepouts = data.document?.keepouts || [];
+    appState.navObjectsFor = map;
+    const available = data.read_only ? [] : appState.navRoutes.filter(route => !route.closed);
+    renderNavRouteList(available);
+    renderRuntimeControls();
+    renderLiveCanvases();
+  } finally {
+    if (appState.navObjectsLoadingMap === map) appState.navObjectsLoadingMap = "";
+  }
+}
+
+function renderNavRouteList(routes) {
+  const control = $("navRouteSelect");
+  const selected = routes.find(route => route.id === control.value);
+  control.value = selected?.id || "";
+  setText("navRouteLabel", selected?.name || (routes.length ? "选择路线" : "暂无开放路线"));
+  const list = $("navRouteOptions");
+  list.replaceChildren();
+  if (!routes.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state compact";
+    empty.textContent = "暂无开放路线";
+    list.appendChild(empty);
+  }
+  routes.forEach(route => {
+    const button = createInfoButton(
+      "nav-select-option" + (route.id === control.value ? " active" : ""),
+      route.name, route.direction === "reverse" ? "反向" : "正向",
+    );
+    button.type = "button";
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", String(route.id === control.value));
+    button.addEventListener("click", () => {
+      control.value = route.id;
+      renderNavRouteList(routes);
+      toggleNavSelect("navRoutePanel", false);
+      control.focus();
+      renderRuntimeControls();
+      renderLiveCanvases();
+    });
+    list.appendChild(button);
+  });
 }
 
 function renderNavLocationList() {
@@ -346,6 +430,9 @@ function renderRuntimeControls() {
     loadNavLocations().catch(console.error);
   }
   const mappingBusy = mapping.running || mapping.stopping;
+  if (activeMap && appState.navObjectsFor !== activeMap && appState.navObjectsLoadingMap !== activeMap) {
+    loadNavMapObjects().catch(console.error);
+  }
   const navigationBusy = navigation.running || navigation.stopping;
   const navCommandsEnabled = navigation.running && !navigation.stopping;
   applyRunState("mappingRunState", mapping, "正在建图");
@@ -358,8 +445,22 @@ function renderRuntimeControls() {
   setHidden("navCommandSections", !navCommandsEnabled);
   setText("navActiveMap", activeMap || appState.navMapName || "--");
   const plan = appState.status?.robot?.plan || {};
-  const hasTask = navCommandsEnabled && (!!appState.status?.robot?.goal_pose || Number(plan.points || 0) > 0 || !!appState.navDestinationName);
-  setHidden("navCurrentTask", !hasTask);
+  const navTask = appState.status?.robot?.navigation || {};
+  const routeActive = navTask.task_type === "route" && ["PLANNING", "FOLLOWING", "PAUSED"].includes(navTask.stage);
+  $("btnStartRoute").disabled = !navCommandsEnabled || !$("navRouteSelect").value || routeActive;
+  $("navRouteSelect").disabled = !navCommandsEnabled || routeActive;
+  if ($("navRouteSelect").disabled) toggleNavSelect("navRoutePanel", false);
+  setHidden("btnPauseRoute", !routeActive || !["FOLLOWING", "PLANNING"].includes(navTask.stage));
+  setHidden("btnResumeRoute", !routeActive || navTask.stage !== "PAUSED");
+  $("btnPauseRoute").disabled = !navCommandsEnabled;
+  $("btnResumeRoute").disabled = !navCommandsEnabled;
+  const hasTask = navCommandsEnabled && (
+    Number(navTask.task_id || 0) > 0
+    || !!appState.status?.robot?.goal_pose
+    || Number(plan.points || 0) > 0
+    || !!appState.navDestinationName
+  );
+  setHidden("navCurrentTask", !navCommandsEnabled);
 
   $("btnStartMapping").disabled = mappingBusy;
   $("btnStopMapping").disabled = !mappingBusy;
@@ -369,14 +470,14 @@ function renderRuntimeControls() {
   $("navMapToggle").disabled = navigationBusy || !appState.savedMaps.length;
   $("btnArmInit").disabled = !navCommandsEnabled;
   $("btnArmGoal").disabled = !navCommandsEnabled;
-  $("btnCancelNav").disabled = !navCommandsEnabled;
+  $("btnCancelNav").disabled = !hasTask || ["REACHED", "FAILED", "CANCELED", "IDLE"].includes(navTask.stage);
 
   const relocate = getRuntime("relocate");
   const relocateBusy = relocate.running || relocate.stopping;
   const btnRelocate = $("btnRelocate");
   if (btnRelocate) {
     btnRelocate.disabled = !navCommandsEnabled || relocateBusy;
-    btnRelocate.textContent = relocateBusy ? "自动重定位中…" : "自动重定位";
+    setText("navRelocateLabel", relocateBusy ? "重定位中…" : "自动重定位");
     btnRelocate.classList.toggle("active", relocateBusy);
   }
   if (!navCommandsEnabled && appState.navPlacementMode && typeof setNavPlacementMode === "function") {
@@ -606,8 +707,8 @@ async function loadSystemSupervisor() {
     const data = await api("/api/system");
     const state = $("systemSupervisorState");
     state.textContent = data.managed
-      ? `start_finav.sh 正在监督当前服务 · PID ${data.pid}`
-      : "未检测到 start_finav.sh 监督进程，关闭和重启不可用";
+      ? (data.backend === "systemd" ? "Finav 服务运行管理已连接" : `start_finav.sh 正在监督当前服务 · PID ${data.pid}`)
+      : "服务管理不可用，关闭和重启不可用";
     state.dataset.state = data.managed ? "ok" : "error";
     $("btnShutdownFinav").disabled = !data.managed;
     $("btnRestartFinav").disabled = !data.managed;
@@ -625,7 +726,7 @@ async function requestFinavPowerAction(action, button) {
   const confirmed = await showAnnotationConfirmDialog({
     title: restarting ? "重启 Finav" : "关闭 Finav",
     message: restarting
-      ? "将停止当前建图、导航、底盘、手柄、路由和 Web 进程，随后重新启动整套 start_finav。页面会短暂断开，是否继续？"
+      ? "将停止当前建图、导航及底盘控制，随后重新启动底盘和 Web。导航任务不会自动恢复，页面会短暂断开，是否继续？"
       : "将停止当前建图、导航、底盘、手柄、路由和 Web 进程。Jetson 系统不会关机，是否继续？",
     confirmText: restarting ? "确认重启" : "确认关闭",
     danger: true,
@@ -739,7 +840,7 @@ async function restartRuntimeTarget(mode, button) {
   button.disabled = true;
   button.textContent = "重启中…";
   try {
-    const data = await api(`/api/runtime/${encodeURIComponent(mode)}/restart`, "POST", {});
+    const data = await api(`/api/runtime/${encodeURIComponent(mode)}/restart`, "POST", {}, { timeoutMs: 45000 });
     if (data.runtime) {
       appState.status = { ...(appState.status || {}), runtime: data.runtime };
       renderRuntimeControls();
@@ -767,7 +868,7 @@ async function startRuntime(mode) {
     if (mode === "navigation" && appState.navMapName) {
       body = { map_file: appState.navMapName };
     }
-    const data = await api(`/api/runtime/${mode}/start`, "POST", body);
+    const data = await api(`/api/runtime/${mode}/start`, "POST", body, { timeoutMs: 45000 });
     if (data.runtime) {
       appState.status = { ...(appState.status || {}), runtime: data.runtime };
       renderRuntimeControls();
@@ -784,7 +885,7 @@ async function startRuntime(mode) {
 async function stopRuntime(mode, options = {}) {
   const run = async () => {
     try {
-      const data = await api(`/api/runtime/${mode}/stop`, "POST", {});
+      const data = await api(`/api/runtime/${mode}/stop`, "POST", {}, { timeoutMs: 45000 });
       if (data.runtime) {
         appState.status = { ...(appState.status || {}), runtime: data.runtime };
         renderRuntimeControls();

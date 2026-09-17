@@ -22,16 +22,26 @@ function manualControlNodes() {
     close: root?.querySelector(".manual-drive-close"),
     state: root?.querySelector(".manual-drive-state"),
     gear: root?.querySelector(".manual-gear strong"),
+    overrideWarning: root?.querySelector(".manual-override-warning"),
     stick: root?.querySelector(".manual-stick"),
     knob: root?.querySelector(".manual-stick-knob"),
     enable: root?.querySelector(".manual-enable"),
   };
 }
 
+function applyManualControlStatus(control) {
+  if (!control) return;
+  const current = appState.status?.control;
+  if (current && (control.version ?? 0) < (current.version ?? 0)) return;
+  appState.status = { ...(appState.status || {}), control };
+  renderManualControlStatus();
+}
+
 function manualControlAvailability() {
   const control = appState.status?.control || {};
-  if (control.manual_locked) return { ready: false, label: "手柄抢停，等待控制回中" };
-  if (control.joystick_active) return { ready: false, label: "物理摇杆正在接管" };
+  const joystickPriority = control.joystick_preemption_enabled !== false;
+  if (joystickPriority && control.manual_locked) return { ready: false, label: "手柄抢停，等待控制回中" };
+  if (joystickPriority && control.joystick_active) return { ready: false, label: "物理摇杆正在接管" };
   if (!control.gear_online) return { ready: false, label: "等待手柄档位" };
   if (!appState.status?.ros?.connected) return { ready: false, label: "ROS 未连接" };
   return { ready: true, label: manualControl.enabled ? "控制已启用" : "尚未启用" };
@@ -41,15 +51,17 @@ function renderManualControlStatus(control = appState.status?.control || {}) {
   const nodes = manualControlNodes();
   if (!nodes.root) return;
   const availability = manualControlAvailability();
+  const joystickPriority = control.joystick_preemption_enabled !== false;
   nodes.gear.textContent = control.gear_online ? `${control.gear} 档 · 跟随手柄` : "不可用";
+  nodes.overrideWarning.classList.toggle("hidden", joystickPriority);
   nodes.state.textContent = availability.label;
   nodes.enable.disabled = !availability.ready && !manualControl.enabled;
   nodes.enable.textContent = manualControl.enabled ? "停用控制" : "启用控制";
   nodes.enable.classList.toggle("active", manualControl.enabled);
   nodes.root.classList.toggle("active", manualControl.enabled);
-  nodes.root.classList.toggle("locked", !!control.manual_locked || !!control.joystick_active);
+  nodes.root.classList.toggle("locked", joystickPriority && (!!control.manual_locked || !!control.joystick_active));
 
-  if (manualControl.enabled && (!availability.ready || control.joystick_active)) {
+  if (manualControl.enabled && !availability.ready) {
     stopManualControl(availability.label, true);
   }
 }

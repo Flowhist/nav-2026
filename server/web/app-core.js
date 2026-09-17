@@ -8,10 +8,12 @@ const appState = {
   page: "mapping",
   lastSeq: 0,
   mapVersion: -1,
+  planningMapVersion: -1,
   planVersion: -1,
   status: null,
   scene: {
     map: null,
+    planning_map: null,
     scan: { count: 0, ranges_b64: "" },
     plan: { points: 0, points_xy: [] },
     robot_pose_map: null,
@@ -25,6 +27,12 @@ const appState = {
   navMapName: "",
   navLocations: [],
   navLocationsFor: "",
+  navRoutes: [],
+  navKeepouts: [],
+  navObjectsFor: "",
+  navObjectsRequest: 0,
+  navObjectsLoadingMap: "",
+  navLayers: { inflation: true, keepouts: true, routes: true, locations: true, plan: true, scan: true },
   statusPanel: "overview",
   dockView: "events",
   dockAutoFollow: {
@@ -212,16 +220,15 @@ function getMapCacheKey(mapData, prefix) {
   return `${prefix}-${mapData.name || "preview"}-${mapData.width}-${mapData.height}`;
 }
 
-function buildMapRaster(mapData, prefix) {
-  const cacheKey = getMapCacheKey(mapData, prefix);
-  if (mapRasterCache.has(cacheKey)) return mapRasterCache.get(cacheKey);
-
-  const offscreen = document.createElement("canvas");
-  offscreen.width = mapData.width;
-  offscreen.height = mapData.height;
-  const ctx = offscreen.getContext("2d");
-  const image = ctx.createImageData(mapData.width, mapData.height);
-
+function decodeOccupancy(mapData) {
+  if (mapData.encoding === "blocked-ranges-v1" && Array.isArray(mapData.blocked_ranges)) {
+    const occupancy = new Int8Array(Number(mapData.width || 0) * Number(mapData.height || 0));
+    mapData.blocked_ranges.forEach(([start, length]) => {
+      const end = Math.min(occupancy.length, Number(start) + Number(length));
+      occupancy.fill(100, Math.max(0, Number(start)), end);
+    });
+    return occupancy;
+  }
   let occupancy = mapData.data;
   if (!occupancy && mapData.encoding === "int8-base64" && mapData.data_b64) {
     const binary = window.atob(mapData.data_b64);
@@ -232,7 +239,19 @@ function buildMapRaster(mapData, prefix) {
     }
     occupancy = decoded;
   }
-  occupancy = occupancy || [];
+  return occupancy || [];
+}
+
+function buildMapRaster(mapData, prefix) {
+  const cacheKey = getMapCacheKey(mapData, prefix);
+  if (mapRasterCache.has(cacheKey)) return mapRasterCache.get(cacheKey);
+
+  const offscreen = document.createElement("canvas");
+  offscreen.width = mapData.width;
+  offscreen.height = mapData.height;
+  const ctx = offscreen.getContext("2d");
+  const image = ctx.createImageData(mapData.width, mapData.height);
+  const occupancy = decodeOccupancy(mapData);
 
   for (let y = 0; y < mapData.height; y += 1) {
     for (let x = 0; x < mapData.width; x += 1) {
@@ -252,6 +271,36 @@ function buildMapRaster(mapData, prefix) {
     }
   }
 
+  ctx.putImageData(image, 0, 0);
+  mapRasterCache.set(cacheKey, offscreen);
+  return offscreen;
+}
+
+function buildPlanningMask(planningMap, sourceMap) {
+  if (!planningMap || !sourceMap) return null;
+  const cacheKey = `planning-${appState.planningMapVersion}`;
+  if (mapRasterCache.has(cacheKey)) return mapRasterCache.get(cacheKey);
+  if (planningMap.width !== sourceMap.width || planningMap.height !== sourceMap.height) return null;
+
+  const planning = decodeOccupancy(planningMap);
+  const source = decodeOccupancy(sourceMap);
+  const offscreen = document.createElement("canvas");
+  offscreen.width = planningMap.width;
+  offscreen.height = planningMap.height;
+  const ctx = offscreen.getContext("2d");
+  const image = ctx.createImageData(planningMap.width, planningMap.height);
+  for (let y = 0; y < planningMap.height; y += 1) {
+    for (let x = 0; x < planningMap.width; x += 1) {
+      const src = y * planningMap.width + x;
+      const dst = ((planningMap.height - 1 - y) * planningMap.width + x) * 4;
+      const addedConstraint = (planning[src] ?? 0) >= 65 && (source[src] ?? -1) >= 0 && (source[src] ?? 100) < 65;
+      if (!addedConstraint) continue;
+      image.data[dst] = 214;
+      image.data[dst + 1] = 62;
+      image.data[dst + 2] = 48;
+      image.data[dst + 3] = 52;
+    }
+  }
   ctx.putImageData(image, 0, 0);
   mapRasterCache.set(cacheKey, offscreen);
   return offscreen;
@@ -498,6 +547,50 @@ function drawRobotFootprint(ctx, view, canvas, pose, footprint = {}) {
   ctx.restore();
 }
 
+function keepoutVertices(zone) {
+  const angle = Number(zone.yaw_deg || 0) * Math.PI / 180;
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  const w = zone.width_m / 2, h = zone.height_m / 2;
+  return [[-w, -h], [w, -h], [w, h], [-w, h]].map(([x, y]) => ({
+    x: zone.center.x + x * cos - y * sin,
+    y: zone.center.y + x * sin + y * cos,
+  }));
+}
+
+function drawKeepout(ctx, view, canvas, zone, selected = false) {
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const points = keepoutVertices(zone).map(p => worldToScreen(view, canvas, p.x, p.y));
+  ctx.save();
+  ctx.beginPath();
+  points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  ctx.closePath();
+  ctx.fillStyle = "rgba(185,90,82,.08)";
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  const left = Math.max(0, Math.min(...points.map(p => p.x)));
+  const right = Math.min(canvas.width, Math.max(...points.map(p => p.x)));
+  const top = Math.max(0, Math.min(...points.map(p => p.y)));
+  const bottom = Math.min(canvas.height, Math.max(...points.map(p => p.y)));
+  ctx.beginPath();
+  for (let x = left - (bottom - top); x < right; x += 10 * ratio) {
+    ctx.moveTo(x, bottom);
+    ctx.lineTo(x + bottom - top, top);
+  }
+  ctx.strokeStyle = "rgba(185,90,82,.25)";
+  ctx.lineWidth = ratio;
+  ctx.stroke();
+  ctx.restore();
+  ctx.beginPath();
+  points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  ctx.closePath();
+  ctx.strokeStyle = selected ? "#234e41" : "#b95a52";
+  ctx.lineWidth = (selected ? 2.5 : 1.5) * ratio;
+  ctx.setLineDash([6 * ratio, 4 * ratio]);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawScene(canvas, mapData, scene, options = {}) {
   if (!resizeCanvas(canvas)) return;
   const ctx = canvas.getContext("2d");
@@ -521,6 +614,38 @@ function drawScene(canvas, mapData, scene, options = {}) {
   ctx.strokeRect(view.offsetX, view.offsetY, view.drawWidth, view.drawHeight);
   ctx.restore();
 
+  if (options.showPlanningMap && scene?.planning_map) {
+    const planningMask = buildPlanningMask(scene.planning_map, mapData);
+    if (planningMask) {
+      ctx.save();
+      applyCameraToContext(ctx, canvas);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(planningMask, view.offsetX, view.offsetY, view.drawWidth, view.drawHeight);
+      ctx.restore();
+    }
+  }
+
+  (options.keepouts || []).forEach(zone => drawKeepout(ctx, view, canvas, zone));
+
+  (options.routes || []).forEach(route => {
+    if (!route.waypoints?.length) return;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const selected = route.id === options.selectedRoute;
+    ctx.save();
+    ctx.strokeStyle = selected ? "#234e41" : "#5e8d7d";
+    ctx.lineWidth = (selected ? 2.5 : 1.5) * ratio;
+    ctx.setLineDash([6 * ratio, 5 * ratio]);
+    ctx.beginPath();
+    route.waypoints.forEach((point, index) => {
+      const pt = worldToScreen(view, canvas, point.x, point.y);
+      if (index === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    });
+    if (route.closed) ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  });
+
   if (options.showPlan && scene?.plan?.points_xy?.length) {
     ctx.save();
     ctx.strokeStyle = "rgba(37, 93, 77, 0.88)";
@@ -535,7 +660,7 @@ function drawScene(canvas, mapData, scene, options = {}) {
     ctx.restore();
   }
 
-  const scanPoints = scanWorldPoints(scene?.scan);
+  const scanPoints = options.showScan === false ? [] : scanWorldPoints(scene?.scan);
   if (scanPoints.length) {
     ctx.save();
     ctx.fillStyle = "rgba(45, 155, 178, 0.75)";
@@ -583,6 +708,7 @@ function renderStatus(status) {
   const tf = ros.tf_hz || {};
   const hz = ros.topic_hz || {};
   const plan = robot.plan || {};
+  const navigation = robot.navigation || {};
   const control = status.control || {};
   if (typeof renderManualControlStatus === "function") renderManualControlStatus(control);
   const runtime = status.runtime || {};
@@ -650,9 +776,37 @@ function renderStatus(status) {
   if (runtime.mapping?.running) {
     setText("mappingElapsed", `已运行 ${formatClockDuration(Date.now() / 1000 - Number(runtime.mapping.started_at || Date.now() / 1000))}`);
   }
-  setText("navTaskGoal", appState.navDestinationName || (robot.goal_pose ? "地图目标" : "等待目标"));
-  setText("navTaskPlan", Number(plan.length_m) > 0 ? `${fmt(plan.length_m, 1)} m` : "规划中");
-  setText("navTaskState", robot.goal_pose || Number(plan.points || 0) > 0 ? "导航中" : "等待目标");
+  const navStageLabels = {
+    IDLE: "等待目标",
+    PLANNING: "正在规划",
+    FOLLOWING: "正在导航",
+    PAUSED: "已暂停",
+    REACHED: "已到达",
+    FAILED: "规划失败",
+    CANCELED: "已取消",
+  };
+  const navReasonLabels = {
+    manager_started: "任务管理器已就绪",
+    new_goal: "收到新目标",
+    path_ready: "路径已生成",
+    replanning: "地图或位置变化，正在重新规划",
+    goal_tolerance: "已进入目标容差范围",
+    already_within_tolerance: "当前位置已在目标范围内",
+    nav_clear: "用户取消导航",
+    user_pause: "用户暂停",
+    route_collision: "路线穿过障碍或禁行区",
+    route_not_found: "路线已删除或不存在",
+    closed_route_not_supported: "不支持闭环路线",
+    no_reachable_entry: "未找到可达入线点",
+    route_updated_paused: "已采用新路线，保持暂停",
+    route_ready: "接入与巡线路径已生成",
+    selecting_entry: "正在选择可达入线点",
+  };
+  const navStage = String(navigation.stage || "IDLE").toUpperCase();
+  setText("navTaskGoal", navigation.task_type === "route" ? navigation.route_name || navigation.route_id : appState.navDestinationName || (navigation.goal || robot.goal_pose ? "地图目标" : "等待目标"));
+  setText("navTaskPlan", Number(plan.length_m) > 0 ? `${fmt(plan.length_m, 1)} m` : navStage === "PLANNING" ? "规划中" : "--");
+  setText("navTaskState", navStageLabels[navStage] || navStage);
+  setText("navTaskReason", navReasonLabels[navigation.reason] || navigation.reason || "--");
 
   const healthDot = $("dockHealthDot");
   if (healthDot) healthDot.className = `health-dot ${overallOk ? "ok" : "warn"}`;

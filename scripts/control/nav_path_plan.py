@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """nav_path_plan.py
 轻量全局路径规划节点：
-  - 订阅 /map, /goal_pose
+  - 订阅 /map 和可配置目标话题
   - 通过 TF 查询 map->base_link 当前位姿
   - 默认使用快速 2D A* 全局规划，基于膨胀地图保证安全边界
   - 保留离散航向 SE2 A* 作为可选精细规划模式
-  - 发布 /plan (nav_msgs/Path, frame_id=map)
+  - 发布可配置内部路径话题，由任务管理器转发到 /plan
 """
 
+import copy
+import json
 import math
 import time
 from typing import Dict, List, Optional, Set, Tuple
@@ -35,7 +37,12 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from path_planning import fast2d as fast2d_planner
 from path_planning import se2 as se2_planner
-from path_planning.fast2d import build_grid_corridor, state_allowed_by_corridor
+from planning_constraints import (
+    ConstraintError,
+    PlanningConstraints,
+    load_planning_constraints,
+    overlay_keepouts,
+)
 
 
 GridIndex = Tuple[int, int]
@@ -110,7 +117,12 @@ class PathPlanner(Node):
         self.declare_parameter("map_topic", "/map")
         self.declare_parameter("goal_topic", "/goal_pose")
         self.declare_parameter("path_topic", "/plan")
+        self.declare_parameter("planning_map_topic", "/planning_map")
+        self.declare_parameter("planner_status_topic", "/nav_task/planner_status")
         self.declare_parameter("nav_clear_reason_topic", "/nav_clear_reason")
+        self.declare_parameter("maps_dir", "")
+        self.declare_parameter("map_file", "")
+        self.declare_parameter("use_editor_constraints", True)
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("plan_rate_hz", 2.0)
@@ -155,7 +167,16 @@ class PathPlanner(Node):
         self.map_topic = str(self.get_parameter("map_topic").value)
         self.goal_topic = str(self.get_parameter("goal_topic").value)
         self.path_topic = str(self.get_parameter("path_topic").value)
+        self.planning_map_topic = str(self.get_parameter("planning_map_topic").value)
+        self.planner_status_topic = str(
+            self.get_parameter("planner_status_topic").value
+        )
         self.nav_clear_reason_topic = str(self.get_parameter("nav_clear_reason_topic").value)
+        self.maps_dir = str(self.get_parameter("maps_dir").value).strip()
+        self.map_file = str(self.get_parameter("map_file").value).strip()
+        self.use_editor_constraints = bool(
+            self.get_parameter("use_editor_constraints").value
+        )
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.base_frame = str(self.get_parameter("base_frame").value)
         self.plan_rate_hz = float(self.get_parameter("plan_rate_hz").value)
@@ -244,13 +265,21 @@ class PathPlanner(Node):
         self.resolution = 0.05
         self.origin_x = 0.0
         self.origin_y = 0.0
+        self.origin_yaw = 0.0
+        self.origin_cos = 1.0
+        self.origin_sin = 0.0
 
         self.inflated_grid: List[int] = []
+        self.planning_constraints = PlanningConstraints(
+            (), self.inflation_radius_m, "config", 0, None
+        )
         self.map_seq = -1
         self.map_dirty = False
         self._map_processed_dirty = True
 
         self.goal_pose_world: Optional[WorldPose] = None
+        self.goal_stamp = None
+        self.goal_token = ""
         self.goal_dirty = False
         self.plan_failed_for_current_goal = False
 
@@ -269,12 +298,18 @@ class PathPlanner(Node):
         self._nav_clear_reason_window_s = 1.0
         self._reset_plan_stats()
 
-        self.path_pub = self.create_publisher(Path, self.path_topic, 10)
         map_qos = QoSProfile(
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1,
             reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.path_pub = self.create_publisher(Path, self.path_topic, 10)
+        self.planning_map_pub = self.create_publisher(
+            OccupancyGrid, self.planning_map_topic, map_qos
+        )
+        self.planner_status_pub = self.create_publisher(
+            String, self.planner_status_topic, 10
         )
         self.create_subscription(OccupancyGrid, self.map_topic, self._on_map, map_qos)
         self.create_subscription(PoseStamped, self.goal_topic, self._on_goal, 10)
@@ -282,16 +317,19 @@ class PathPlanner(Node):
             String, self.nav_clear_reason_topic, self._on_nav_clear_reason, 10
         )
         self.create_subscription(Empty, "/nav_clear", self._on_nav_clear, 10)
+        self.create_subscription(String, "/nav_task/planner_cancel", self._on_planner_cancel, 10)
 
         plan_period = 1.0 / max(self.plan_rate_hz, 0.5)
         self.create_timer(plan_period, self._plan_loop)
 
         self.get_logger().info(
-            "path_plan started | map=%s goal=%s out=%s | footprint(front=%.2f rear=%.2f left=%.2f right=%.2f margin=%.2f)"
+            "path_plan started | map=%s goal=%s out=%s planning_map=%s editor_map=%s | footprint(front=%.2f rear=%.2f left=%.2f right=%.2f margin=%.2f)"
             % (
                 self.map_topic,
                 self.goal_topic,
                 self.path_topic,
+                self.planning_map_topic,
+                self.map_file or "disabled",
                 self.vehicle_front_m,
                 self.vehicle_rear_m,
                 self.vehicle_left_m,
@@ -381,7 +419,12 @@ class PathPlanner(Node):
 
     def _on_goal(self, msg: PoseStamped) -> None:
         """接收目标位姿并触发下一次重规划。"""
+        self.goal_stamp = copy.deepcopy(msg.header.stamp)
+        self.goal_token = f"{int(msg.header.stamp.sec)}.{int(msg.header.stamp.nanosec):09d}"
         if msg.header.frame_id and msg.header.frame_id != self.map_frame:
+            self._publish_planner_status(
+                "FAILED", f"invalid_goal_frame:{msg.header.frame_id}"
+            )
             self.get_logger().warn(
                 f"ignore goal frame={msg.header.frame_id}, expected={self.map_frame}"
             )
@@ -393,7 +436,10 @@ class PathPlanner(Node):
             yaw,
         )
         self.goal_dirty = True
+        # A newly selected route may carry newly saved keepouts without a new /map.
+        self._map_processed_dirty = True
         self.plan_failed_for_current_goal = False
+        self._publish_planner_status("PLANNING", "new_goal")
         if self.stop_on_new_goal_clear_path and self.last_plan_poses:
             self.last_plan_poses = []
             self._publish_path([], None)
@@ -405,6 +451,11 @@ class PathPlanner(Node):
                 math.degrees(self.goal_pose_world[2]),
             )
         )
+
+    def _on_planner_cancel(self, message: String) -> None:
+        # Cross-topic delivery can reorder a new goal and the previous cancellation.
+        if message.data and message.data == self.goal_token:
+            self._on_nav_clear(Empty())
 
     def _on_nav_clear(self, _msg: Empty) -> None:
         """清空当前导航目标与路径状态。"""
@@ -440,6 +491,7 @@ class PathPlanner(Node):
         self.map_dirty = False
         self.plan_failed_for_current_goal = True
         self._publish_path([], None)
+        self._publish_planner_status("FAILED", reason)
         self.get_logger().warn(f"导航停止原因: {reason}，已发布空路径")
 
     def _log_wait_reason(self, reason: str, interval_s: float = 2.0) -> None:
@@ -468,6 +520,9 @@ class PathPlanner(Node):
         if self.map_msg is None:
             self._log_wait_reason("规划等待原因: 尚未收到有效 /map")
             return
+        # Publish the initial safety grid even before a navigation goal exists.
+        if not self.inflated_grid:
+            self._ensure_processed_map()
         if self.goal_pose_world is None:
             return
 
@@ -490,6 +545,7 @@ class PathPlanner(Node):
                     "导航停止原因: 当前位姿已在目标容差内，dist=%.2fm <= %.2fm，已清空路径"
                     % (dist_to_goal, self.goal_tolerance_m)
                 )
+            self._publish_planner_status("REACHED", "already_within_tolerance")
             return
 
         need_replan = False
@@ -508,6 +564,7 @@ class PathPlanner(Node):
         if self.stop_before_replan_clear_path and self.last_plan_poses:
             self.last_plan_poses = []
             self._publish_path([], None)
+            self._publish_planner_status("PLANNING", "replanning")
             self.get_logger().info(
                 "导航暂停原因: 触发重规划，先发布空路径让控制器停车，下一轮发布新路径"
             )
@@ -633,7 +690,7 @@ class PathPlanner(Node):
         return bool(self.inflated_grid)
 
     def _rebuild_processed_map(self) -> None:
-        """将 OccupancyGrid 转为可快速查询的膨胀障碍网格。"""
+        """叠加禁行区后，将 OccupancyGrid 转为膨胀规划栅格。"""
         assert self.map_msg is not None
         info = self.map_msg.info
         self.map_w = int(info.width)
@@ -641,13 +698,46 @@ class PathPlanner(Node):
         self.resolution = float(info.resolution)
         self.origin_x = float(info.origin.position.x)
         self.origin_y = float(info.origin.position.y)
+        self.origin_yaw = self._quat_to_yaw(info.origin.orientation)
+        self.origin_cos = math.cos(self.origin_yaw)
+        self.origin_sin = math.sin(self.origin_yaw)
 
-        inflation_cells = max(
-            0, int(math.ceil(self.inflation_radius_m / max(self.resolution, 1e-6)))
-        )
         start = time.monotonic()
+        try:
+            constraints = (
+                load_planning_constraints(
+                    self.maps_dir, self.map_file, self.inflation_radius_m
+                )
+                if self.use_editor_constraints
+                else PlanningConstraints((), self.inflation_radius_m, "config", 0, None)
+            )
+            merged_data, keepout_cells = overlay_keepouts(
+                self.map_msg.data,
+                self.map_w,
+                self.map_h,
+                self.resolution,
+                self.origin_x,
+                self.origin_y,
+                self.origin_yaw,
+                constraints.keepouts,
+            )
+        except ConstraintError as exc:
+            self.inflated_grid = [1] * (self.map_w * self.map_h)
+            self.pose_free_cache.clear()
+            self.get_logger().error(f"规划约束加载失败，已封锁规划栅格: {exc}")
+            self._publish_planning_map()
+            return
+        self.planning_constraints = constraints
+        inflation_cells = max(
+            0,
+            int(
+                math.ceil(
+                    constraints.clearance_m / max(self.resolution, 1e-6)
+                )
+            ),
+        )
         self.inflated_grid = build_inflated_grid(
-            self.map_msg.data,
+            merged_data,
             self.map_w,
             self.map_h,
             self.occupied_threshold,
@@ -657,10 +747,32 @@ class PathPlanner(Node):
         elapsed = time.monotonic() - start
         backend = "scipy" if np is not None and ndimage is not None else "python"
         self.get_logger().info(
-            "按需地图膨胀完成 | size=%dx%d inflation_cells=%d backend=%s time=%.3fs"
-            % (self.map_w, self.map_h, inflation_cells, backend, elapsed)
+            "按需规划栅格完成 | size=%dx%d keepouts=%d keepout_cells=%d clearance=%.2fm source=%s revision=%d inflation_cells=%d backend=%s time=%.3fs"
+            % (
+                self.map_w,
+                self.map_h,
+                len(constraints.keepouts),
+                keepout_cells,
+                constraints.clearance_m,
+                constraints.clearance_source,
+                constraints.revision,
+                inflation_cells,
+                backend,
+                elapsed,
+            )
         )
         self.pose_free_cache.clear()
+        self._publish_planning_map()
+
+    def _publish_planning_map(self) -> None:
+        if self.map_msg is None or not self.inflated_grid:
+            return
+        message = OccupancyGrid()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.header.frame_id = self.map_frame
+        message.info = copy.deepcopy(self.map_msg.info)
+        message.data = [100 if value else 0 for value in self.inflated_grid]
+        self.planning_map_pub.publish(message)
 
     def _is_grid_free(self, idx: GridIndex) -> bool:
         """判断栅格索引是否在地图内且为空闲。"""
@@ -671,16 +783,22 @@ class PathPlanner(Node):
 
     def _world_to_grid(self, p: WorldPoint) -> Optional[GridIndex]:
         """世界坐标转栅格坐标，越界时返回 None。"""
-        gx = int((p[0] - self.origin_x) / self.resolution)
-        gy = int((p[1] - self.origin_y) / self.resolution)
+        dx = p[0] - self.origin_x
+        dy = p[1] - self.origin_y
+        local_x = self.origin_cos * dx + self.origin_sin * dy
+        local_y = -self.origin_sin * dx + self.origin_cos * dy
+        gx = math.floor(local_x / self.resolution)
+        gy = math.floor(local_y / self.resolution)
         if gx < 0 or gy < 0 or gx >= self.map_w or gy >= self.map_h:
             return None
         return (gx, gy)
 
     def _grid_to_world(self, p: GridIndex) -> WorldPoint:
         """栅格坐标转世界坐标（栅格中心点）。"""
-        x = self.origin_x + (p[0] + 0.5) * self.resolution
-        y = self.origin_y + (p[1] + 0.5) * self.resolution
+        local_x = (p[0] + 0.5) * self.resolution
+        local_y = (p[1] + 0.5) * self.resolution
+        x = self.origin_x + self.origin_cos * local_x - self.origin_sin * local_y
+        y = self.origin_y + self.origin_sin * local_x + self.origin_cos * local_y
         return (x, y)
 
     def _yaw_to_bin(self, yaw: float) -> int:
@@ -853,7 +971,11 @@ class PathPlanner(Node):
     ) -> None:
         """发布 nav_msgs/Path；空路径时可选择发布单点 goal。"""
         msg = Path()
-        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.stamp = (
+            copy.deepcopy(self.goal_stamp)
+            if self.goal_stamp is not None
+            else self.get_clock().now().to_msg()
+        )
         msg.header.frame_id = self.map_frame
 
         if not poses:
@@ -872,6 +994,20 @@ class PathPlanner(Node):
             msg.poses.append(pose)
 
         self.path_pub.publish(msg)
+
+    def _publish_planner_status(self, stage: str, reason: str = "") -> None:
+        """Publish the internal planner result consumed by nav_task_manager."""
+        message = String()
+        message.data = json.dumps(
+            {
+                "stage": stage.upper(),
+                "reason": reason,
+                "task_token": self.goal_token,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        self.planner_status_pub.publish(message)
 
     @staticmethod
     def _quat_to_yaw(q) -> float:

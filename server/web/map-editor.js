@@ -202,8 +202,8 @@ class FinavMapEditor {
     this.draw();
   }
 
-  setSelection(type = null, id = null, childId = null) {
-    this.selection = type && id ? { type, id, childId } : null;
+  setSelection(type = null, id = null, childId = null, segmentIndex = null) {
+    this.selection = type && id ? { type, id, childId, segmentIndex } : null;
     this.renderTree();
     this.renderProperties();
     this.draw();
@@ -401,7 +401,16 @@ class FinavMapEditor {
       const preview = this.routePreviews.get(object.id);
       const status = !preview ? "尚未预览" : preview.status === "invalid" ? `发现 ${preview.collisions?.length || 0} 个冲突路段，已标红` : preview.status === "valid_with_fallbacks" ? `有效，${preview.fallback_waypoint_ids.length} 个转角未平滑` : "有效";
       const statusKind = preview?.status === "invalid" ? "error" : preview?.status?.startsWith("valid") ? "valid" : "";
-      html += `<label class="editor-field"><span>路线形式</span><select data-editor-path="closed"><option value="false" ${object.closed ? "" : "selected"}>开放路线</option><option value="true" ${object.closed ? "selected" : ""}>闭环路线</option></select></label><div class="editor-property-row"><span>关键点</span><strong>${object.waypoints.length}</strong></div>${this.numberField("安全净空", "settings.clearance", this.document.settings.safety_clearance_m, "m", 'min="0" step="0.05"')}<div class="editor-route-status ${statusKind}"><span>路径状态</span><strong>${escapeHtml(status)}</strong></div><div class="editor-property-actions"><button data-editor-action="smooth-route" type="button">预览平滑路线</button>${this.selection.childId ? '<button data-editor-action="delete-waypoint" type="button">删除当前关键点</button>' : ""}</div>`;
+      const directionLabel = this.routeDirectionLabel(object);
+      const repeatField = object.closed
+        ? this.numberField("巡航圈数（0 持续）", "repeat_count", object.repeat_count, "圈", 'min="0" step="1"')
+        : '<div class="editor-property-row"><span>巡航次数</span><strong>单次</strong></div>';
+      const selectionAction = this.selection.childId
+        ? '<button data-editor-action="delete-waypoint" type="button">删除当前关键点</button>'
+        : Number.isInteger(this.selection.segmentIndex)
+          ? '<button data-editor-action="add-waypoint" type="button">增加关键点</button>'
+          : "";
+      html += `<label class="editor-field"><span>路线形式</span><select data-editor-path="closed"><option value="false" ${object.closed ? "" : "selected"}>开放路线</option><option value="true" ${object.closed ? "selected" : ""}>闭环路线</option></select></label><label class="editor-field"><span>行进方向</span><select data-editor-path="direction"><option value="forward" ${object.direction === "reverse" ? "" : "selected"}>按关键点正序</option><option value="reverse" ${object.direction === "reverse" ? "selected" : ""}>按关键点逆序</option></select></label><div class="editor-property-row"><span>方向结果</span><strong>${escapeHtml(directionLabel)}</strong></div>${repeatField}${this.numberField("路线限速", "speed_limit_mps", object.speed_limit_mps, "m/s", 'min="0.01" step="0.01"')}<div class="editor-property-row"><span>关键点</span><strong>${object.waypoints.length}</strong></div>${this.numberField("安全净空", "settings.clearance", this.document.settings.safety_clearance_m, "m", 'min="0" step="0.05"')}<div class="editor-route-status ${statusKind}"><span>路径状态</span><strong>${escapeHtml(status)}</strong></div><div class="editor-property-actions"><button data-editor-action="smooth-route" type="button">预览平滑路线</button>${selectionAction}</div>`;
     }
     html += `<div class="editor-danger-zone"><button data-editor-action="delete-object" type="button">删除${typeLabel}</button></div>`;
     panel.innerHTML = html;
@@ -419,7 +428,8 @@ class FinavMapEditor {
     } else if (this.selection.type === "keepout") {
       rows = `<section class="map-detail-section"><h3>位置与尺寸</h3><div class="map-detail-row"><span>中心</span><strong>${this.round(object.center.x)}, ${this.round(object.center.y)} m</strong></div><div class="map-detail-row"><span>尺寸</span><strong>${this.round(object.width_m)} × ${this.round(object.height_m)} m</strong></div><div class="map-detail-row"><span>旋转</span><strong>${this.round(object.yaw_deg, 1)}°</strong></div></section>`;
     } else {
-      rows = `<section class="map-detail-section"><h3>路线信息</h3><div class="map-detail-row"><span>形式</span><strong>${object.closed ? "闭环路线" : "开放路线"}</strong></div><div class="map-detail-row"><span>关键点</span><strong>${object.waypoints.length}</strong></div><div class="map-detail-row"><span>安全净空</span><strong>${this.round(this.document.settings.safety_clearance_m)} m</strong></div></section>`;
+      const repeat = object.closed ? (object.repeat_count === 0 ? "持续巡航" : `${object.repeat_count} 圈`) : "单次";
+      rows = `<section class="map-detail-section"><h3>路线信息</h3><div class="map-detail-row"><span>形式</span><strong>${object.closed ? "闭环路线" : "开放路线"}</strong></div><div class="map-detail-row"><span>方向</span><strong>${escapeHtml(this.routeDirectionLabel(object))}</strong></div><div class="map-detail-row"><span>巡航次数</span><strong>${repeat}</strong></div><div class="map-detail-row"><span>路线限速</span><strong>${this.round(object.speed_limit_mps)} m/s</strong></div><div class="map-detail-row"><span>关键点</span><strong>${object.waypoints.length}</strong></div><div class="map-detail-row"><span>安全净空</span><strong>${this.round(this.document.settings.safety_clearance_m)} m</strong></div></section>`;
     }
     return `<div class="editor-property-type">${typeLabel}</div><div class="map-detail-name">${escapeHtml(object.name)}</div>${rows}`;
   }
@@ -447,7 +457,7 @@ class FinavMapEditor {
     const selection = { ...this.selection };
     let value = input.value;
     if (input.type === "number") value = Number(value);
-    if (input.tagName === "SELECT") value = value === "true";
+    if (input.dataset.editorPath === "closed") value = value === "true";
     if (input.dataset.editorPath === "closed" && value && this.selectedObject()?.waypoints.length < 3) {
       showToast("闭环路线至少需要三个关键点", "error");
       this.renderProperties();
@@ -461,6 +471,9 @@ class FinavMapEditor {
       }
       const object = this.objectBySelection(document, selection);
       if (!object) return;
+      if (input.dataset.editorPath === "closed" && !value && object.repeat_count === 0) object.repeat_count = 1;
+      if (input.dataset.editorPath === "repeat_count") value = Math.max(0, Math.trunc(value));
+      if (input.dataset.editorPath === "speed_limit_mps") value = Math.max(0.01, value);
       this.setPath(object, input.dataset.editorPath, value);
     });
   }
@@ -469,6 +482,7 @@ class FinavMapEditor {
     if (action === "delete-object") this.deleteSelection();
     else if (action === "copy-location") this.copyLocation();
     else if (action === "smooth-route") this.smoothRoute();
+    else if (action === "add-waypoint") this.addWaypoint();
     else if (action === "delete-waypoint") this.deleteWaypoint();
   }
 
@@ -516,6 +530,21 @@ class FinavMapEditor {
       target.waypoints = target.waypoints.filter((item) => item.id !== selection.childId);
     });
     this.setSelection("route", selection.id);
+  }
+
+  async addWaypoint() {
+    const selection = { ...this.selection };
+    const route = this.selectedObject();
+    const index = Number(selection.segmentIndex);
+    if (!route || !Number.isInteger(index) || index < 0 || index >= route.waypoints.length - (route.closed ? 0 : 1)) return;
+    const start = route.waypoints[index];
+    const end = route.waypoints[(index + 1) % route.waypoints.length];
+    const waypoint = { id: createEditorId(), x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+    await this.commit("增加路线点", (document) => {
+      const target = document.routes.find((item) => item.id === selection.id);
+      target?.waypoints.splice(index + 1, 0, waypoint);
+    });
+    this.setSelection("route", selection.id, waypoint.id);
   }
 
   moveWaypoint(routeId, index, delta) {
@@ -583,7 +612,7 @@ class FinavMapEditor {
     if (!this.ready || event.pointerType === "touch" || event.button !== 0 || !this.document) return;
     if (!this.active) {
       const hit = this.hitTest(event);
-      if (hit) this.setSelection(hit.type, hit.id, hit.childId);
+      if (hit) this.setSelection(hit.type, hit.id, hit.childId, hit.segmentIndex);
       else {
         this.setSelection();
         startViewportGesture(this.canvas, event, "pan");
@@ -607,7 +636,8 @@ class FinavMapEditor {
         startViewportGesture(this.canvas, event, "pan");
         return;
       }
-      this.setSelection(hit.type, hit.id, hit.childId);
+      this.setSelection(hit.type, hit.id, hit.childId, hit.segmentIndex);
+      if (Number.isInteger(hit.segmentIndex)) return;
       const object = this.selectedObject();
       this.drag = {
         kind: hit.handle || "move",
@@ -705,7 +735,7 @@ class FinavMapEditor {
     const points = this.routeDraft.slice();
     this.routeDraft = [];
     const id = createEditorId();
-    await this.commit("创建巡航路线", (document) => document.routes.push({ id, name: this.nextName(document.routes, "巡航路线"), closed: false, waypoints: points.map((point) => ({ id: createEditorId(), x: point.x, y: point.y })) }));
+    await this.commit("创建巡航路线", (document) => document.routes.push({ id, name: this.nextName(document.routes, "巡航路线"), closed: false, direction: "forward", repeat_count: 1, speed_limit_mps: 0.35, waypoints: points.map((point) => ({ id: createEditorId(), x: point.x, y: point.y })) }));
     this.setTool("select");
     this.setSelection("route", id);
     this.selectNameField();
@@ -721,7 +751,8 @@ class FinavMapEditor {
       event.preventDefault();
       this.redo();
     } else if (!editing && event.key === "Delete") {
-      this.deleteSelection();
+      if (this.selection?.childId) this.deleteWaypoint();
+      else if (!Number.isInteger(this.selection?.segmentIndex)) this.deleteSelection();
     } else if (!editing && event.key === "Enter" && this.tool === "route") {
       this.finishRoute();
     } else if (event.key === "Escape") {
@@ -750,7 +781,7 @@ class FinavMapEditor {
         if (this.distance(pointer, this.screen(waypoint)) < 13) return { type: "route", id: route.id, childId: waypoint.id, handle: "waypoint" };
       }
       for (let index = 0; index < route.waypoints.length - (route.closed ? 0 : 1); index += 1) {
-        if (this.screenSegmentDistance(pointer, this.screen(route.waypoints[index]), this.screen(route.waypoints[(index + 1) % route.waypoints.length])) < 9) return { type: "route", id: route.id };
+        if (this.screenSegmentDistance(pointer, this.screen(route.waypoints[index]), this.screen(route.waypoints[(index + 1) % route.waypoints.length])) < 9) return { type: "route", id: route.id, segmentIndex: index };
       }
     }
     for (const location of [...this.document.locations].reverse()) {
@@ -780,11 +811,7 @@ class FinavMapEditor {
     this.document?.keepouts.forEach((zone) => {
       if (this.hiddenObjects.has(zone.id)) return;
       const selected = this.selection?.type === "keepout" && this.selection.id === zone.id;
-      this.path(ctx, this.keepoutVertices(zone), true);
-      ctx.fillStyle = "rgba(185,90,82,.08)";
-      ctx.strokeStyle = selected ? "#234e41" : "#b95a52";
-      ctx.lineWidth = selected ? 3 : 2;
-      ctx.fill(); ctx.stroke();
+      drawKeepout(ctx, this.canvas._view, this.canvas, zone, selected);
       if (selected && this.active) {
         const handles = this.keepoutHandles(zone);
         this.handle(ctx, handles.resize);
@@ -805,6 +832,8 @@ class FinavMapEditor {
       // Draw the computed corridor above the dashed source route so a short
       // conflict cannot be hidden by the original centerline.
       if (preview?.points?.length) this.drawRoutePreview(ctx, preview, selected);
+      if (selected && Number.isInteger(this.selection?.segmentIndex)) this.drawSelectedRouteSegment(ctx, route, this.selection.segmentIndex);
+      this.drawRouteDirection(ctx, route, route.waypoints);
       if (this.active) route.waypoints.forEach((point, index) => {
         const screen = this.screen(point);
         ctx.beginPath(); ctx.arc(screen.x, screen.y, selected ? 7 : 5, 0, Math.PI * 2);
@@ -871,6 +900,73 @@ class FinavMapEditor {
       ctx.fillStyle = "#ff1010";
       ctx.fill();
     });
+    ctx.restore();
+  }
+
+  drawSelectedRouteSegment(ctx, route, index) {
+    const start = route.waypoints[index];
+    const end = route.waypoints[(index + 1) % route.waypoints.length];
+    if (!start || !end) return;
+    this.path(ctx, [start, end]);
+    ctx.strokeStyle = "#ff9f1c";
+    ctx.lineWidth = 5;
+    ctx.setLineDash([]);
+    ctx.stroke();
+  }
+
+  routeTravelPoints(route, points = route.waypoints) {
+    const ordered = points.slice();
+    if (route.direction === "reverse") ordered.reverse();
+    return ordered;
+  }
+
+  routeDirectionLabel(route) {
+    if (!route.closed) return route.direction === "reverse" ? "末点 → 首点" : "首点 → 末点";
+    const points = this.routeTravelPoints(route);
+    let twiceArea = 0;
+    points.forEach((point, index) => {
+      const next = points[(index + 1) % points.length];
+      twiceArea += point.x * next.y - next.x * point.y;
+    });
+    if (Math.abs(twiceArea) < 1e-6) return "闭环方向未确定";
+    return twiceArea > 0 ? "逆时针" : "顺时针";
+  }
+
+  drawRouteDirection(ctx, route, rawPoints) {
+    const points = this.routeTravelPoints(route, rawPoints);
+    if (points.length < 2) return;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const segmentCount = points.length - (route.closed ? 0 : 1);
+    ctx.save();
+    ctx.fillStyle = "#176b52";
+    for (let index = 0; index < segmentCount; index += 1) {
+      const start = this.screen(points[index]);
+      const end = this.screen(points[(index + 1) % points.length]);
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      if (Math.hypot(dx, dy) < 24 * ratio) continue;
+      const angle = Math.atan2(dy, dx);
+      const x = start.x + dx * 0.58;
+      const y = start.y + dy * 0.58;
+      const size = 6 * ratio;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(angle) * size, y + Math.sin(angle) * size);
+      ctx.lineTo(x + Math.cos(angle + 2.5) * size, y + Math.sin(angle + 2.5) * size);
+      ctx.lineTo(x + Math.cos(angle - 2.5) * size, y + Math.sin(angle - 2.5) * size);
+      ctx.closePath();
+      ctx.fill();
+    }
+    if (!route.closed) {
+      const markers = [[points[0], "起", "#176b52"], [points[points.length - 1], "终", "#b95a52"]];
+      markers.forEach(([point, label, color]) => {
+        const screen = this.screen(point);
+        ctx.beginPath(); ctx.arc(screen.x, screen.y, 9 * ratio, 0, Math.PI * 2);
+        ctx.fillStyle = color; ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.font = `${9 * ratio}px sans-serif`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(label, screen.x, screen.y);
+      });
+    }
     ctx.restore();
   }
 
@@ -949,8 +1045,7 @@ class FinavMapEditor {
   }
 
   keepoutVertices(zone) {
-    const halfWidth = zone.width_m / 2; const halfHeight = zone.height_m / 2;
-    return [[-halfWidth, -halfHeight], [halfWidth, -halfHeight], [halfWidth, halfHeight], [-halfWidth, halfHeight]].map(([x, y]) => { const point = this.rotatePoint(x, y, zone.yaw_deg); return { x: zone.center.x + point.x, y: zone.center.y + point.y }; });
+    return keepoutVertices(zone);
   }
 
   keepoutHandles(zone) {

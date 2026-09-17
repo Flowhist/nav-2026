@@ -125,16 +125,12 @@ install(
 install(PROGRAMS
   scripts/control/nav_voice_bridge.py
   scripts/control/nav_path_plan.py
+  scripts/control/nav_task_manager.py
   scripts/control/nav_control.py
-  scripts/control/base_control.py
-  scripts/control/base_driver_worker.py
-  scripts/control/base_control_router.py
-  scripts/handle/handle_control.py
   scripts/control/nav_relocate.py
   scripts/imu/dm_imu_publisher.py
   scripts/tool/TF.sh
   scripts/tool/clean_nav.sh
-  scripts/tool/base_monitor.py
   scripts/tool/clean_map.sh
   scripts/tool/save_map.sh
   scripts/tool/save_map.py
@@ -151,9 +147,6 @@ install(PROGRAMS
 )
 
 install(FILES
-  scripts/handle/handle_hid.py
-  scripts/handle/handle_modbus.py
-  scripts/handle/handle_protocol.py
   scripts/map_location/location_utils.py
   scripts/map_location/editor_server.py
   scripts/map_location/editor_map_io.py
@@ -161,6 +154,8 @@ install(FILES
   scripts/map_location/editor_geometry.py
   scripts/map_location/editor_routes.py
   scripts/map_location/editor_export.py
+  scripts/control/planning_constraints.py
+  scripts/control/route_tasks.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -180,23 +175,6 @@ install(DIRECTORY
 install(TARGETS hins_he_lidar_node scan_fusion_node # serial_bridge_node
   EXPORT export_${PROJECT_NAME}
   DESTINATION lib/${PROJECT_NAME})
-
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  find_package(ament_cmake_pytest REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # uncomment the line when a copyright and license is not present in all source files
-  #set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # uncomment the line when this package is not in a git repo
-  #set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-  ament_add_pytest_test(test_handle_hid tests/test_handle_hid.py)
-  ament_add_pytest_test(test_base_control_profile tests/test_base_control_profile.py)
-  ament_add_pytest_test(test_base_control_dispatch tests/test_base_control_dispatch.py)
-  ament_add_pytest_test(test_base_driver_worker tests/test_base_driver_worker.py)
-  ament_add_pytest_test(test_manual_web_control tests/test_manual_web_control.py)
-endif()
 
 ament_export_dependencies(${dependencies})
 

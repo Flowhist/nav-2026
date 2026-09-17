@@ -239,16 +239,29 @@ def generate_launch_description():
         parameters=[os.path.join(config_dir, "nav.yaml")],
     )
 
-    # 10. 轻量路径规划：/map + TF + /goal_pose -> /plan
+    # 10. 轻量路径规划：/map + TF + 内部目标 -> 内部路径
     path_plan_node = Node(
         package="finav",
         executable="nav_path_plan.py",
         name="path_plan",
         output="screen",
-        parameters=[os.path.join(config_dir, "path_plan.yaml")],
+        parameters=[
+            os.path.join(config_dir, "path_plan.yaml"),
+            {"maps_dir": maps_dir, "map_file": map_file},
+        ],
     )
 
-    # 11. 机器人模型发布
+    # 11. 导航任务管理：保持外部 /goal_pose、/plan 契约，统一发布任务状态
+    nav_task_manager_node = Node(
+        package="finav",
+        executable="nav_task_manager.py",
+        name="nav_task_manager",
+        output="screen",
+        parameters=[os.path.join(config_dir, "nav_task.yaml"),
+                    {"maps_dir": maps_dir, "map_file": map_file}],
+    )
+
+    # 12. 机器人模型发布
     robot_model_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "sub", "robot_model.launch.py")
@@ -268,6 +281,7 @@ def generate_launch_description():
             slam_toolbox_nav_launch,
             location_viz_node,
             nav_bridge_node,
+            nav_task_manager_node,
             path_plan_node,
             cmd_vel_relay_node,
             robot_model_launch,

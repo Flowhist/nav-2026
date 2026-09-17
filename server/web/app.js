@@ -393,6 +393,7 @@ async function setPage(page) {
   manualControlOnPageChange(page);
   toggleNavSelect("navMapPanel", false);
   toggleNavSelect("navLocationPanel", false);
+  toggleNavSelect("navRoutePanel", false);
   toggleNavSelect("previewMapPanel", false);
   document.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.page === page);
@@ -456,6 +457,7 @@ function bind() {
     if (!event.target.closest(".help-wrap")) document.querySelectorAll(".map-help").forEach((panel) => panel.classList.add("hidden"));
     if (!event.target.closest("#navMapPanel")) toggleNavSelect("navMapPanel", false);
     if (!event.target.closest("#navLocationPanel")) toggleNavSelect("navLocationPanel", false);
+    if (!event.target.closest("#navRoutePanel")) toggleNavSelect("navRoutePanel", false);
     if (!event.target.closest("#previewMapPanel")) toggleNavSelect("previewMapPanel", false);
     if (!event.target.closest(".system-menu-wrap")) {
       $("systemMenu").classList.add("hidden");
@@ -476,9 +478,9 @@ function bind() {
   $("btnStartNavigation").addEventListener("click", () => startRuntime("navigation").catch(console.error));
   $("btnStopNavigation").addEventListener("click", async () => {
     const confirmed = await showAnnotationConfirmDialog({
-      title: "结束导航",
+      title: "停止导航",
       message: "将停止当前导航链路并清理目标与路径状态，是否继续？",
-      confirmText: "结束导航",
+      confirmText: "停止导航",
       danger: true,
     });
     if (confirmed) await stopRuntime("navigation", { showModal: true });
@@ -535,6 +537,72 @@ function bind() {
       reportActionError(err, "导航取消失败");
     }
   });
+
+  $("navRouteSelect").addEventListener("click", () => toggleNavSelect("navRoutePanel"));
+  $("navRoutePanel").addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      toggleNavSelect("navRoutePanel", false);
+      $("navRouteSelect").focus();
+    } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      toggleNavSelect("navRoutePanel", true);
+      const options = [...$("navRouteOptions").querySelectorAll("button")];
+      const current = options.indexOf(document.activeElement);
+      const index = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1
+        : event.key === "ArrowDown" ? (current + 1) % options.length : (current <= 0 ? options.length : current) - 1;
+      options[index]?.focus();
+    }
+  });
+  try {
+    const saved = JSON.parse(localStorage.getItem("finav.navLayers") || "{}");
+    Object.keys(appState.navLayers).forEach(key => {
+      if (typeof saved?.[key] === "boolean") appState.navLayers[key] = saved[key];
+    });
+  } catch (_) { /* Storage may be unavailable in private browser sessions. */ }
+  document.querySelectorAll("[data-nav-layer]").forEach(input => {
+    input.checked = appState.navLayers[input.dataset.navLayer];
+    input.addEventListener("change", () => {
+      appState.navLayers[input.dataset.navLayer] = input.checked;
+      try { localStorage.setItem("finav.navLayers", JSON.stringify(appState.navLayers)); } catch (_) {}
+      renderLiveCanvases();
+    });
+  });
+  document.querySelectorAll(".nav-map-popover").forEach(popover => {
+    popover.addEventListener("toggle", () => {
+      if (popover.open) document.querySelectorAll(".nav-map-popover").forEach(other => {
+        if (other !== popover) other.open = false;
+      });
+    });
+  });
+  document.addEventListener("pointerdown", event => {
+    if (!event.target.closest(".nav-map-popover")) {
+      document.querySelectorAll(".nav-map-popover").forEach(popover => { popover.open = false; });
+    }
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") document.querySelectorAll(".nav-map-popover").forEach(popover => {
+      if (popover.open) { popover.open = false; popover.querySelector("summary").focus(); }
+    });
+  });
+  for (const [id, action] of [["btnStartRoute", "start"], ["btnPauseRoute", "pause"], ["btnResumeRoute", "resume"]]) {
+    $(id).addEventListener("click", async () => {
+      $(id).disabled = true;
+      try {
+        await api("/api/nav/route", "POST", {
+          action, map_name: getActiveNavigationMap(appState.navMapName), route_id: $("navRouteSelect").value,
+        });
+        if (action === "start") appState.navDestinationName = "";
+      } catch (err) {
+        reportActionError(err, "路线指令失败");
+      } finally {
+        renderRuntimeControls();
+      }
+    });
+  }
+  setInterval(() => {
+    if (appState.page === "navigation" && getRuntime("navigation").running) loadNavMapObjects().catch(console.error);
+  }, 5000);
 
   const sendNavLocation = async () => {
     const input = $("navLocationInput");

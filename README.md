@@ -1,6 +1,6 @@
 # Finav
 
-Finav 是一个基于 ROS 2 Humble 的实机导航项目，当前包含 WHILL 底盘控制、Hinson HE-3051 激光雷达、DM-IMU、EKF 融合、SLAM Toolbox 建图/定位、自研路径规划与路径跟踪、Web 调试后台和 Gazebo/RViz 仿真环境。
+Finav 是一个基于 ROS 2 Humble 的实机导航项目，包含 Hinson HE-3051 激光雷达、DM-IMU、EKF 融合、SLAM Toolbox 建图/定位、自研路径规划与路径跟踪、Web 调试后台和 Gazebo/RViz 仿真环境。WHILL 底盘、手柄及控制仲裁归同级独立仓库 `base_control`；详见 [底盘仓库拆分](Doc/底盘仓库拆分.md)。
 
 新开发者请先阅读项目 Wiki：
 
@@ -14,14 +14,14 @@ Wiki 中按模块说明了系统由哪些部分组成、每部分的大致原理
 
 ```bash
 source /opt/ros/humble/setup.bash
-colcon build --packages-select finav
+colcon build --base-paths src/base_control src/finav --packages-select base_control finav
 source install/setup.bash
 ```
 
 如果工作区中存在另一个同名 `finav` 包，使用：
 
 ```bash
-colcon build --base-paths src/finav --packages-select finav
+colcon build --base-paths src/base_control src/finav --packages-select base_control finav
 source install/setup.bash
 ```
 
@@ -41,9 +41,9 @@ ros2 launch finav nav.launch.py
 常用目录：
 
 - `launch/`：实机建图、导航和子模块启动文件。
-- `config/`：雷达、IMU、EKF、SLAM、底盘、规划和控制参数。
-- `scripts/control/`：底盘驱动、控制仲裁、路径规划、路径跟踪。
-- `scripts/handle/`：STM32 手柄 Modbus 通信、协议解析和 ROS 节点。
+- `config/`：雷达、IMU、EKF、SLAM、规划和导航控制参数。
+- `scripts/control/`：导航任务、路径规划、路径跟踪。
+- `../base_control/`：独立底盘与手柄仓库，包括驱动、仲裁和底层配置。
 - `scripts/imu/`：DM-IMU ROS 2 发布节点。
 - `scripts/map_location/`：地图地点文件读取和 RViz 地点可视化。
 - `third_party/`：Hinson HE-3051 雷达和 DM-IMU 厂商代码整理区。
@@ -375,8 +375,8 @@ ros2 launch finav nav.launch.py
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/flowhist/workspace/final_ws/install/local_setup.bash
-python3 server/run_server.py --host 0.0.0.0 --port 8010
+source install/local_setup.bash
+python3 src/finav/server/run_server.py --host 0.0.0.0 --port 8010
 ```
 
 如果需要把底盘、STM32 手柄与网页后台一起拉起，直接在项目根目录执行：

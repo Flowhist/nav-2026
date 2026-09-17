@@ -18,7 +18,10 @@ import yaml
 
 from editor_map_io import validate_map_name
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+MIN_SCHEMA_VERSION = 1
+DEFAULT_ROUTE_SPEED_MPS = 0.35
+ROUTE_DIRECTIONS = {"forward", "reverse"}
 
 
 class DocumentError(ValueError):
@@ -61,6 +64,26 @@ def _name(value: object, field: str) -> str:
     if not text or len(text) > 128 or any(ch in text for ch in "\r\n"):
         raise DocumentError("invalid_name", f"Invalid name at {field}", field)
     return text
+
+
+def _integer(value: object, field: str) -> int:
+    if isinstance(value, bool):
+        raise DocumentError("invalid_integer", f"Invalid integer at {field}", field)
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise DocumentError("invalid_integer", f"Invalid integer at {field}", field) from exc
+    if isinstance(value, float) and not value.is_integer():
+        raise DocumentError("invalid_integer", f"Invalid integer at {field}", field)
+    if isinstance(value, str) and str(number) != value.strip():
+        raise DocumentError("invalid_integer", f"Invalid integer at {field}", field)
+    return number
+
+
+def _boolean(value: object, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise DocumentError("invalid_boolean", f"Invalid boolean at {field}", field)
+    return value
 
 
 def empty_document(
@@ -173,7 +196,31 @@ def _normalize_routes(items: object) -> list[dict[str, object]]:
             raise DocumentError("duplicate_route", f"Duplicate route: {name}", prefix)
         ids.add(ident)
         names.add(name)
-        closed = bool(item.get("closed", False))
+        closed = _boolean(item.get("closed", False), f"{prefix}.closed")
+        direction = str(item.get("direction", "forward")).strip()
+        if direction not in ROUTE_DIRECTIONS:
+            raise DocumentError(
+                "invalid_route_direction",
+                f"Route direction must be one of: {', '.join(sorted(ROUTE_DIRECTIONS))}",
+                f"{prefix}.direction",
+            )
+        repeat_count = _integer(item.get("repeat_count", 1), f"{prefix}.repeat_count")
+        if repeat_count < 0 or (not closed and repeat_count != 1):
+            raise DocumentError(
+                "invalid_route_repeat_count",
+                "Open routes require repeat_count=1; closed routes require repeat_count>=0",
+                f"{prefix}.repeat_count",
+            )
+        speed_limit_mps = _finite(
+            item.get("speed_limit_mps", DEFAULT_ROUTE_SPEED_MPS),
+            f"{prefix}.speed_limit_mps",
+        )
+        if speed_limit_mps <= 0:
+            raise DocumentError(
+                "invalid_route_speed",
+                "Route speed_limit_mps must be positive",
+                f"{prefix}.speed_limit_mps",
+            )
         raw_waypoints = item.get("waypoints", [])
         minimum = 3 if closed else 2
         if not isinstance(raw_waypoints, list) or len(raw_waypoints) < minimum:
@@ -203,6 +250,9 @@ def _normalize_routes(items: object) -> list[dict[str, object]]:
             "id": ident,
             "name": name,
             "closed": closed,
+            "direction": direction,
+            "repeat_count": repeat_count,
+            "speed_limit_mps": speed_limit_mps,
             "waypoints": waypoints,
         }
         result.append(route)
@@ -212,13 +262,18 @@ def _normalize_routes(items: object) -> list[dict[str, object]]:
 def normalize_document(data: object, map_name: str) -> dict[str, object]:
     if not isinstance(data, dict):
         raise DocumentError("invalid_document", "Editor document must be an object")
-    version = int(data.get("schema_version", SCHEMA_VERSION))
+    try:
+        version = _integer(data.get("schema_version", SCHEMA_VERSION), "schema_version")
+    except DocumentError as exc:
+        raise DocumentError(
+            "unsupported_schema", "Editor schema_version must be an integer"
+        ) from exc
     if version > SCHEMA_VERSION:
         raise DocumentError(
             "unsupported_schema",
             f"Editor schema {version} is newer than supported {SCHEMA_VERSION}",
         )
-    if version != SCHEMA_VERSION:
+    if version < MIN_SCHEMA_VERSION:
         raise DocumentError("unsupported_schema", f"Unsupported editor schema: {version}")
     map_info = data.get("map")
     settings = data.get("settings")
@@ -280,6 +335,7 @@ def route_input_sha256(
         "route": {
             "id": route.get("id"),
             "closed": bool(route.get("closed", False)),
+            "direction": route.get("direction", "forward"),
             "waypoints": route.get("waypoints", []),
         },
         "clearance_m": round(float(clearance_m), 6),

@@ -11,6 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$SCRIPT_DIR"
 WORKSPACE_DIR="$(cd "$REPO_DIR/../.." && pwd)"
+source "$REPO_DIR/scripts/service/legacy_guard.sh"
 
 HANDLE_PORT="/dev/serial/by-path/platform-3610000.usb-usb-0:2.3.3:1.0-port0"
 JOY_DEV="/dev/input/by-id/usb-ShenZhenXiaoLong_SMC25usb32_8D8531A84856-joystick"
@@ -178,23 +179,23 @@ pkill -9 -f "base_control_router.py" 2>/dev/null || true
 pkill -9 -f "server/run_server.py" 2>/dev/null || true
 sleep 0.2
 
-CONTROL_PARAMS="$REPO_DIR/config/base_control.yaml"
+CONTROL_PARAMS="$(python3 -c 'from base_control.paths import config_dir; print(config_dir() / "base_control.yaml")')"
 [[ -f "$CONTROL_PARAMS" ]] || fail "未找到参数文件: $CONTROL_PARAMS"
 
 start_control_stack() {
     printf '▶ 启动 base_control\n'
-    setsid ros2 run finav base_control.py \
+    setsid ros2 run base_control base_control.py \
         --ros-args --params-file "$CONTROL_PARAMS" \
         > /dev/null 2>&1 &
     DRIVER_PID=$!
 
     printf '▶ 启动 STM32 手柄\n'
-    setsid ros2 launch finav handle.launch.py "handle_port:=$HANDLE_PORT" "joy_dev:=$JOY_DEV" \
+    setsid ros2 launch base_control handle.launch.py "handle_port:=$HANDLE_PORT" "joy_dev:=$JOY_DEV" \
         > /dev/null 2>&1 &
     HANDLE_PID=$!
 
     printf '▶ 启动 base_control_router\n'
-    setsid ros2 run finav base_control_router.py \
+    setsid ros2 run base_control base_control_router.py \
         --ros-args --params-file "$CONTROL_PARAMS" \
         > /dev/null 2>&1 &
     ROUTER_PID=$!
