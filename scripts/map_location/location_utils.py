@@ -51,20 +51,27 @@ def discover_maps_with_locations(maps_dir: str) -> List[str]:
         if not os.path.isdir(d):
             continue
         loc = os.path.join(d, f"{name}.locations.yaml")
-        if os.path.exists(loc):
+        if os.path.exists(loc) or os.path.exists(os.path.join(d, f"{name}.editor.yaml")):
             names.append(name)
     return names
 
 
 def load_locations(path: Path) -> Dict[str, Dict[str, float]]:
-    """从 .locations.yaml 读取地点字典。"""
+    """Prefer the atomic editor document; legacy files are import-only."""
+    editor = path.with_name(path.name.removesuffix(".locations.yaml") + ".editor.yaml")
+    if editor.is_file():
+        path = editor
     if not path.exists():
         return {}
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         return {}
+    if not isinstance(data, dict):
+        return {}
     entries = data.get("locations", {})
+    if isinstance(entries, list):
+        entries = {item["name"]: item for item in entries if isinstance(item, dict) and "name" in item}
     if not isinstance(entries, dict):
         return {}
     result: Dict[str, Dict[str, float]] = {}
@@ -134,5 +141,6 @@ def detect_running_map_file(maps_dir: str, require_locations: bool = True) -> st
 def _locations_file_exists(map_file: str, maps_dir: str) -> bool:
     return (
         bool(map_file)
-        and (Path(maps_dir) / map_file / f"{map_file}.locations.yaml").exists()
+        and any((Path(maps_dir) / map_file / f"{map_file}.{suffix}.yaml").exists()
+                for suffix in ("locations", "editor"))
     )

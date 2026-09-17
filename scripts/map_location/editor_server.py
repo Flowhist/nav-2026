@@ -101,7 +101,7 @@ class EditorApplication:
                     f"locations[{index}]",
                 )
 
-    def load_document(self, map_name: str) -> dict[str, object]:
+    def load_document(self, map_name: str, include_map: bool = True) -> dict[str, object]:
         map_data = load_map(self.maps_dir, map_name)
         clearance, source = resolve_clearance(self.planner_config)
         try:
@@ -126,7 +126,7 @@ class EditorApplication:
                 pass
             return {
                 "document": fallback,
-                "map": map_data.preview_payload(),
+                **({"map": map_data.preview_payload()} if include_map else {}),
                 "read_only": True,
                 "read_only_reason": str(error),
                 "error": {"code": error.code, "message": str(error)},
@@ -138,7 +138,7 @@ class EditorApplication:
         document = self._refresh_map_state(document, map_data)
         return {
             "document": document,
-            "map": map_data.preview_payload(),
+            **({"map": map_data.preview_payload()} if include_map else {}),
             "source_changed": source_changed,
         }
 

@@ -20,14 +20,16 @@ if str(MAP_EDITOR_DIR) not in sys.path:
     sys.path.insert(0, str(MAP_EDITOR_DIR))
 
 from editor_export import ExportError
-from editor_map_io import MapFormatError
+from editor_map_io import MapFormatError, validate_map_name
 from editor_server import ApiError, EditorApplication
 from editor_store import DocumentError, RevisionConflict
 from base_control.paths import config_dir as base_config_dir
-from map_utils import list_saved_maps, load_map_preview, load_map_locations, save_map_locations
+from map_utils import list_saved_maps, load_map_preview, load_map_locations
 from systemd_runtime import create_runtime
 from ros_bridge import RosBridge
 from state_store import StateStore
+from web_support import (ConfigStore, LimitedHTTPServer, RequestError,
+                         access_password, authorized, finite_fields, query_integer, request_errors)
 
 
 RESTART_TARGETS = {
@@ -102,6 +104,9 @@ class ServerApp:
         self.maps_dir = self.repo_dir / "maps"
         self.config_dir = self.repo_dir / "config"
         self.base_config_dir = base_config_dir()
+        self.config_store = ConfigStore()
+        self.access_password = access_password()
+        self._map_lock = threading.RLock()
         self.editor = EditorApplication(
             self.maps_dir,
             self.config_dir / "path_plan.yaml",
@@ -120,10 +125,9 @@ class ServerApp:
         self._running = False
 
     def start(self) -> None:
-        self.bridge.start()
         handler_cls = self._build_handler()
-        self._httpd = ThreadingHTTPServer((self.host, self.port), handler_cls)
-        self._httpd.daemon_threads = True
+        self._httpd = LimitedHTTPServer((self.host, self.port), handler_cls)
+        self.bridge.start()
         self._running = True
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
         self._thread.start()
@@ -131,12 +135,14 @@ class ServerApp:
 
     def stop(self) -> None:
         self._running = False
-        self.runtime.close()
+        self.bridge.stop()
         if self._httpd:
             self._httpd.shutdown()
+            self._httpd.close_clients()
             self._httpd.server_close()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.5)
+        self.runtime.close()
 
     def _build_handler(self):
         app = self
@@ -145,6 +151,18 @@ class ServerApp:
             server_version = "FinavWeb/0.1"
             protocol_version = "HTTP/1.1"
 
+            def _authorize(self):
+                if authorized(self.headers.get("Authorization"), app.access_password):
+                    return True
+                self.close_connection = True
+                self.send_response(HTTPStatus.UNAUTHORIZED)
+                self.send_header("WWW-Authenticate", 'Basic realm="Finav", charset="UTF-8"')
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return False
+
+            @request_errors
             def do_GET(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
                 path = parsed.path
@@ -163,10 +181,8 @@ class ServerApp:
                     return
                 if path == "/api/scene":
                     query = parse_qs(parsed.query)
-                    map_version = int(query.get("map_version", [-1])[0])
-                    planning_map_version = int(
-                        query.get("planning_map_version", [-1])[0]
-                    )
+                    map_version = query_integer(query, "map_version", -1, -1, 2**63 - 1)
+                    planning_map_version = query_integer(query, "planning_map_version", -1, -1, 2**63 - 1)
                     self._json(
                         HTTPStatus.OK,
                         app.state.snapshot_scene(
@@ -177,21 +193,24 @@ class ServerApp:
                     return
                 if path == "/api/history":
                     query = parse_qs(parsed.query)
-                    since = int(query.get("since", [0])[0])
-                    limit = int(query.get("limit", [200])[0])
-                    data = app.state.get_history(since_seq=since, limit=limit)
-                    self._json(HTTPStatus.OK, {"events": data, "latest_seq": data[-1]["seq"] if data else since})
+                    since = query_integer(query, "since", 0, 0, 2**63 - 1)
+                    limit = query_integer(query, "limit", 200, 1, 1000)
+                    self._json(HTTPStatus.OK, app.state.history_page(
+                        since, limit, query.get("session_id", [None])[0]))
                     return
                 if path.startswith("/api/runtime/logs/"):
                     mode = unquote(path.removeprefix("/api/runtime/logs/")).strip("/")
                     query = parse_qs(parsed.query)
-                    tail = int(query.get("tail", [300])[0])
+                    tail = query_integer(query, "tail", 300, 1, 2000)
                     try:
                         payload = app.runtime.read_log(mode, tail=tail)
                     except ValueError as exc:
                         self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
                         return
-                    self._json(HTTPStatus.OK, payload)
+                    version = payload["version"]
+                    if query.get("version", [None])[0] == version:
+                        payload = {"unchanged": True}
+                    self._json(HTTPStatus.OK, {**payload, "version": version})
                     return
                 if path == "/api/maps":
                     self._json(HTTPStatus.OK, {"maps": list_saved_maps(app.maps_dir)})
@@ -205,22 +224,17 @@ class ServerApp:
                     self._editor_json(lambda: app._load_editor_document(parts[2]))
                     return
                 if path.startswith("/api/maps/") and path.endswith("/locations"):
-                    name = unquote(path.removeprefix("/api/maps/").removesuffix("/locations")).strip("/")
+                    name = unquote(path.removeprefix("/api/maps/").removesuffix("/locations"))
                     if app._resolve_map_dir(name) is None:
                         self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid map name"})
                         return
-                    self._json(
-                        HTTPStatus.OK,
-                        {"map_file": name, "locations": load_map_locations(app.maps_dir, name)},
-                    )
+                    self._editor_json(lambda: app._locations_snapshot(name))
                     return
                 if path.startswith("/api/maps/"):
-                    name = unquote(path.removeprefix("/api/maps/")).strip("/")
-                    payload = load_map_preview(app.maps_dir, name)
-                    if payload is None:
-                        self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"map not found: {name}"})
-                        return
-                    self._json(HTTPStatus.OK, payload)
+                    name = unquote(path.removeprefix("/api/maps/"))
+                    if app._resolve_map_dir(name) is None:
+                        raise RequestError(400, "invalid map name")
+                    self._editor_json(lambda: load_map_preview(app.maps_dir, name))
                     return
                 if path == "/api/configs":
                     self._json(HTTPStatus.OK, {"files": app._list_config_files()})
@@ -236,7 +250,7 @@ class ServerApp:
                         {
                             "name": target.name,
                             "path": f"config/{target.name}",
-                            "content": target.read_text(encoding="utf-8"),
+                            **app.config_store.read(target),
                             "impact": describe_config_impact(target.name),
                         },
                     )
@@ -244,6 +258,7 @@ class ServerApp:
 
                 self._serve_static(path)
 
+            @request_errors
             def do_POST(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
                 path = parsed.path
@@ -273,6 +288,7 @@ class ServerApp:
                     return
 
                 if path == "/api/nav/goal":
+                    finite_fields(body, "x", "y", "yaw_deg")
                     app.bridge.command(
                         {
                             "type": "set_goal",
@@ -285,6 +301,7 @@ class ServerApp:
                     return
 
                 if path == "/api/control/manual":
+                    finite_fields(body, "linear", "angular")
                     try:
                         linear = float(body.get("linear", 0.0))
                         angular = float(body.get("angular", 0.0))
@@ -316,6 +333,7 @@ class ServerApp:
                     return
 
                 if path == "/api/nav/initialpose":
+                    finite_fields(body, "x", "y", "yaw_deg")
                     app.bridge.command(
                         {
                             "type": "set_initialpose",
@@ -334,9 +352,12 @@ class ServerApp:
 
                 if path == "/api/nav/relocate":
                     map_file = body.get("map_file", "")
+                    if map_file and (not isinstance(map_file, str) or app._resolve_map_dir(map_file) is None):
+                        raise RequestError(400, "invalid map name")
                     params = {"map_file": map_file} if isinstance(map_file, str) and map_file.strip() else {}
                     try:
-                        runtime = app.runtime.run_relocate(params=params)
+                        with app._map_lock:
+                            runtime = app.runtime.run_relocate(params=params)
                     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
                         self._json(HTTPStatus.CONFLICT, {"ok": False, "error": str(exc)})
                         return
@@ -353,8 +374,15 @@ class ServerApp:
                     return
 
                 if path == "/api/map/save":
-                    app.bridge.command({"type": "save_map", "name": body.get("name", "manual_map")})
-                    self._json(HTTPStatus.OK, {"ok": True})
+                    name = body.get("name")
+                    if not isinstance(name, str) or app._resolve_map_dir(name) is None or name.startswith("-"):
+                        raise RequestError(400, "invalid map name")
+                    with app._map_lock:
+                        mapping = app.runtime.snapshot().get("mapping", {})
+                        if not mapping.get("running") or mapping.get("stopping"):
+                            raise RequestError(409, "Mapping must be running before saving")
+                        job = app.bridge.save_map(name)
+                    self._json(HTTPStatus.ACCEPTED, {"ok": True, "job": job})
                     return
                 if path in {"/api/system/shutdown", "/api/system/restart"}:
                     action = path.rsplit("/", 1)[-1]
@@ -366,7 +394,7 @@ class ServerApp:
                     self._json(HTTPStatus.ACCEPTED, payload)
                     return
                 if path.startswith("/api/maps/") and path.endswith("/locations"):
-                    name = unquote(path.removeprefix("/api/maps/").removesuffix("/locations")).strip("/")
+                    name = unquote(path.removeprefix("/api/maps/").removesuffix("/locations"))
                     target = app._resolve_map_dir(name)
                     if target is None:
                         self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid map name"})
@@ -374,16 +402,10 @@ class ServerApp:
                     if not target.exists() or not target.is_dir():
                         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"map not found: {name}"})
                         return
-                    try:
-                        locations = save_map_locations(app.maps_dir, name, body.get("locations", []))
-                    except ValueError as exc:
-                        self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
-                        return
-                    app.state.add_event("info", "map locations saved", {"name": name, "count": len(locations)})
-                    self._json(HTTPStatus.OK, {"ok": True, "map_file": name, "locations": locations})
+                    self._editor_json(lambda: app._save_locations(name, body))
                     return
                 if path.startswith("/api/maps/") and path.endswith("/delete"):
-                    name = unquote(path.removeprefix("/api/maps/").removesuffix("/delete")).strip("/")
+                    name = unquote(path.removeprefix("/api/maps/").removesuffix("/delete"))
                     target = app._resolve_map_dir(name)
                     if target is None:
                         self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid map name"})
@@ -391,7 +413,15 @@ class ServerApp:
                     if not target.exists() or not target.is_dir():
                         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"map not found: {name}"})
                         return
-                    shutil.rmtree(target)
+                    with app._map_lock:
+                        runtime = app.runtime.snapshot()
+                        if runtime.get("busy") or any(
+                            item.get("running") or item.get("stopping")
+                            for key, item in runtime.items()
+                            if key in {"mapping", "navigation", "relocate"} and isinstance(item, dict)
+                        ) or app.state.snapshot().get("map_save", {}).get("state") == "running":
+                            raise RequestError(409, "Stop mapping/navigation/relocation and finish map saving before deletion")
+                        shutil.rmtree(target)
                     app.state.add_event("info", "map deleted", {"name": name})
                     self._json(HTTPStatus.OK, {"ok": True, "name": name})
                     return
@@ -403,6 +433,9 @@ class ServerApp:
                     return
                 if path == "/api/runtime/navigation/start":
                     map_file = body.get("map_file", "")
+                    target = app._resolve_map_dir(map_file) if isinstance(map_file, str) else None
+                    if target is None or not (target / f"{map_file}.yaml").is_file():
+                        raise RequestError(400, "A saved map is required")
                     launch_args = {"map_file": map_file} if isinstance(map_file, str) and map_file.strip() else {}
                     self._runtime_json(lambda: app.runtime.start("navigation", launch_args=launch_args))
                     return
@@ -431,17 +464,15 @@ class ServerApp:
                     if not target.exists():
                         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"config not found: {rel_name}"})
                         return
-                    content = body.get("content", "")
-                    if not isinstance(content, str):
-                        self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "content must be string"})
-                        return
-                    target.write_text(content, encoding="utf-8")
+                    revision = app.config_store.save(target, body)
                     app.state.add_event("info", "config saved", {"file": target.name})
-                    self._json(HTTPStatus.OK, {"ok": True, "name": target.name, "impact": describe_config_impact(target.name)})
+                    self._json(HTTPStatus.OK, {"ok": True, "name": target.name, "revision": revision,
+                                               "impact": describe_config_impact(target.name)})
                     return
 
                 self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": f"unknown endpoint: {path}"})
 
+            @request_errors
             def do_PUT(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
                 parts = self._path_segments(parsed.path)
@@ -466,7 +497,8 @@ class ServerApp:
 
             def _runtime_json(self, operation) -> None:
                 try:
-                    payload = operation()
+                    with app._map_lock:
+                        payload = operation()
                 except ValueError as exc:
                     self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
                     return
@@ -477,7 +509,10 @@ class ServerApp:
 
             def _editor_json(self, operation) -> None:
                 try:
-                    payload = operation()
+                    with app._map_lock:
+                        payload = operation()
+                except RequestError:
+                    raise
                 except ApiError as error:
                     status, code, field = error.status, error.code, error.field
                     message = str(error)
@@ -511,17 +546,17 @@ class ServerApp:
                 if mode not in {"mapping", "navigation"}:
                     self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid stream mode"})
                     return
+                map_version = query_integer(query, "map_version", -1, -1, 2**63 - 1)
+                planning_map_version = query_integer(query, "planning_map_version", -1, -1, 2**63 - 1)
+                plan_version = query_integer(query, "plan_version", -1, -1, 2**63 - 1)
+                if not self.server.stream_slots.acquire(blocking=False):
+                    raise RequestError(503, "Too many live streams")
                 try:
-                    map_version = int(query.get("map_version", [-1])[0])
-                    planning_map_version = int(
-                        query.get("planning_map_version", [-1])[0]
-                    )
-                    plan_version = int(query.get("plan_version", [-1])[0])
-                except (TypeError, ValueError):
-                    map_version = -1
-                    planning_map_version = -1
-                    plan_version = -1
+                    self._send_scene_stream(mode, map_version, planning_map_version, plan_version)
+                finally:
+                    self.server.stream_slots.release()
 
+            def _send_scene_stream(self, mode, map_version, planning_map_version, plan_version):
                 target_hz = 10.0 if mode == "mapping" else 15.0
                 interval = 1.0 / target_hz
                 frames = 0
@@ -591,25 +626,45 @@ class ServerApp:
                     app.state.remove_live_viewer(mode)
 
             def _read_json(self) -> Dict[str, Any]:
+                if self.headers.get("Transfer-Encoding"):
+                    raise RequestError(400, "Transfer-Encoding is not supported")
+                if self.headers.get_content_type() != "application/json":
+                    raise RequestError(415, "Content-Type must be application/json")
+                origin = self.headers.get("Origin")
+                parsed_origin = urlparse(origin or "")
+                if (self.headers.get("Sec-Fetch-Site") == "cross-site"
+                        or (origin and (parsed_origin.scheme not in {"http", "https"}
+                                        or parsed_origin.netloc != self.headers.get("Host", "")))):
+                    raise RequestError(403, "Cross-origin writes are not allowed")
                 try:
                     size = int(self.headers.get("Content-Length", "0"))
-                except ValueError:
-                    size = 0
-                raw = self.rfile.read(size) if size > 0 else b"{}"
-                if not raw:
-                    return {}
+                except ValueError as exc:
+                    raise RequestError(400, "Invalid Content-Length") from exc
+                if size < 0:
+                    raise RequestError(400, "Invalid Content-Length")
+                if size > 4 * 1024 * 1024:
+                    raise RequestError(413, "Request body is too large")
+                raw = self.rfile.read(size) if size else b"{}"
+                if size and len(raw) != size:
+                    raise RequestError(400, "Incomplete request body")
                 try:
-                    data = json.loads(raw.decode("utf-8"))
-                    return data if isinstance(data, dict) else {}
-                except Exception:
-                    return {}
+                    data = json.loads(raw.decode("utf-8"), parse_constant=self._invalid_constant)
+                except (ValueError, UnicodeError) as exc:
+                    raise RequestError(400, "Invalid JSON") from exc
+                if not isinstance(data, dict):
+                    raise RequestError(400, "JSON body must be an object")
+                return data
+
+            @staticmethod
+            def _invalid_constant(value):
+                raise ValueError(f"Invalid JSON constant: {value}")
 
             def _serve_static(self, path: str) -> None:
                 if path == "/":
                     path = "/index.html"
 
-                target = (app.web_dir / path.lstrip("/")).resolve()
-                if not str(target).startswith(str(app.web_dir.resolve())) or not target.exists() or not target.is_file():
+                target = (app.web_dir / unquote(path).lstrip("/")).resolve()
+                if not target.is_relative_to(app.web_dir.resolve()) or not target.is_file():
                     self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
                     return
 
@@ -678,10 +733,7 @@ class ServerApp:
         return {"ok": True, "accepted": True}
 
     def _load_editor_document(self, map_name: str) -> Dict[str, object]:
-        payload = self.editor.load_document(map_name)
-        # The map raster is already loaded by the Finav map page. Avoid sending
-        # a second multi-megabyte pixels + occupancy payload on editor entry.
-        payload.pop("map", None)
+        payload = self.editor.load_document(map_name, include_map=False)
         document = payload.get("document", {})
         editor_path = self.maps_dir / map_name / f"{map_name}.editor.yaml"
         if (
@@ -701,22 +753,41 @@ class ServerApp:
     def _save_editor_document(
         self, map_name: str, body: object
     ) -> Dict[str, object]:
-        baseline = self._load_editor_document(map_name).get("document", {})
-        payload = self.editor.save_document(map_name, body, baseline)
-        document = payload.get("document", {})
-        if isinstance(document, dict):
-            save_map_locations(
-                self.maps_dir,
-                map_name,
-                document.get("locations", []),
-            )
-        return payload
+        with self._map_lock:
+            baseline = self._load_editor_document(map_name).get("document", {})
+            return self.editor.save_document(map_name, body, baseline)
+
+    def _save_locations(self, map_name, body):
+        with self._map_lock:
+            document = self._load_editor_document(map_name)["document"]
+            if "locations" not in body or "expected_revision" not in body:
+                raise RequestError(400, "locations and expected_revision are required")
+            locations = body["locations"]
+            if not isinstance(locations, list):
+                raise RequestError(400, "locations must be a list")
+            document["locations"] = [dict(item, id=item.get("id") or
+                "location-" + hashlib.sha256(str(item.get("name", "")).encode()).hexdigest()[:16])
+                for item in locations if isinstance(item, dict)]
+            if len(document["locations"]) != len(locations):
+                raise RequestError(400, "Invalid location entry")
+            result = self._save_editor_document(map_name, {
+                "document": document, "expected_revision": body["expected_revision"]})
+            return {"ok": True, "map_file": map_name, "locations": result["document"]["locations"],
+                    "revision": result["document"]["revision"]}
+
+    def _locations_snapshot(self, map_name):
+        document = self._load_editor_document(map_name)["document"]
+        return {"map_file": map_name, "locations": document["locations"], "revision": document["revision"]}
 
     def _resolve_map_dir(self, name: str) -> Optional[Path]:
-        if not name or "/" in name or "\\" in name:
+        if not isinstance(name, str) or not name or name != name.strip():
+            return None
+        try:
+            validate_map_name(name)
+        except MapFormatError:
             return None
         target = (self.maps_dir / name).resolve()
-        if not str(target).startswith(str(self.maps_dir.resolve())):
+        if target.parent != self.maps_dir.resolve() or (self.maps_dir / name).is_symlink():
             return None
         return target
 

@@ -4,6 +4,7 @@ function renderDockStream() {
   const title = $("dockLogTitle");
   const clearBtn = $("btnClearDockPane");
   const view = appState.dockView;
+  document.querySelector(".dock-event-filters").hidden = view !== "events";
   const shouldFollow = appState.dockAutoFollow[view] ?? true;
   const prevScrollTop = box.scrollTop;
   const prevScrollHeight = box.scrollHeight;
@@ -13,16 +14,17 @@ function renderDockStream() {
   });
 
   if (view === "events") {
+    const events = appState.events.filter((evt) => appState.eventLevel === "all" || normalizeLevel(evt.level) === appState.eventLevel);
     title.textContent = "事件";
-    meta.textContent = `显示后端事件流，共 ${appState.events.length} 条`;
+    meta.textContent = `${events.length} 条事件${appState.eventTruncated ? " · 较早事件已截断" : ""}`;
     clearBtn.textContent = "清空显示";
     box.className = "dock-stream events";
     box.innerHTML = "";
-    if (!appState.events.length) {
+    if (!events.length) {
       box.innerHTML = `<div class="event"><span class="lvl">INFO</span><div class="msg">当前没有事件</div></div>`;
       return;
     }
-    appState.events.forEach((evt) => {
+    events.forEach((evt) => {
       const row = document.createElement("div");
       const lvl = normalizeLevel(evt.level);
       row.className = "event";
@@ -62,8 +64,9 @@ function addEvents(events) {
     appState.events.push(evt);
     appState.lastSeq = Math.max(appState.lastSeq, evt.seq || 0);
   });
-  if (appState.events.length > 240) {
-    appState.events = appState.events.slice(-240);
+  if (appState.events.length > appState.eventLimit) {
+    appState.events = appState.events.slice(-appState.eventLimit);
+    appState.eventTruncated = true;
   }
   if (appState.dockView === "events") renderDockStream();
 }
@@ -82,10 +85,13 @@ function clearDockPane() {
 
 async function loadRuntimeLog(mode) {
   try {
-    const data = await api(`/api/runtime/logs/${mode}?tail=320`);
+    const version = appState.runtimeLogs[mode]?.version || "";
+    const data = await api(`/api/runtime/logs/${mode}?tail=320&version=${encodeURIComponent(version)}`);
+    if (data.unchanged) return;
     appState.runtimeLogs[mode] = {
       lines: data.lines || [],
       updatedAt: data.updated_at || null,
+      version: data.version,
     };
     if (appState.dockView === mode) renderDockStream();
   } catch (err) {
@@ -118,6 +124,21 @@ async function withBlockingModal(task, message) {
 async function pollStatus() {
   try {
     const status = await api("/api/status");
+    if (appState.serverSession && appState.serverSession !== status.session_id) {
+      resetLiveScene();
+      if (isLivePage() && $("statusDock").classList.contains("collapsed")) startSceneStream();
+      if (appState.mapSaveJob) showToast("服务已重启，请检查地图保存结果", "error");
+      appState.mapSaveJob = null;
+    }
+    appState.serverSession = status.session_id;
+    const save = status.map_save;
+    if (save?.id === appState.mapSaveJob && save.state !== "running") {
+      appState.mapSaveJob = null;
+      if (save.state === "succeeded") {
+        showToast(`地图“${save.name}”已保存`, "ok");
+        loadSavedMaps().catch(console.error);
+      } else showToast(save.error || "地图保存失败", "error");
+    }
     const control = appState.status?.control;
     appState.status = { ...status, control };
     applyManualControlStatus(status.control);
@@ -132,8 +153,17 @@ async function pollStatus() {
 async function pollEvents() {
   try {
     if (appState.statusPanel === "logs" && !$("statusDock").classList.contains("collapsed")) {
-      const data = await api(`/api/history?since=${appState.lastSeq}&limit=200`);
+      const data = await api(`/api/history?since=${appState.lastSeq}&limit=200&session_id=${encodeURIComponent(appState.eventSession || "")}`);
+      if (data.reset) {
+        appState.events = [];
+        appState.lastSeq = 0;
+        appState.eventTruncated = false;
+      }
+      appState.eventSession = data.session_id;
+      appState.eventTruncated ||= data.truncated;
       addEvents(data.events || []);
+      appState.lastSeq = data.latest_seq;
+      if (data.reset && !data.events?.length) renderDockStream();
     }
   } catch (err) {
     console.error(err);

@@ -53,6 +53,8 @@ systemctl --user stop finav.target
 
 浏览器访问 `http://<机器人IP>:8010`，机器人本机可访问 `http://localhost:8010`。在网页中启动、停止建图或导航；导航前先选择地图，建图与导航不能同时运行。
 
+开发调试阶段默认关闭口令登录，浏览器可直接访问。可选访问控制设置见 [Web 访问](Doc/服务部署.md#web-访问)。
+
 单独停止服务：
 
 ```bash
@@ -136,7 +138,7 @@ systemctl --user disable finav.target
 - `server_app.py`
   - HTTP 服务、路由分发、静态文件服务。
 - `ros_bridge.py`
-  - ROS2 桥接层，负责订阅 `/map`、`/scan`、`/odom`、`/plan`、`/tf`，并处理网页控制命令。
+  - ROS2 桥接层，订阅地图、规划约束、雷达、位姿、导航任务和底盘仲裁状态，并处理网页控制命令。
 - `process_manager.py`
   - 未安装服务时的进程管理及共用日志、重定位辅助功能。
 - `systemd_runtime.py`
@@ -144,17 +146,25 @@ systemctl --user disable finav.target
 - `state_store.py`
   - 线程安全状态仓库，保存 `status`、`scene`、事件历史。
 - `map_utils.py`
-  - 读取 `maps/` 下的 `.yaml + .pgm`，并负责 Web 地点配置的读取与保存。
+  - 复用地图编辑器的地图解析及共享地点读取函数，提供 Web 预览数据。
+- `web_support.py`
+  - HTTP 连接限制、身份验证、请求校验与配置原子保存。
 - `web/index.html`
   - 页面结构。
 - `web/styles.css`
   - 样式。
 - `web/app-core.js`
-  - 前端基础状态、API 请求、地图基础渲染工具。
+  - 前端基础状态、地图基础渲染工具。
+- `web/app-api.js`
+  - API 请求、超时与 HTTP/ROS/画面流连接状态。
 - `web/app-dock.js`
   - 底栏状态 / 事件 / 日志区域逻辑。
 - `web/app-pages.js`
-  - 实时场景流、地图列表、配置编辑器。
+  - 实时场景流、地图与导航地点/路线列表、配置编辑器、服务控制。
+- `web/app-manual-control.js`
+  - 网页虚拟摇杆、键盘控制、回中与停止逻辑。
+- `web/map-editor.js`
+  - 地点、禁行区、路线编辑与地图导出；后端逻辑位于 `scripts/map_location/editor_*.py`。
 - `web/app.js`
   - 前端主交互绑定、导航拖拽、页面切换、初始化入口。
 - `runtime/`
@@ -171,7 +181,7 @@ systemctl --user disable finav.target
 - “开始建图”会调用：
   - `POST /api/runtime/mapping/start`
   - 服务模式启动 `finav-mapping.service`，由服务运行 `map.launch.py`
-- “结束建图”或离开建图页会调用：
+- “结束建图”或运行期间确认离开建图页会调用（不会自动保存地图）：
   - `POST /api/runtime/mapping/stop`
   - 服务模式停止 `finav-mapping.service` 及其子进程
 
@@ -181,32 +191,46 @@ systemctl --user disable finav.target
 - 右侧包含：
   - 导航启动 / 结束
   - 设置初始位姿
-  - 设置目标点
+  - 设置目标点、选择已保存地点
+  - 已保存开放路线的启动、暂停、继续和取消
+  - 重定位
   - 停止 / 取消
 - “开始导航”会调用：
   - `POST /api/runtime/navigation/start`
   - 服务模式启动 `finav-navigation.service`，由服务运行 `nav.launch.py`
-- “结束导航”或离开导航页会调用：
+- “结束导航”或运行期间确认离开导航页会调用：
   - `POST /api/runtime/navigation/stop`
   - 服务模式停止 `finav-navigation.service` 及其子进程
 
-### 3. 地图预览页
+### 3. 地图页
 
 - 从 `maps/` 目录读取地图元数据和 `.pgm`，在前端 canvas 中展示。
-- 支持在地图上新增、编辑和保存导航地点；地点统一通过 Web 页面维护。
+- 支持地点、禁行区、开放路线编辑，路线平滑、地图导出及删除。
+- 地点、禁行区和路线统一保存在 `maps/<地图名>/<地图名>.editor.yaml`，使用 revision 检测保存冲突并原子写入。没有编辑文档时兼容读取旧 `.locations.yaml`，之后不再双写地点文件。
+- 删除地图前必须停止建图、导航和重定位，并等待存图结束。
+- 路线执行行为见 [导航接口](Doc/navigation_topics.md#开放路线)。
 
 ### 4. 配置文件页
 
 - 从导航仓库 `config/` 和底盘仓库的配置目录读取 `.yaml/.yml` 文件列表。
 - 支持网页直接查看、编辑、保存。
-- 当前是“纯文本编辑 + 前端轻量 YAML 高亮”，未做 YAML 语法校验。
-- 可通过 `finav.target` 关闭或整套重启 Finav 服务；“关闭”不会关闭 Jetson 系统。
+- 采用纯文本编辑和轻量 YAML 高亮；后端校验 YAML 语法、非空映射及 `ros__parameters` 映射结构，按内容版本检查冲突后原子保存原始文本。
+- 保存后显示配置对应的生效提示；底盘配置通过顶栏“⋯”菜单中的“重启底盘控制”应用，该操作会停止当前建图或导航，Web 保持运行。
+- 顶栏“⋯”菜单还提供整套重启和关闭 Finav 服务；整套重启只恢复底盘与 Web，“关闭”不会关闭 Jetson 系统。
 
 ### 5. 运行状态中心
 
 - 常驻于建图 / 导航页底部，展开后覆盖大部分工作区，不触发页面切换或任务清理。
 - 汇总建图 / 导航就绪条件、地图 / 雷达 / 里程计 / TF 新鲜度与频率、机器人位姿、目标、路径、手柄链路、运行进程和日志。
 - 展开期间暂停被遮挡的实时画面流，状态数据仍按低频更新，以减少无效传输和渲染。
+- 服务区分启动中、已就绪、未就绪、停止中和失败；启动超过 30 秒仍缺少关键数据时显示未就绪，无目标时不要求存在路径。
+- 事件支持级别筛选和保留条数选择；重启 Web 后自动恢复事件读取，历史截断时显示提示。
+
+### 6. 网页手动控制
+
+- 提供虚拟摇杆和键盘控制，经 `/api/control/manual` 转为 `/web_cmd_vel`，由底盘仲裁器处理。
+- 控制量按手柄档位缩放；档位不在线时拒绝非零输入，手柄抢停后的锁定状态要求网页控制回中。
+- 页面切换、失焦或隐藏时执行停止逻辑。
 
 ## 后端数据流
 
@@ -217,17 +241,23 @@ systemctl --user disable finav.target
 - 订阅 `/map`
   - 对栅格内容计算签名，仅在内容变化时更新 `scene.map` 和递增 `map_version`
   - 栅格以 `int8 + Base64` 紧凑传输
+- 订阅 `/planning_map`
+  - 更新规划约束覆盖层，使用独立的 `planning_map_version`
 - 订阅 `/scan`
   - 仅在网页存在可见实时画面时处理
   - 距离压缩为毫米级 `uint16 + Base64`，浏览器侧完成极坐标投影
 - 订阅 `/odom`
   - 更新机器人里程计位姿、速度
 - 订阅 `/plan`
-  - 更新路径点数、长度、路径点数组
+  - 更新路径点数、长度、路径点数组及 `plan_version`
+- 订阅 `/nav_status`
+  - 更新导航任务类型、阶段、目标及原因
 - 订阅 `/tf`
   - 统计 `map->odom`、`odom->base_link` 频率
-- 订阅 `/js_state`
-  - 更新底栏里的 STM32 手柄控制激活状态
+- 订阅 `/js_state`、`/js_cmd_vel`、`/handle/gear`、`/base_control_router/status`
+  - 更新手柄在线、输入、档位和网页控制锁定状态
+- 订阅 `/nav_voice_bridge/status`
+  - 更新地点名称导航的反馈状态
 - 定时器：
   - `0.02s` 处理网页命令队列
   - `0.25s` 刷新 `map` 坐标系下机器人位姿
@@ -260,6 +290,9 @@ systemctl --user disable finav.target
   - `/api/nav/initialpose`
   - `/api/nav/goal`
   - `/api/nav/cancel`
+  - `/api/nav/route`、`/api/nav/location`、`/api/nav/relocate`
+- 手动控制
+  - `/api/control/manual`
 - 建图存图
   - `/api/map/save`
 - 运行时
@@ -279,6 +312,8 @@ systemctl --user disable finav.target
 
 服务模式使用 `systemd_runtime.py` 管理独立服务，日志写入 `~/.local/state/finav/`。Web 通过 systemd 查询运行状态，重启 Web 不会接管或终止其他服务进程。
 
+运行后端默认根据 `~/.config/finav/services.json` 是否存在选择，也可用 `FINAV_RUNTIME_BACKEND` 指定；已安装服务时拒绝启用旧进程模式。服务模式重启 Web 会结束其一次性重定位辅助进程。
+
 未安装服务时，旧进程模式由 `process_manager.py` 负责：
 
 - 启动建图 / 导航 launch
@@ -292,7 +327,7 @@ systemctl --user disable finav.target
 - 启动某一模式前，会先停止另一模式，避免建图 / 导航并存。
 - 日志读取已做两层优化：
   - 按文件尾部读取，不再每次轮询整文件
-  - 按 `mtime + size + tail` 做简单缓存
+  - 按文件标识、纳秒修改时间、大小和行数缓存，并通过版本参数跳过未变化的传输与渲染
 - 启动时会强制设置：
   - `LANG=C.UTF-8`
   - `LC_ALL=C.UTF-8`
@@ -304,38 +339,58 @@ systemctl --user disable finav.target
 
 - `GET /api/health`
 - `GET /api/status`
-- `GET /api/stream?mode=mapping|navigation&map_version=<n>&plan_version=<n>`
-- `GET /api/scene?map_version=<n>`
-- `GET /api/history?since=<seq>&limit=<n>`
+- `GET /api/stream?mode=mapping|navigation&map_version=<n>&planning_map_version=<n>&plan_version=<n>`
+- `GET /api/scene?map_version=<n>&planning_map_version=<n>`
+- `GET /api/history?since=<seq>&limit=<n>&session_id=<id>`（响应含 `session_id`、`latest_seq`、`reset`、`truncated`）
 
 ### 地图
 
 - `GET /api/maps`
 - `GET /api/maps/<name>`
-- `POST /api/map/save` `{ name }`
+- `POST /api/map/save` `{ name }`（建图期间受理，返回 `202` 与 `job`；通过 `/api/status` 的 `map_save` 查询完成/失败，超时为 120 秒）
+- `GET /api/maps/<name>/locations`
+- `POST /api/maps/<name>/locations` `{ locations, expected_revision }`（读接口返回 `revision`，保存统一进入编辑文档）
+- `GET /api/maps/<name>/editor`
+- `PUT /api/maps/<name>/editor` `{ expected_revision, document }`
+- `POST /api/maps/<name>/routes/<route_id>/smooth` `{ expected_revision }`
+- `POST /api/maps/<name>/export`
+- `POST /api/maps/<name>/delete`（删除地图目录及其文件）
 
 ### 导航 / 控制
 
 - `POST /api/nav/goal` `{ x, y, yaw_deg }`
 - `POST /api/nav/initialpose` `{ x, y, yaw_deg }`
 - `POST /api/nav/cancel`
+- `POST /api/nav/route` `{ action, map_name, route_id }`，`action` 为 `start/pause/resume/cancel`
+- `POST /api/nav/location` `{ name }`
+- `POST /api/nav/relocate` `{ map_file }`
+- `POST /api/control/manual` `{ linear, angular }`（归一化输入，非实际速度；零输入表示停止）
+
+ROS 控制与存图接口返回后仍需查看状态和事件确认执行结果；存图通过后台脚本完成。
+
+口令登录默认关闭，只有显式设置 `FINAV_WEB_AUTH=1` 才启用 Basic 身份验证。写请求使用 `application/json`，拒绝跨站来源；无效参数返回 4xx，ROS 离线或普通命令队列已满返回 503。手动输入保留最新值并在 300 毫秒后过期，停止/取消指令优先处理。
 
 ### 运行时
 
 - `POST /api/runtime/mapping/start`
 - `POST /api/runtime/mapping/stop`
-- `POST /api/runtime/navigation/start`
+- `POST /api/runtime/navigation/start` `{ map_file }`
 - `POST /api/runtime/navigation/stop`
 - `GET /api/runtime/logs/mapping?tail=<n>`
 - `GET /api/runtime/logs/navigation?tail=<n>`
 - `POST /api/runtime/logs/mapping/clear`
 - `POST /api/runtime/logs/navigation/clear`
+- `POST /api/runtime/<mode>/restart`，模式包括 `base`、`base_drive`、`handle`、`router`、`mapping`、`navigation`；服务模式下前四项都重启整个底盘服务
+
+日志读取与清空还支持 `relocate`、`base`、`handle`、`router`、`base_drive`；服务模式下底盘相关名称映射到同一份 `base.log`。Web 日志通过部署文档中的文件或 journal 命令查看。
+
+日志读取可附加上次响应的 `version` 参数，未变化时返回 `unchanged: true`。
 
 ### 配置文件
 
 - `GET /api/configs`
 - `GET /api/configs/<filename>`
-- `POST /api/configs/<filename>` `{ content }`
+- `POST /api/configs/<filename>` `{ content, expected_revision }`（读取时取得 `revision`；冲突返回 409，YAML/基本结构校验失败返回 422）
 
 ### Finav 服务
 
@@ -352,89 +407,21 @@ systemctl --user disable finav.target
 - `styles.css`
   - 负责全部页面样式。
 - `app-core.js`
-  - 负责全局状态、基础工具、API 请求、通用 canvas 渲染。
+  - 负责全局状态、基础工具、通用 canvas 渲染。
+- `app-api.js`
+  - 负责 HTTP 请求、错误解析与分通道连接状态。
 - `app-dock.js`
   - 负责底栏状态 / 事件 / 运行日志。
 - `app-pages.js`
-  - 负责场景流、地图预览、配置页编辑与保存。
+  - 负责场景流、地图/地点/路线列表、配置页编辑与保存、运行服务控制。
+- `app-manual-control.js`
+  - 负责虚拟摇杆、键盘控制及停止事件。
+- `map-editor.js`
+  - 负责地图对象编辑、路线平滑及导出。
 - `app.js`
   - 负责导航拖拽、页面切换、事件绑定、应用初始化。
 
-### 当前前端结构评价
-
-- 优点
-  - 部署简单，没有前端构建链。
-  - 已按功能边界做了一次轻量拆分，阅读成本比单文件低。
-  - 浏览器兼容要求低。
-  - 调试路径短，适合现场联调。
-- 问题
-  - 目前仍是全局函数 + 顺序脚本加载，模块边界主要靠约定。
-  - 地图渲染、配置编辑、运行时控制虽然已分文件，但仍共享同一份全局状态。
-  - 后续继续加页面逻辑，维护成本会明显上升。
-
-### 是否需要拆前端代码
-
-有必要，但当前先停在“原生多文件拆分”这一层更合适。
-
-原因：
-
-- 当前前端仍然没有 bundler。
-- 对这个项目来说，先用原生多文件把职责切开，已经能明显提升可读性。
-- 如果继续上 ES module / Vite，需要一起梳理静态资源路径、模块依赖和部署方式，改动面会更大。
-
-当前已经拆到这个粒度：
-
-- `web/app-core.js`
-  - 全局状态、基础工具函数、API 请求、地图基础渲染。
-- `web/app-dock.js`
-  - 状态栏、事件流、运行日志。
-- `web/app-pages.js`
-  - 地图预览、配置文件页、场景流。
-- `web/app.js`
-  - 导航拖拽、绑定、初始化。
-
-如果后面前端继续扩张，再考虑：
-
-- 改成浏览器原生 ES module
-- 或者再进一步引入 bundler
-
-## 当前架构是否合理
-
-对当前项目阶段来说，整体是合理的。
-
-### 合理点
-
-- Python HTTP 服务足够轻，部署简单。
-- ROS2 bridge 独立线程，和 HTTP 路由职责分离。
-- `StateStore` 把“实时状态”和“事件流”统一收口，前端消费简单。
-- `RuntimeManager` 把 launch / cleanup / log 从 `server_app.py` 中抽离出来，方向是对的。
-- 地图、配置、日志都走显式 API，而不是前端直接碰文件系统，边界清晰。
-
-### 目前主要风险
-
-1. 缺少鉴权
-   - 内网调试可接受，但只要被其他机器访问，就能起停 launch、改配置文件或控制整套服务。
-
-2. 配置编辑缺少语法校验
-   - 当前是“保存即写盘”，如果用户改坏 YAML，后续 launch 会直接失败。
-
-3. 原生脚本仍共享全局状态
-   - 当前按职责拆成四个文件，但模块边界仍依赖脚本加载顺序。
-
-## 可继续优化的地方
-
-1. 给日志接口加 `since_mtime` / `etag`
-   - 前端如果发现日志没更新，可以直接跳过渲染。
-
-2. 配置文件保存前做 YAML 解析校验
-   - 至少提示“语法错误，不保存”。
-
-3. 给 `RuntimeManager` 增加启动成功判定
-   - 现在“start”更多表示命令已发出。
-   - 更稳的方式是结合 `/map`、`/plan`、关键进程存活状态给出“已启动 / 启动失败”。
-
-4. 为事件流增加级别过滤或保留上限控制
-   - 当前默认最多 2000 条，前端显示 240 条。
+脚本按 `app-core.js`、`app-api.js`、`app-dock.js`、`app-pages.js`、`app-manual-control.js`、`map-editor.js`、`app.js` 顺序加载，共用 `appState`；地图编辑器通过 `window.finavMapEditor` 暴露入口。
 
 ## 启动
 
@@ -474,6 +461,15 @@ python3 src/finav/server/run_server.py --host 0.0.0.0 --port 8010
 
 ## 注意
 
-- 这是内网调试工具，当前未加鉴权，不应直接暴露公网。
+- 这是内网调试工具；Basic 身份验证不加密 HTTP 传输，跨不可信网络访问时需使用 HTTPS 反向代理或安全隧道。
 - `cancel_nav` 现在会同时急停并清掉当前导航目标 / 路径状态。
 - 配置页会直接覆盖 `config/` 下文件，建议调参前保留原始备份。
+
+## Web 离线验证
+
+在工作区根目录运行，使用临时地图/配置与模拟服务，不启动 ROS 节点或操作硬件：
+
+```bash
+source /opt/ros/humble/setup.bash
+PYTHONPATH="src/base_control:src/finav/server:$PYTHONPATH" python3 -m unittest discover -s src/finav/server/tests -v
+```

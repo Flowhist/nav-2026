@@ -89,7 +89,7 @@ class NavBridge(Node):
         if path is None:
             self.get_logger().warn("map_file or maps_dir not set, no locations loaded")
             return
-        if not path.exists():
+        if not path.exists() and not path.with_name(f"{self.map_file}.editor.yaml").exists():
             self.get_logger().warn(f"locations file not found: {path}")
             return
 

@@ -45,6 +45,7 @@
 - Before large changes, inspect relevant files and present a short plan.
 - Prefer minimal, localized edits.
 - Preserve existing architecture and naming conventions.
+- Keep Web UI consistent with `server/web/styles.css` tokens and existing components. Use `enhanceSelects()` for new select fields (including dynamically rendered fields), sharing the map picker's rounded menu, spacing, and selected state. Verify desktop/mobile layout and keyboard interaction.
 - After edits, run the smallest relevant verification command.
 - Do not delete files or rewrite large modules unless explicitly requested.
 - Do not read `.env`, credential, token, private key, or secret files.

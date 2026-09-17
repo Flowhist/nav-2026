@@ -2,6 +2,7 @@ function stopSceneStream() {
   if (appState.stream.source) appState.stream.source.close();
   appState.stream.source = null;
   appState.stream.mode = null;
+  setConnectionState(null, "stream");
 }
 
 function startSceneStream() {
@@ -17,7 +18,8 @@ function startSceneStream() {
   appState.stream.frames = 0;
   appState.stream.sampleStartedAt = performance.now();
 
-  source.onopen = () => setConnectionState("online");
+  setConnectionState("pending", "stream");
+  source.onopen = () => setConnectionState("online", "stream");
   source.onmessage = (event) => {
     try {
       const payload = JSON.parse(event.data);
@@ -25,11 +27,11 @@ function startSceneStream() {
       appState.mapVersion = payload.map_version ?? appState.mapVersion;
       appState.planningMapVersion = payload.planning_map_version ?? appState.planningMapVersion;
       appState.planVersion = payload.plan_version ?? appState.planVersion;
-      if (payload.map) {
+      if (payload.map_changed) {
         appState.scene.map = payload.map;
         [...mapRasterCache.keys()].filter((key) => key.startsWith("live-")).forEach((key) => mapRasterCache.delete(key));
       }
-      if (payload.planning_map) {
+      if (payload.planning_map_changed) {
         appState.scene.planning_map = payload.planning_map;
         [...mapRasterCache.keys()].filter((key) => key.startsWith("planning-")).forEach((key) => mapRasterCache.delete(key));
       }
@@ -59,7 +61,7 @@ function startSceneStream() {
     }
   };
   source.onerror = () => {
-    if (appState.stream.source === source) setConnectionState("offline");
+    if (appState.stream.source === source) setConnectionState("offline", "stream");
   };
 }
 
@@ -407,8 +409,11 @@ function getActiveNavigationMap(fallback = "") {
 
 function applyRunState(id, runtime, activeText) {
   const node = $(id);
-  const text = runtime.stopping ? "结束中" : runtime.running ? activeText : "未启动";
+  const readiness = runtime.readiness?.state;
+  const text = ({ starting: "启动中", not_ready: "未就绪", failed: "启动失败" })[readiness]
+    || (runtime.stopping ? "结束中" : runtime.running ? activeText : "未启动");
   node.textContent = text;
+  node.title = (runtime.readiness?.missing || []).join(", ");
   node.classList.remove("idle", "running", "stopping");
   node.classList.add(runtime.stopping ? "stopping" : runtime.running ? "running" : "idle");
 }
@@ -464,7 +469,7 @@ function renderRuntimeControls() {
 
   $("btnStartMapping").disabled = mappingBusy;
   $("btnStopMapping").disabled = !mappingBusy;
-  $("btnSaveMap").disabled = !mapping.running || mapping.stopping;
+  $("btnSaveMap").disabled = !mapping.running || mapping.stopping || !!appState.mapSaveJob || appState.status?.map_save?.state === "running";
   $("btnStartNavigation").disabled = navigationBusy || !appState.savedMaps.length;
   $("btnStopNavigation").disabled = !navigationBusy;
   $("navMapToggle").disabled = navigationBusy || !appState.savedMaps.length;
@@ -587,57 +592,6 @@ function renderConfigHighlight() {
   syncConfigEditorScroll();
 }
 
-function validateConfigYaml(text) {
-  const stack = [];
-  const pairs = { "]": "[", "}": "{" };
-  const lines = String(text || "").split("\n");
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (/^\t+/.test(line)) return `YAML 第 ${i + 1} 行使用了 Tab 缩进，请改为空格。`;
-    const body = splitYamlComment(line)[0];
-    for (const ch of body) {
-      if (ch === "[" || ch === "{") stack.push({ ch, line: i + 1 });
-      if (ch === "]" || ch === "}") {
-        const prev = stack.pop();
-        if (!prev || prev.ch !== pairs[ch]) return `YAML 第 ${i + 1} 行括号不匹配。`;
-      }
-    }
-  }
-  if (stack.length) return `YAML 第 ${stack[stack.length - 1].line} 行括号未闭合。`;
-  return "";
-}
-
-function renderConfigRestartActions() {
-  const panel = $("configApplyPanel");
-  const actions = $("configRestartActions");
-  const targetsByMode = new Map();
-  appState.configs.forEach((file) => {
-    const targets = file.impact && Array.isArray(file.impact.restart_targets) ? file.impact.restart_targets : [];
-    targets.forEach((target) => {
-      if (target && target.mode && !targetsByMode.has(target.mode)) {
-        targetsByMode.set(target.mode, target);
-      }
-    });
-  });
-  actions.innerHTML = "";
-  const targets = Array.from(targetsByMode.values());
-  if (!targets.length) {
-    panel.classList.add("hidden");
-    return;
-  }
-
-  panel.classList.remove("hidden");
-  targets.forEach((target) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "secondary";
-    btn.dataset.restartMode = target.mode;
-    btn.textContent = `重启${target.label || target.mode}`;
-    btn.addEventListener("click", () => restartRuntimeTarget(target.mode, btn).catch(console.error));
-    actions.appendChild(btn);
-  });
-}
-
 function setConfigSaveNotice(text = "", kind = "ok") {
   const node = $("configSaveNotice");
   if (configSaveNoticeTimer) {
@@ -653,19 +607,11 @@ function setConfigSaveNotice(text = "", kind = "ok") {
   node.textContent = text;
   node.dataset.kind = kind;
   node.classList.remove("hidden");
-  if (kind === "dirty") return;
+  if (kind === "dirty" || kind === "restart") return;
   configSaveNoticeTimer = window.setTimeout(() => {
     node.classList.add("hidden");
     node.dataset.kind = "";
   }, 2200);
-}
-
-function setConfigRestartNotice(text = "", kind = "ok") {
-  const node = $("configRestartNotice");
-  if (!node) return;
-  node.textContent = text;
-  node.dataset.kind = kind;
-  node.classList.toggle("hidden", !text);
 }
 
 function renderConfigCards() {
@@ -695,7 +641,6 @@ async function loadConfigs() {
   try {
     const data = await api("/api/configs");
     appState.configs = data.files || [];
-    renderConfigRestartActions();
     renderConfigCards();
   } catch (err) {
     reportActionError(err, "配置列表加载失败");
@@ -799,6 +744,7 @@ async function openConfigEditor(name) {
       name: data.name || name,
       path: data.path || `config/${name}`,
       content: data.content || "",
+      revision: data.revision,
       impact: data.impact || null,
     };
     $("configEditorTitle").textContent = data.name || name;
@@ -815,18 +761,18 @@ async function openConfigEditor(name) {
 async function saveConfigEditor() {
   if (!appState.configEditor.name) return;
   const content = $("configEditor").value;
-  const validationError = validateConfigYaml(content);
-  if (validationError) {
-    setConfigSaveNotice("校验失败", "error");
-    showToast(validationError, "error");
-    return;
-  }
   try {
-    const data = await api(`/api/configs/${encodeURIComponent(appState.configEditor.name)}`, "POST", { content });
+    const data = await api(`/api/configs/${encodeURIComponent(appState.configEditor.name)}`, "POST", {
+      content, expected_revision: appState.configEditor.revision,
+    });
+    appState.configEditor.revision = data.revision;
     appState.configEditor.content = content;
     appState.configEditor.impact = data.impact || appState.configEditor.impact;
     await loadConfigs();
-    setConfigSaveNotice("保存成功", "ok");
+    const impact = appState.configEditor.impact;
+    const needsBaseRestart = impact?.restart_targets?.some((target) => target.mode === "base_drive");
+    const notice = needsBaseRestart ? "需重启底盘控制后生效" : impact?.message;
+    setConfigSaveNotice(notice ? `已保存；${notice}` : "保存成功", notice ? "restart" : "ok");
     showToast("配置已保存", "ok");
   } catch (err) {
     reportActionError(err, "配置保存失败");
@@ -834,22 +780,26 @@ async function saveConfigEditor() {
   }
 }
 
-async function restartRuntimeTarget(mode, button) {
-  if (!mode) return;
+async function restartBaseControl(button) {
+  const confirmed = await showAnnotationConfirmDialog({
+    title: "重启底盘控制",
+    message: "将重启底盘控制，并停止当前建图或导航任务。任务不会自动恢复，Web 服务保持运行，是否继续？",
+    confirmText: "确认重启",
+    danger: true,
+  });
+  if (!confirmed) return;
   const original = button.textContent;
   button.disabled = true;
   button.textContent = "重启中…";
   try {
-    const data = await api(`/api/runtime/${encodeURIComponent(mode)}/restart`, "POST", {}, { timeoutMs: 45000 });
+    const data = await api("/api/runtime/base_drive/restart", "POST", {}, { timeoutMs: 45000 });
     if (data.runtime) {
       appState.status = { ...(appState.status || {}), runtime: data.runtime };
       renderRuntimeControls();
     }
-    setConfigRestartNotice("已请求重启", "ok");
     showToast("底盘控制重启请求已发送", "ok");
   } catch (err) {
     reportActionError(err, "重启失败");
-    setConfigRestartNotice("重启失败", "error");
   } finally {
     button.disabled = false;
     button.textContent = original;

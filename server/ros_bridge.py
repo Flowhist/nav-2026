@@ -2,11 +2,15 @@
 import base64
 import json
 import math
+import os
 import queue
+import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+import uuid
 import zlib
 from array import array
 from pathlib import Path
@@ -15,6 +19,7 @@ from typing import Any, Dict, Optional, Tuple
 import yaml
 
 from state_store import StateStore
+from web_support import RequestError
 
 
 from base_control.handle_hid import HidMappingConfig, command_from_axes
@@ -112,6 +117,12 @@ class RosBridge:
         )
         self._cmd_q: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=200)
         self._thread: Optional[threading.Thread] = None
+        self._closed = threading.Event()
+        self._command_lock = threading.Lock()
+        self._manual_pending = None
+        self._stop_pending = None
+        self._save_lock = threading.Lock()
+        self._save_thread = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -120,45 +131,147 @@ class RosBridge:
         self._thread.start()
 
     def command(self, payload: Dict[str, Any]) -> None:
+        with self._command_lock:
+            if self._closed.is_set() or not self.state_store.snapshot()["ros"]["connected"]:
+                raise RequestError(503, "ROS bridge is offline")
+            payload = dict(payload, expires_at=time.monotonic() + 2.0)
+            if payload["type"] == "manual_drive":
+                payload["expires_at"] = time.monotonic() + 0.3
+                if abs(payload["linear"]) <= 1e-6 and abs(payload["angular"]) <= 1e-6:
+                    payload.update(linear=0.0, angular=0.0)
+                    if not self._stop_pending or self._stop_pending["type"] != "cancel_nav":
+                        self._stop_pending = payload
+                    self._manual_pending = None
+                else:
+                    self._manual_pending = payload
+                return
+            if payload["type"] == "cancel_nav":
+                self._stop_pending = payload
+                self._manual_pending = None
+                while not self._cmd_q.empty():
+                    self._cmd_q.get_nowait()
+                return
+            try:
+                self._cmd_q.put_nowait(payload)
+            except queue.Full as exc:
+                raise RequestError(503, "ROS command queue is full") from exc
+
+    def pending_commands(self):
+        with self._command_lock:
+            if self._stop_pending:
+                command = self._stop_pending
+                self._stop_pending = None
+                return [command]
+            commands = []
+            if self._manual_pending:
+                commands.append(self._manual_pending)
+                self._manual_pending = None
+            for _ in range(20):
+                try:
+                    commands.append(self._cmd_q.get_nowait())
+                except queue.Empty:
+                    break
+            return commands
+
+    def stop(self):
+        self._closed.set()
+        if self._thread:
+            self._thread.join(timeout=5.0)
+        if self._save_thread:
+            self._save_thread.join(timeout=5.0)
+
+    def save_map(self, name):
+        if self._closed.is_set() or not self.state_store.snapshot()["ros"]["connected"]:
+            raise RequestError(503, "ROS bridge is offline")
+        if not self._save_lock.acquire(blocking=False):
+            raise RequestError(409, "A map save is already running")
+        job = {"id": uuid.uuid4().hex, "name": name, "state": "running", "started_at": time.time()}
+        self.state_store.update_status({"map_save": {**job, "error": None, "finished_at": None}})
+        self._save_thread = threading.Thread(target=self._save_map_job, args=(job,), daemon=True)
+        self._save_thread.start()
+        return job
+
+    def _save_map_job(self, job):
+        process = None
+        output = tempfile.TemporaryFile()
         try:
-            self._cmd_q.put_nowait(payload)
-        except queue.Full:
-            self.state_store.add_event("warn", "command queue full, drop command", payload)
+            repo = Path(__file__).resolve().parent.parent
+            process = subprocess.Popen(["bash", str(repo / "scripts/tool/save_map.sh"), job["name"]],
+                                       cwd=repo, stdout=output, stderr=subprocess.STDOUT,
+                                       start_new_session=True)
+            deadline = time.monotonic() + 120.0
+            while process.poll() is None:
+                if self._closed.wait(0.1) or time.monotonic() >= deadline:
+                    raise RuntimeError("Map saving canceled or timed out")
+            if process.returncode != 0:
+                output.seek(max(0, output.tell() - 4096))
+                detail = output.read().decode("utf-8", errors="replace").strip()
+                raise RuntimeError(f"Map save failed (exit {process.returncode}): {detail}")
+            self.state_store.update_status({"map_save": {"state": "succeeded", "finished_at": time.time()}})
+            self.state_store.add_event("info", "map saved", job)
+        except Exception as exc:
+            self.state_store.update_status({"map_save": {"state": "failed", "error": str(exc), "finished_at": time.time()}})
+            self.state_store.add_event("error", "map save failed", {"name": job["name"], "error": str(exc)})
+        finally:
+            try:
+                if process and process.poll() is None:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=2.0)
+            finally:
+                output.close()
+                self._save_lock.release()
 
     def _run(self) -> None:
+        context = executor = node = None
         try:
             import rclpy
+            from rclpy.context import Context
             from rclpy.executors import MultiThreadedExecutor
 
-            rclpy.init(args=None)
-            node = _BridgeNode(self.state_store, self._cmd_q, self)
-            executor = MultiThreadedExecutor(num_threads=3)
+            context = Context()
+            rclpy.init(args=None, context=context)
+            node = _BridgeNode(self.state_store, self, context=context)
+            executor = MultiThreadedExecutor(num_threads=3, context=context)
             executor.add_node(node)
 
             self.state_store.update_status({"ros": {"connected": True}})
             self.state_store.add_event("info", "ROS bridge started")
-            executor.spin()
+            while not self._closed.is_set():
+                executor.spin_once(timeout_sec=0.1)
         except Exception as exc:
             self.state_store.update_status({"ros": {"connected": False}})
             self.state_store.add_event("error", f"ROS bridge failed: {exc}")
+        finally:
+            self.state_store.update_status({"ros": {"connected": False}})
+            if executor:
+                executor.shutdown(timeout_sec=2.0)
+            if node:
+                try:
+                    _BridgeNode._publish_web_stop(node)
+                finally:
+                    node.destroy_node()
+            if context and context.ok():
+                context.shutdown()
 
 
 class _BridgeNode:
-    def __new__(cls, state_store: StateStore, cmd_q: "queue.Queue[Dict[str, Any]]", bridge: RosBridge):
+    def __new__(cls, state_store: StateStore, bridge: RosBridge, context=None):
         from rclpy.node import Node
 
         class BridgeNode(Node):
             pass
 
-        obj = BridgeNode("web_control_server")
-        cls._init_bridge(obj, state_store, cmd_q, bridge)
+        obj = BridgeNode("web_control_server", context=context)
+        cls._init_bridge(obj, state_store, bridge)
         return obj
 
     @staticmethod
     def _init_bridge(
         self: Any,
         state_store: StateStore,
-        cmd_q: "queue.Queue[Dict[str, Any]]",
         bridge: RosBridge,
     ) -> None:
         from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
@@ -175,7 +288,6 @@ class _BridgeNode:
         from tf2_ros import Buffer, TransformListener
 
         self.state_store = state_store
-        self.cmd_q = cmd_q
         self.bridge = bridge
 
         self.PoseStamped = PoseStamped
@@ -598,13 +710,16 @@ class _BridgeNode:
 
     @staticmethod
     def _process_commands(self: Any) -> None:
-        while True:
+        for cmd in self.bridge.pending_commands():
+            is_stop = cmd["type"] == "cancel_nav" or (
+                cmd["type"] == "manual_drive" and cmd["linear"] == 0 and cmd["angular"] == 0)
+            if not is_stop and time.monotonic() > cmd["expires_at"]:
+                self.state_store.add_event("warn", "expired command discarded", {"type": cmd["type"]})
+                continue
             try:
-                cmd = self.cmd_q.get_nowait()
-            except queue.Empty:
-                break
-
-            _BridgeNode._handle_command(self, cmd)
+                _BridgeNode._handle_command(self, cmd)
+            except (ValueError, TypeError, RuntimeError) as exc:
+                self.state_store.add_event("error", "command failed", {"type": cmd["type"], "error": str(exc)})
 
     @staticmethod
     def _handle_command(self: Any, cmd: Dict[str, Any]) -> None:
@@ -659,10 +774,6 @@ class _BridgeNode:
             self.state_store.update_status({"robot": {"initial_pose": None}})
             self.state_store.update_scene({"initial_pose": None})
             _BridgeNode._event(self, "info", "initialpose published", {"x": x, "y": y, "yaw_deg": yaw_deg})
-
-        elif ctype == "save_map":
-            name = str(cmd.get("name", "manual_map")).strip() or "manual_map"
-            _BridgeNode._save_map(self, name)
 
         elif ctype == "cancel_nav":
             _BridgeNode._publish_web_stop(self)
@@ -744,22 +855,3 @@ class _BridgeNode:
                 }
             }
         )
-
-    @staticmethod
-    def _save_map(self: Any, name: str) -> None:
-        repo_root = Path(__file__).resolve().parent.parent
-        script = repo_root / "scripts" / "tool" / "save_map.sh"
-        if not script.exists():
-            _BridgeNode._event(self, "error", f"map save script not found: {script}")
-            return
-
-        try:
-            subprocess.Popen(
-                ["bash", str(script), name],
-                cwd=str(repo_root),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            _BridgeNode._event(self, "info", "map save requested", {"name": name})
-        except Exception as exc:
-            _BridgeNode._event(self, "error", f"map save request failed: {exc}", {"name": name})

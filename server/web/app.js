@@ -492,8 +492,8 @@ function bind() {
       const name = await showMapSaveDialog(mapping.launch_args?.map_file || "manual_map");
       if (!name) return;
       setButtonBusy(button, true, "保存中…");
-      await api("/api/map/save", "POST", { name });
-      window.setTimeout(() => loadSavedMaps().catch(console.error), 1800);
+      const result = await api("/api/map/save", "POST", { name });
+      appState.mapSaveJob = result.job.id;
       showToast("已请求保存地图", "ok");
     } catch (err) {
       reportActionError(err, "地图保存失败");
@@ -667,6 +667,7 @@ function bind() {
     setConfigSaveNotice($("configEditor").value === appState.configEditor.content ? "" : "● 未保存", "dirty");
   });
   $("configEditor").addEventListener("scroll", syncConfigEditorScroll);
+  $("btnRestartBaseControl").addEventListener("click", (event) => restartBaseControl(event.currentTarget));
   $("btnRestartFinav").addEventListener("click", (event) => requestFinavPowerAction("restart", event.currentTarget));
   $("btnShutdownFinav").addEventListener("click", (event) => requestFinavPowerAction("shutdown", event.currentTarget));
 
@@ -715,6 +716,16 @@ function bind() {
   });
 
   updateSceneHints();
+  $("eventLevel").addEventListener("change", (event) => {
+    appState.eventLevel = event.target.value;
+    renderDockStream();
+  });
+  $("eventLimit").addEventListener("change", (event) => {
+    appState.eventLimit = Number(event.target.value);
+    if (appState.events.length > appState.eventLimit) appState.eventTruncated = true;
+    appState.events = appState.events.slice(-appState.eventLimit);
+    renderDockStream();
+  });
   renderDockStream();
   renderRuntimeControls();
   loadSavedMaps().catch(console.error);
@@ -724,6 +735,7 @@ function bind() {
 }
 
 bind();
+enhanceSelects();
 pollStatus();
 pollEvents();
 pollDockLogs();

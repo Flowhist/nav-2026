@@ -7,6 +7,12 @@ function createViewport() {
 const appState = {
   page: "mapping",
   lastSeq: 0,
+  eventSession: null,
+  eventTruncated: false,
+  eventLevel: "all",
+  eventLimit: 240,
+  serverSession: null,
+  mapSaveJob: null,
   mapVersion: -1,
   planningMapVersion: -1,
   planVersion: -1,
@@ -82,59 +88,6 @@ let toastTimer = null;
 function fmt(n, digits = 2) {
   if (n === null || n === undefined || Number.isNaN(Number(n))) return "--";
   return Number(n).toFixed(digits);
-}
-
-async function api(path, method = "GET", body = null, options = {}) {
-  const { headers = {}, timeoutMs = 8000, ...rest } = options;
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-  const opt = {
-    method,
-    headers: { "Content-Type": "application/json", ...headers },
-    signal: controller.signal,
-    ...rest,
-  };
-  if (body !== null && body !== undefined) opt.body = JSON.stringify(body);
-  try {
-    const res = await fetch(path, opt);
-    if (!res.ok) {
-      const err = new Error(await readApiError(res));
-      err.status = res.status;
-      setConnectionState("online");
-      throw err;
-    }
-    setConnectionState("online");
-    return res.json();
-  } catch (err) {
-    if (!err?.status) setConnectionState("offline");
-    if (err?.name === "AbortError") throw new Error("请求超时，请检查 Finav 服务连接");
-    throw err;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-
-function setConnectionState(state) {
-  const badge = $("connectionBadge");
-  const label = $("connectionBadgeText");
-  if (!badge || !label) return;
-  badge.classList.remove("pending", "online", "offline");
-  badge.classList.add(state);
-  label.textContent = state === "online" ? "在线" : state === "offline" ? "连接中断" : "正在连接";
-}
-
-async function readApiError(res) {
-  try {
-    const data = await res.json();
-    if (data && data.error) {
-      return typeof data.error === "object"
-        ? String(data.error.message || data.error.code || res.statusText)
-        : String(data.error);
-    }
-  } catch (_err) {
-    // fall through to HTTP status text
-  }
-  return `${res.status} ${res.statusText}`;
 }
 
 function showToast(message, kind = "ok") {
@@ -723,14 +676,16 @@ function renderStatus(status) {
     node.textContent = idle ? "待命" : ok ? "正常" : "异常";
     node.dataset.state = idle ? "idle" : ok ? "ok" : "error";
   };
-  const runtimeLabel = (item) => item?.stopping ? "停止中" : item?.running ? "运行中" : "未运行";
+  const runtimeLabel = (item) => ({ ready: "已就绪", starting: "启动中", not_ready: "未就绪（超过 30 秒）",
+    failed: "启动失败", stopping: "停止中", stopped: "未运行" })[item?.readiness?.state]
+    || (item?.running ? "运行中" : "未运行");
   const mapReceived = Number.isFinite(age("map"));
   const mappingReady = !!ros.connected && fresh("scan") && fresh("odom") && fresh("tf_odom_base_link");
   const navigationReady = mappingReady && mapReceived && fresh("tf_map_odom", 3.0);
   const activeRuntime = runtime.mapping?.running ? "建图运行中" : runtime.navigation?.running ? "导航运行中" : "无建图/导航任务";
   const overallOk = !!ros.connected && (fresh("scan") || (!runtime.mapping?.running && !runtime.navigation?.running));
 
-  setConnectionState(ros.connected ? "online" : "offline");
+  setConnectionState(ros.connected ? "online" : "offline", "ros");
 
   setText("rosConnected", ros.connected ? "在线" : "离线");
   setText("tfMapOdom", `${fmt(tf.map_odom)} Hz`);

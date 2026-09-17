@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import threading
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 
@@ -8,6 +9,7 @@ class StateStore:
     def __init__(self, max_history: int = 2000) -> None:
         self._lock = threading.Lock()
         self._seq = 0
+        self.session_id = uuid.uuid4().hex
         self._max_history = max_history
         self._history: List[Dict[str, Any]] = []
         self._status: Dict[str, Any] = {
@@ -100,7 +102,40 @@ class StateStore:
 
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
-            return self._deep_copy(self._status)
+            status = self._deep_copy(self._status)
+        status["session_id"] = self.session_id
+        self._add_readiness(status)
+        return status
+
+    @staticmethod
+    def _add_readiness(status):
+        ros = status.get("ros", {})
+        ages = ros.get("last_seen", {})
+        now = time.time()
+        for mode in ("mapping", "navigation"):
+            runtime = status.get("runtime", {}).get(mode, {})
+            elapsed = max(0.0, now - (runtime.get("started_at") or now))
+            required = ["scan", "odom", "tf_odom_base_link"]
+            if mode == "navigation":
+                required.append("tf_map_odom")
+            missing = [key for key in required if ages.get(key) is None or ages[key] > 3.0]
+            if not ros.get("connected"):
+                missing.insert(0, "ros")
+            if mode == "navigation" and (ages.get("map") is None or ages["map"] > elapsed + 1.0):
+                missing.append("map")
+            if runtime.get("stopping"):
+                state = "stopping"
+            elif runtime.get("error") or runtime.get("active_state") == "failed":
+                state = "failed"
+            elif not runtime.get("running"):
+                state = "stopped"
+            elif not missing:
+                state = "ready"
+            elif elapsed >= 30:
+                state = "not_ready"
+            else:
+                state = "starting"
+            runtime["readiness"] = {"state": state, "missing": missing}
 
     def update_scene(
         self,
@@ -187,10 +222,16 @@ class StateStore:
                 self._history = self._history[-self._max_history :]
             return evt
 
-    def get_history(self, since_seq: int = 0, limit: int = 200) -> List[Dict[str, Any]]:
+    def history_page(self, since_seq=0, limit=200, session_id=None):
         with self._lock:
-            data = [x for x in self._history if x["seq"] > since_seq]
-            return self._deep_copy(data[-max(1, min(limit, 1000)) :])
+            reset = session_id != self.session_id or since_seq > self._seq
+            if reset:
+                since_seq = 0
+            earliest = self._history[0]["seq"] if self._history else self._seq + 1
+            data = [x for x in self._history if x["seq"] > since_seq][:max(1, min(limit, 1000))]
+            return {"events": self._deep_copy(data), "session_id": self.session_id,
+                    "reset": reset, "truncated": since_seq < earliest - 1,
+                    "latest_seq": data[-1]["seq"] if data else self._seq}
 
     def _deep_update(self, base: Dict[str, Any], patch: Dict[str, Any]) -> None:
         for k, v in patch.items():

@@ -31,7 +31,7 @@
 | `/handle/gear` | `std_msgs/UInt16` | 手柄档位 1～5 |
 | `/nav_task/speed_limit` | `std_msgs/Float32` | 路线速度限制 |
 
-规划器的 goal/path/status 与跟踪器 status 使用 `/nav_task/` 内部话题，不作为外部目标入口。可选地点语音桥接通过 `/nav_voice_bridge/voice_command` 接收地点名称，查 `.locations.yaml` 后发布 `/goal_pose`。
+规划器的 goal/path/status 与跟踪器 status 使用 `/nav_task/` 内部话题，不作为外部目标入口。可选地点语音桥接通过 `/nav_voice_bridge/voice_command` 接收地点名称，优先读取 `.editor.yaml` 中的地点，没有编辑文档时读取旧 `.locations.yaml`，随后发布 `/goal_pose`。
 
 ## 地图、定位与 TF
 

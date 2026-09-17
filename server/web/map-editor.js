@@ -415,6 +415,7 @@ class FinavMapEditor {
     html += `<div class="editor-danger-zone"><button data-editor-action="delete-object" type="button">删除${typeLabel}</button></div>`;
     panel.innerHTML = html;
     this.bindProperties();
+    enhanceSelects(panel);
   }
 
   renderMapSummary() {
@@ -833,7 +834,6 @@ class FinavMapEditor {
       // conflict cannot be hidden by the original centerline.
       if (preview?.points?.length) this.drawRoutePreview(ctx, preview, selected);
       if (selected && Number.isInteger(this.selection?.segmentIndex)) this.drawSelectedRouteSegment(ctx, route, this.selection.segmentIndex);
-      this.drawRouteDirection(ctx, route, route.waypoints);
       if (this.active) route.waypoints.forEach((point, index) => {
         const screen = this.screen(point);
         ctx.beginPath(); ctx.arc(screen.x, screen.y, selected ? 7 : 5, 0, Math.PI * 2);
@@ -841,6 +841,7 @@ class FinavMapEditor {
         ctx.strokeStyle = "#2f8568"; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
         if (selected) { ctx.fillStyle = this.selection?.childId === point.id ? "#fff" : "#234e41"; ctx.font = "10px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(String(index + 1), screen.x, screen.y); }
       });
+      this.drawRouteDirection(ctx, route, route.waypoints);
     });
   }
 

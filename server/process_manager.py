@@ -54,6 +54,7 @@ class RuntimeManager:
         self.state_store.update_scene(
             {
                 "map": None,
+                "planning_map": None,
                 "scan": {
                     "frame_id": "base_link",
                     "encoding": "uint16-mm-base64",
@@ -70,6 +71,7 @@ class RuntimeManager:
                 "initial_pose": None,
             },
             map_changed=True,
+            planning_map_changed=True,
             plan_changed=True,
         )
 
@@ -469,18 +471,20 @@ class RuntimeManager:
 
         log_path = self.runtime_dir / f"{mode}.log"
         if not log_path.exists():
-            return {"mode": mode, "lines": [], "path": str(log_path), "updated_at": None}
+            return {"mode": mode, "lines": [], "path": str(log_path), "updated_at": None, "version": "missing"}
 
         stat = log_path.stat()
         line_limit = max(20, min(int(tail), 2000))
+        version = f"{stat.st_ino}:{stat.st_mtime_ns}:{stat.st_size}:{line_limit}"
         with self._lock:
             cached = self._log_cache.get(mode)
-            if cached and cached.get("mtime") == stat.st_mtime and cached.get("size") == stat.st_size and cached.get("tail") == line_limit:
+            if cached and cached.get("version") == version:
                 return {
                     "mode": mode,
                     "lines": list(cached.get("lines", [])),
                     "path": str(log_path),
                     "updated_at": stat.st_mtime,
+                    "version": version,
                 }
 
         try:
@@ -490,12 +494,10 @@ class RuntimeManager:
 
         with self._lock:
             self._log_cache[mode] = {
-                "mtime": stat.st_mtime,
-                "size": stat.st_size,
-                "tail": line_limit,
+                "version": version,
                 "lines": list(lines),
             }
-        return {"mode": mode, "lines": lines, "path": str(log_path), "updated_at": stat.st_mtime}
+        return {"mode": mode, "lines": lines, "path": str(log_path), "updated_at": stat.st_mtime, "version": version}
 
     def clear_log(self, mode: str) -> Dict[str, object]:
         if mode not in {"mapping", "navigation", "relocate", "base", "handle", "router", "base_drive"}:

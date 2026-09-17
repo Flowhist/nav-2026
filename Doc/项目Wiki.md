@@ -44,7 +44,7 @@ nav_workspace/src/
 5. 导航页选择地图、启动导航，确认定位后下发目标点或路线。
 6. 测试结束执行 `systemctl --user stop finav.target`。
 
-地图保存在 `maps/`，地图栅格、SLAM 定位数据和编辑数据应一起备份。`<地图名>.editor.yaml` 保存禁行区及路线，`.locations.yaml` 保存地点；地图默认被 Git 忽略，推送代码不会备份地图。
+地图保存在 `maps/`，地图栅格、SLAM 定位数据和编辑数据应一起备份。`<地图名>.editor.yaml` 统一保存地点、禁行区及路线；没有编辑文档时兼容读取旧 `.locations.yaml`。地图默认被 Git 忽略，推送代码不会备份地图。
 
 ## 改哪里
 
@@ -65,6 +65,10 @@ nav_workspace/src/
 
 ## 开发与验证
 
+Web 后续工作见 [Web 待优化清单](Web待优化清单.md)，功能与操作说明见 README。
+
+Web UI 复用 `server/web/styles.css` 的颜色、圆角、间距及已有组件。选项下拉统一使用地图选择器的 `.nav-select` 样式；普通 `select` 通过 `app-select.js` 的 `enhanceSelects(root)` 增强，动态生成字段后也需调用。新增控件须检查选中、禁用、键盘操作，以及桌面和移动端菜单边界，避免重新引入浏览器原生弹出菜单。
+
 优先修改对应仓库，保留 ROS 接口；新增运动来源应进入仲裁器，不直接向 `/cmd_vel` 发指令。构建时显式指定包路径，避免扫描到重复包。
 
 底盘无硬件检查可在工作区执行：
@@ -75,4 +79,4 @@ source install/local_setup.bash
 colcon test --base-paths src/base_control --packages-select base_control
 ```
 
-目前导航仓库没有可直接运行的 `tests/` 测试集。构建不代替实机验收：运动改动需验证松杆停车、持续指令、接管及急停；服务改动需验证独立重启、模式切换和开机行为。
+Web 离线回归位于 `server/tests/`，运行命令见 README。构建和离线测试不代替实机验收：运动改动需验证松杆停车、持续指令、接管及急停；服务改动需验证独立重启、模式切换和开机行为。

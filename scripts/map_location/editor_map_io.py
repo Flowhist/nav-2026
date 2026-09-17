@@ -60,8 +60,8 @@ class MapData:
             self.height - 1 - local_y / self.resolution,
         )
 
-    def preview_payload(self) -> dict:
-        return {
+    def preview_payload(self, include_pixels: bool = True) -> dict:
+        payload = {
             "name": self.name,
             "width": self.width,
             "height": self.height,
@@ -72,9 +72,11 @@ class MapData:
                 "yaw_deg": math.degrees(self.origin_yaw),
             },
             "source_sha256": self.source_sha256,
-            "pixels": self.pixels.reshape(-1).tolist(),
             "occupancy": self.occupancy.reshape(-1).tolist(),
         }
+        if include_pixels:
+            payload["pixels"] = self.pixels.reshape(-1).tolist()
+        return payload
 
 
 def validate_map_name(name: str) -> str:
