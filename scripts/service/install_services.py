@@ -15,7 +15,7 @@ def unit_quote(value: str) -> str:
 
 def render_units(repo_dir: Path, state_dir: Path) -> dict[str, str]:
     units = {}
-    units["base_control.service"] = render_base_unit(repo_dir.parent.parent / "install/local_setup.bash", state_dir)
+    units["base-control.service"] = render_base_unit(repo_dir.parent.parent / "install/local_setup.bash", state_dir)
     for mode in ("web", "mapping", "navigation"):
         relationships = "PartOf=finav.target\n"
         if mode in ("mapping", "navigation"):
@@ -24,7 +24,7 @@ def render_units(repo_dir: Path, state_dir: Path) -> dict[str, str]:
             # Avoid ordering cycles: mapping orders after navigation for both transitions.
             if mode == "navigation":
                 relationships = relationships.replace("After=finav-mapping.service\n", "")
-            relationships += "BindsTo=base_control.service\nAfter=base_control.service\n"
+            relationships += "BindsTo=base-control.service\nAfter=base-control.service\n"
         units[f"finav-{mode}.service"] = (
             f"[Unit]\nDescription=Finav {mode}\n{relationships}\n"
             "[Service]\nType=exec\n"
@@ -38,8 +38,8 @@ def render_units(repo_dir: Path, state_dir: Path) -> dict[str, str]:
         )
     units["finav.target"] = (
         "[Unit]\nDescription=base_control and web services\n"
-        "Wants=base_control.service finav-web.service\n"
-        "After=base_control.service finav-web.service\n\n"
+        "Wants=base-control.service finav-web.service\n"
+        "After=base-control.service finav-web.service\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
     return units

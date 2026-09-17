@@ -15,7 +15,7 @@ from process_manager import RuntimeManager
 
 
 UNITS = {mode: f"finav-{mode}.service" for mode in ("base", "web", "mapping", "navigation")}
-UNITS["base"] = "base_control.service"
+UNITS["base"] = "base-control.service"
 BASE_MODES = {"base", "base_drive", "handle", "router"}
 MANAGED_MODES = BASE_MODES | {"mapping", "navigation"}
 

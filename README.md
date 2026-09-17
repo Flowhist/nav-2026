@@ -1,42 +1,105 @@
 # Finav
 
-Finav 是一个基于 ROS 2 Humble 的实机导航项目，包含 Hinson HE-3051 激光雷达、DM-IMU、EKF 融合、SLAM Toolbox 建图/定位、自研路径规划与路径跟踪、Web 调试后台和 Gazebo/RViz 仿真环境。WHILL 底盘、手柄及控制仲裁归同级独立仓库 `base_control`；详见 [底盘仓库拆分](Doc/底盘仓库拆分.md)。
+Finav 是一个基于 ROS 2 Humble 的实机导航项目，包含 Hinson HE-3051 激光雷达、DM-IMU、EKF 融合、SLAM Toolbox 建图/定位、自研路径规划与路径跟踪、Web 调试后台和 Gazebo/RViz 仿真环境。WHILL 底盘、手柄及控制仲裁归同级独立仓库 `base_control`；仓库分工见 [新人入门](Doc/项目Wiki.md)。
 
 新开发者请先阅读项目 Wiki：
 
 - [Doc/项目Wiki.md](Doc/项目Wiki.md)
 
-Wiki 中按模块说明了系统由哪些部分组成、每部分的大致原理、关键话题/坐标系、对应源码和配置文件位置，以及常见排查入口。后续参与开发时，建议先根据自己的任务领域阅读 Wiki 中的对应章节，再进入具体代码。
+文档按任务分为四份：[新人入门](Doc/项目Wiki.md)、[服务部署](Doc/服务部署.md)、[导航接口](Doc/navigation_topics.md)、[驱动与依赖](Doc/驱动与依赖清单.md)。先跑通服务，再查对应模块的代码与配置。
 
 ## 快速入口
 
-构建：
+在工作区根目录执行构建和服务安装；`src/` 下需要同时有 `finav` 和 `base_control` 两个仓库：
 
 ```bash
+cd /home/embotic/nav_workspace
 source /opt/ros/humble/setup.bash
-colcon build --base-paths src/base_control src/finav --packages-select base_control finav
-source install/setup.bash
+colcon build --base-paths src/base_control src/finav --packages-select base_control finav --symlink-install
+source install/local_setup.bash
+python3 src/finav/scripts/service/install_services.py
 ```
 
-如果工作区中存在另一个同名 `finav` 包，使用：
+上述构建已限定包路径，避免工作区存在同名包时冲突。安装脚本只生成当前用户的 systemd 单元，不启动服务、不启用自启动；不要用 sudo 执行安装脚本。仓库位置改变后需重新构建、安装。
+
+## 服务启动与管理
+
+所有 `systemctl --user` 命令均由安装服务的机器人用户执行，不加 sudo。启动底盘前确认现场安全、手柄回中。
+
+| 服务单元 | 职责 |
+| --- | --- |
+| `base-control.service` | 底盘驱动、手柄和速度仲裁 |
+| `finav-web.service` | 网页后台和 ROS 状态桥接 |
+| `finav-mapping.service` | 建图链路 |
+| `finav-navigation.service` | 导航链路 |
+| `finav.target` | 统一管理上述服务；启动时只拉起底盘和 Web |
+
+### 日常启动与停止
 
 ```bash
-colcon build --base-paths src/base_control src/finav --packages-select base_control finav
-source install/setup.bash
+# 启动底盘和网页
+systemctl --user start finav.target
+
+# 也可以分别启动
+systemctl --user start base-control.service
+systemctl --user start finav-web.service
+
+# 只重启网页，不影响手柄控制
+systemctl --user restart finav-web.service
+
+# 停止全部服务，包括已启动的建图和导航
+systemctl --user stop finav.target
 ```
 
-实机常用入口：
+浏览器访问 `http://<机器人IP>:8010`，机器人本机可访问 `http://localhost:8010`。在网页中启动、停止建图或导航；导航前先选择地图，建图与导航不能同时运行。
+
+单独停止服务：
 
 ```bash
-# 启动底盘、STM32 手柄、Web 后台和控制路由
-bash start_finav.sh
-
-# 单独启动建图链路
-ros2 launch finav map.launch.py
-
-# 单独启动导航链路
-ros2 launch finav nav.launch.py
+systemctl --user stop finav-mapping.service
+systemctl --user stop finav-navigation.service
+systemctl --user stop finav-web.service
+systemctl --user stop base-control.service
 ```
+
+停止或重启底盘会同时停止建图、导航；单独停止或重启 Web 不会停止这些服务。整套重启用 `systemctl --user restart finav.target`，只恢复底盘和 Web，不恢复之前的导航任务。
+
+### 状态和日志
+
+```bash
+systemctl --user status base-control.service finav-web.service finav-mapping.service finav-navigation.service --no-pager
+
+# 节点输出：底盘日志同时包含手柄和仲裁器
+tail -n 50 -F ~/.local/state/finav/base.log
+tail -n 50 -F ~/.local/state/finav/web.log
+tail -n 50 -F ~/.local/state/finav/mapping.log
+tail -n 50 -F ~/.local/state/finav/navigation.log
+
+# 服务启动器错误
+journalctl --user -u base-control.service -u finav-web.service -n 100 --no-pager
+```
+
+日志窗口按 `Ctrl+C` 只退出查看，不会停止服务。`active` 仅表示服务进程在运行，设备连接和定位是否就绪仍需查看日志或网页状态。
+
+### 开机自启动
+
+```bash
+# 无需登录即可运行用户服务；在机器人用户的终端执行
+sudo loginctl enable-linger "$USER"
+systemctl --user enable finav.target
+
+# 检查是否已启用
+systemctl --user is-enabled finav.target
+
+# 取消下次开机自启动，不停止当前服务
+systemctl --user disable finav.target
+```
+
+开机仅启动底盘和 Web，建图、导航仍由网页按需启动。`enable` 不会立即启动服务；需要立即启动时另执行 `systemctl --user start finav.target`。
+
+底盘配置位于 `base_control/config/`，导航配置位于 `finav/config/`；保存后按网页提示重启对应服务。详细部署、参数和回退说明见 [服务部署](Doc/服务部署.md)。已安装服务的机器不要再运行旧 `start_finav.sh` 或另起同一套 ROS 节点。
+
+## 项目目录
 
 常用目录：
 
@@ -75,7 +138,9 @@ ros2 launch finav nav.launch.py
 - `ros_bridge.py`
   - ROS2 桥接层，负责订阅 `/map`、`/scan`、`/odom`、`/plan`、`/tf`，并处理网页控制命令。
 - `process_manager.py`
-  - 建图 / 导航运行时管理，负责启动 `map.launch.py`、`nav.launch.py`，读取日志，调用清理脚本。
+  - 未安装服务时的进程管理及共用日志、重定位辅助功能。
+- `systemd_runtime.py`
+  - 已安装服务时的运行管理，负责服务启停、状态查询和模式切换。
 - `state_store.py`
   - 线程安全状态仓库，保存 `status`、`scene`、事件历史。
 - `map_utils.py`
@@ -93,7 +158,7 @@ ros2 launch finav nav.launch.py
 - `web/app.js`
   - 前端主交互绑定、导航拖拽、页面切换、初始化入口。
 - `runtime/`
-  - `mapping.log`、`navigation.log` 运行日志输出目录。
+  - 仅旧进程模式使用；服务模式日志位于 `~/.local/state/finav/`。
 
 ## 页面与工作流
 
@@ -105,10 +170,10 @@ ros2 launch finav nav.launch.py
   - 地图保存
 - “开始建图”会调用：
   - `POST /api/runtime/mapping/start`
-  - 后端实际执行 `ros2 launch finav map.launch.py`
+  - 服务模式启动 `finav-mapping.service`，由服务运行 `map.launch.py`
 - “结束建图”或离开建图页会调用：
   - `POST /api/runtime/mapping/stop`
-  - 后端执行 `scripts/tool/clean_map.sh`
+  - 服务模式停止 `finav-mapping.service` 及其子进程
 
 ### 2. 导航页
 
@@ -120,10 +185,10 @@ ros2 launch finav nav.launch.py
   - 停止 / 取消
 - “开始导航”会调用：
   - `POST /api/runtime/navigation/start`
-  - 后端实际执行 `ros2 launch finav nav.launch.py`
+  - 服务模式启动 `finav-navigation.service`，由服务运行 `nav.launch.py`
 - “结束导航”或离开导航页会调用：
   - `POST /api/runtime/navigation/stop`
-  - 后端执行 `scripts/tool/clean_nav.sh`
+  - 服务模式停止 `finav-navigation.service` 及其子进程
 
 ### 3. 地图预览页
 
@@ -132,10 +197,10 @@ ros2 launch finav nav.launch.py
 
 ### 4. 配置文件页
 
-- 从 `config/` 读取 `.yaml/.yml` 文件列表。
+- 从导航仓库 `config/` 和底盘仓库的配置目录读取 `.yaml/.yml` 文件列表。
 - 支持网页直接查看、编辑、保存。
 - 当前是“纯文本编辑 + 前端轻量 YAML 高亮”，未做 YAML 语法校验。
-- 可关闭或整套重启当前 `start_finav.sh` 监督的 Finav 服务；“关闭”不会关闭 Jetson 系统。
+- 可通过 `finav.target` 关闭或整套重启 Finav 服务；“关闭”不会关闭 Jetson 系统。
 
 ### 5. 运行状态中心
 
@@ -212,7 +277,9 @@ ros2 launch finav nav.launch.py
 
 ## 运行时管理
 
-`process_manager.py` 负责：
+服务模式使用 `systemd_runtime.py` 管理独立服务，日志写入 `~/.local/state/finav/`。Web 通过 systemd 查询运行状态，重启 Web 不会接管或终止其他服务进程。
+
+未安装服务时，旧进程模式由 `process_manager.py` 负责：
 
 - 启动建图 / 导航 launch
 - 维护 `mapping` / `navigation` 进程状态
@@ -371,24 +438,26 @@ ros2 launch finav nav.launch.py
 
 ## 启动
 
-只起网页后台时，在工作区根目录执行：
+已安装服务时，只启动网页后台：
+
+```bash
+systemctl --user start finav-web.service
+```
+
+同时启动底盘和网页：
+
+```bash
+systemctl --user start finav.target
+```
+
+浏览器访问 `http://<机器人IP>:8010`。完整管理命令见上方“服务启动与管理”。
+
+仅在未安装服务的开发环境中，可从工作区根目录手动启动 Web：
 
 ```bash
 source /opt/ros/humble/setup.bash
 source install/local_setup.bash
 python3 src/finav/server/run_server.py --host 0.0.0.0 --port 8010
-```
-
-如果需要把底盘、STM32 手柄与网页后台一起拉起，直接在项目根目录执行：
-
-```bash
-bash start_finav.sh
-```
-
-浏览器访问：
-
-```text
-http://<你的IP>:8010
 ```
 
 ## 调试建议
@@ -397,8 +466,8 @@ http://<你的IP>:8010
 - 看 ROS bridge 是否正常：`/api/status`
 - 看实时场景是否推送：`/api/stream?mode=mapping`
 - 看运行日志：
-  - `server/runtime/mapping.log`
-  - `server/runtime/navigation.log`
+  - `~/.local/state/finav/mapping.log`
+  - `~/.local/state/finav/navigation.log`
 - 如果网页按钮已点但功能没起来：
   - 先看运行日志
   - 再看 `events` 里的 `start requested / cleanup started / process exited`
