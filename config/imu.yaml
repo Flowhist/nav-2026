@@ -20,7 +20,7 @@ dm_imu:
 
     # EKF 不再融合六轴 IMU 的绝对 yaw，保留下列历史实测值但禁用补偿。
     yaw_drift_compensation_enable: false
-    yaw_drift_rate_deg_s: -0.01626810
+    yaw_drift_rate_deg_s: -0.01726810
 
     # 陀螺仪固定零偏（多轮静止采样结果），启动后立即应用。
     gyro_bias_x: 0.0

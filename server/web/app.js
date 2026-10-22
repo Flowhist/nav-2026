@@ -1,6 +1,7 @@
 function setNavPlacementMode(mode) {
   appState.navPlacementMode = mode;
   $("btnArmInit").classList.toggle("active", mode === "initial");
+  $("btnMappingInitialPose").classList.toggle("active", mode === "initial" && appState.page === "mapping");
   $("btnArmGoal").classList.toggle("active", mode === "goal");
   updateSceneHints();
 }
@@ -166,7 +167,8 @@ async function finishNavDrag(event) {
   const dy = world.y - drag.start.y;
   const yawDeg = Math.hypot(dx, dy) < 0.03 ? 0 : Math.atan2(dy, dx) * 180 / Math.PI;
   const body = { x: drag.start.x, y: drag.start.y, yaw_deg: yawDeg };
-  const endpoint = appState.navPlacementMode === "initial" ? "/api/nav/initialpose" : "/api/nav/goal";
+  const endpoint = appState.navPlacementMode === "initial"
+    ? (appState.page === "mapping" ? "/api/mapping/initialpose" : "/api/nav/initialpose") : "/api/nav/goal";
 
   appState.navDrag = null;
   if (canvas.releasePointerCapture) {
@@ -374,7 +376,7 @@ function confirmPageSwitchStop(mode, page) {
 
 async function setPage(page) {
   if (appState.page === "preview" && page !== "preview" && appState.previewEditActive) {
-    await window.finavMapEditor?.exit();
+    if (await window.finavMapEditor?.exit() === false) return;
   }
   if (page !== appState.page) {
     if (appState.page === "mapping" && page !== "mapping" && getRuntime("mapping").running) {
@@ -390,8 +392,10 @@ async function setPage(page) {
   }
 
   appState.page = page;
+  $("navSpeedPanel").open = false;
   manualControlOnPageChange(page);
   toggleNavSelect("navMapPanel", false);
+  toggleNavSelect("mappingMapPanel", false);
   toggleNavSelect("navLocationPanel", false);
   toggleNavSelect("navRoutePanel", false);
   toggleNavSelect("previewMapPanel", false);
@@ -404,6 +408,7 @@ async function setPage(page) {
   if (!isLivePage()) setStatusExpanded(false);
   if (page === "preview") loadSavedMaps().catch(console.error);
   if (page === "navigation" && !appState.savedMaps.length) loadSavedMaps().catch(console.error);
+  if (page === "navigation") loadNavigationSpeed();
   if (page === "configs") {
     showConfigOverview();
     loadConfigs().catch(console.error);
@@ -437,9 +442,57 @@ function bind() {
     btn.addEventListener("click", () => toggleHelp(btn.dataset.help));
   });
 
-  $("navMapToggle").addEventListener("click", () => {
-    if (!appState.savedMaps.length) loadSavedMaps().catch(console.error);
-    toggleNavSelect("navMapPanel");
+  ["nav", "mapping"].forEach((prefix) => {
+    const panel = $(`${prefix}MapPanel`);
+    const control = $(`${prefix}MapToggle`);
+    const menu = panel.querySelector(".nav-select-menu");
+    const list = panel.querySelector(".nav-select-options");
+    function positionMenu() {
+      const rect = control.getBoundingClientRect();
+      const boundary = panel.closest(".inspector").getBoundingClientRect();
+      const below = Math.min(innerHeight - 12, boundary.bottom) - rect.bottom - 8;
+      const above = rect.top - Math.max(12, boundary.top) - 8;
+      const upward = below < Math.min(list.scrollHeight + 14, 254) && above > below;
+      menu.style.position = "fixed";
+      menu.style.width = `${Math.min(rect.width, innerWidth - 24)}px`;
+      menu.style.left = `${Math.max(12, Math.min(rect.left, innerWidth - rect.width - 12))}px`;
+      menu.style.right = "auto";
+      menu.style.top = upward ? "auto" : `${rect.bottom + 6}px`;
+      menu.style.bottom = upward ? `${innerHeight - rect.top + 6}px` : "auto";
+      list.style.maxHeight = `${Math.max(40, Math.min(240, (upward ? above : below) - 14))}px`;
+    }
+    control.addEventListener("click", () => {
+      if (!appState.savedMaps.length) loadSavedMaps().catch(console.error);
+      toggleNavSelect(panel.id);
+      if (panel.classList.contains("open")) positionMenu();
+    });
+    panel.addEventListener("keydown", (event) => {
+      if (control.disabled) return;
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+        event.preventDefault();
+        event.stopPropagation();
+        const options = Array.from(panel.querySelectorAll('[role="option"]'));
+        const index = options.indexOf(document.activeElement);
+        const open = panel.classList.contains("open");
+        toggleNavSelect(panel.id, true);
+        positionMenu();
+        const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1
+          : !open || index < 0 ? Math.max(0, options.findIndex(item => item.getAttribute("aria-selected") === "true"))
+          : (index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+        options[next]?.focus();
+      } else if (event.key === "Escape" || event.key === "Tab") {
+        toggleNavSelect(panel.id, false);
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          control.focus();
+        }
+      }
+    });
+    document.addEventListener("scroll", event => {
+      if (panel.classList.contains("open") && !menu.contains(event.target)) positionMenu();
+    }, true);
+    window.addEventListener("resize", () => toggleNavSelect(panel.id, false));
   });
   $("previewMapToggle").addEventListener("click", () => {
     if (!appState.savedMaps.length) loadSavedMaps().catch(console.error);
@@ -456,6 +509,7 @@ function bind() {
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".help-wrap")) document.querySelectorAll(".map-help").forEach((panel) => panel.classList.add("hidden"));
     if (!event.target.closest("#navMapPanel")) toggleNavSelect("navMapPanel", false);
+    if (!event.target.closest("#mappingMapPanel")) toggleNavSelect("mappingMapPanel", false);
     if (!event.target.closest("#navLocationPanel")) toggleNavSelect("navLocationPanel", false);
     if (!event.target.closest("#navRoutePanel")) toggleNavSelect("navRoutePanel", false);
     if (!event.target.closest("#previewMapPanel")) toggleNavSelect("previewMapPanel", false);
@@ -466,6 +520,13 @@ function bind() {
   });
 
   $("btnStartMapping").addEventListener("click", () => startRuntime("mapping").catch(console.error));
+  $("btnContinueMapping").addEventListener("click", () => {
+    if (!appState.mappingMapName) return;
+    startRuntime("mapping", appState.mappingMapName).catch(console.error);
+  });
+  $("btnMappingInitialPose").addEventListener("click", () => setNavPlacementMode(appState.navPlacementMode === "initial" ? null : "initial"));
+  $("btnMappingRelocate").addEventListener("click", () => runMappingAction("relocate"));
+  $("btnMappingResume").addEventListener("click", () => runMappingAction("resume"));
   $("btnStopMapping").addEventListener("click", async () => {
     const confirmed = await showAnnotationConfirmDialog({
       title: "结束建图",
@@ -489,7 +550,7 @@ function bind() {
     const button = $("btnSaveMap");
     try {
       const mapping = getRuntime("mapping");
-      const name = await showMapSaveDialog(mapping.launch_args?.map_file || "manual_map");
+      const name = await showMapSaveDialog(mapping.launch_args?.map_file ? `${mapping.launch_args.map_file}_extended` : "manual_map");
       if (!name) return;
       setButtonBusy(button, true, "保存中…");
       const result = await api("/api/map/save", "POST", { name });
@@ -613,9 +674,9 @@ function bind() {
       await api("/api/nav/location", "POST", { name });
       appState.navDestinationName = name;
       renderRuntimeControls();
-      showToast(`已发送地点“${name}”`, "ok");
+      showToast(`已发送目的地“${name}”`, "ok");
     } catch (err) {
-      reportActionError(err, "地点导航失败");
+      reportActionError(err, "目的地导航请求失败");
     }
   };
   $("btnNavLocation").addEventListener("click", () => sendNavLocation());

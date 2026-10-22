@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+import yaml
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from rclpy.node import Node
@@ -41,31 +42,9 @@ def set_yaw_orientation(orientation, yaw_rad: float) -> None:
 
 
 def _parse_simple_yaml(path: Path) -> Dict[str, object]:
-    data: Dict[str, object] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        key = key.strip()
-        value = value.strip()
-        if value.startswith("[") and value.endswith("]"):
-            items: List[object] = []
-            for item in value[1:-1].split(","):
-                item = item.strip()
-                if not item:
-                    continue
-                try:
-                    items.append(float(item))
-                except ValueError:
-                    items.append(item.strip("'\""))
-            data[key] = items
-            continue
-        try:
-            data[key] = float(value) if "." in value or "e" in value.lower() else int(value)
-            continue
-        except ValueError:
-            data[key] = value.strip("'\"")
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"invalid map YAML: {path}")
     return data
 
 
@@ -188,6 +167,16 @@ class AutoLocalize(Node):
         self.declare_parameter("match_sigma_m", 0.16)
         self.declare_parameter("min_score", 0.40)
         self.declare_parameter("min_score_gap", 0.001)
+        self.declare_parameter("hypothesis_separation_m", 0.50)
+        self.declare_parameter("hypothesis_separation_deg", 15.0)
+        self.declare_parameter("coarse_match_sigma_m", 0.30)
+        self.declare_parameter("ray_obstacle_penalty", 0.35)
+        self.declare_parameter("fast_accept_score", 0.70)
+        self.declare_parameter("candidate_ray_validation", False)
+        self.declare_parameter("continuous_refinement", False)
+        self.declare_parameter("continuous_refine_candidates", 3)
+        self.declare_parameter("precomputed_scores", False)
+        self.declare_parameter("multiscale_coarse_search", False)
         self.declare_parameter("free_candidate_stride", 1)
         self.declare_parameter("debug", False)
 
@@ -231,6 +220,16 @@ class AutoLocalize(Node):
         self.match_sigma_m = max(0.02, float(self.get_parameter("match_sigma_m").value))
         self.min_score = float(self.get_parameter("min_score").value)
         self.min_score_gap = float(self.get_parameter("min_score_gap").value)
+        self.hypothesis_separation_m = max(0.10, float(self.get_parameter("hypothesis_separation_m").value))
+        self.hypothesis_separation_yaw = math.radians(max(5.0, float(self.get_parameter("hypothesis_separation_deg").value)))
+        self.coarse_match_sigma_m = max(self.match_sigma_m, float(self.get_parameter("coarse_match_sigma_m").value))
+        self.ray_obstacle_penalty = max(0.0, float(self.get_parameter("ray_obstacle_penalty").value))
+        self.fast_accept_score = max(self.min_score, float(self.get_parameter("fast_accept_score").value))
+        self.candidate_ray_validation = bool(self.get_parameter("candidate_ray_validation").value)
+        self.continuous_refinement = bool(self.get_parameter("continuous_refinement").value)
+        self.continuous_refine_candidates = max(0, int(self.get_parameter("continuous_refine_candidates").value))
+        self.precomputed_scores = bool(self.get_parameter("precomputed_scores").value)
+        self.multiscale_coarse_search = bool(self.get_parameter("multiscale_coarse_search").value)
         self.free_candidate_stride = max(1, int(self.get_parameter("free_candidate_stride").value))
         self.debug = bool(self.get_parameter("debug").value)
 
@@ -270,10 +269,13 @@ class AutoLocalize(Node):
             raise RuntimeError(f"map image not found: {pgm_path}")
 
         self.yaml_path = yaml_path
-        self.resolution = float(meta.get("resolution", 0.05))
-        origin = meta.get("origin", [0.0, 0.0, 0.0])
-        if not isinstance(origin, list) or len(origin) < 3:
-            origin = [0.0, 0.0, 0.0]
+        self.resolution = float(meta["resolution"])
+        if not math.isfinite(self.resolution) or self.resolution <= 0:
+            raise ValueError(f"invalid map resolution: {yaml_path}")
+        origin = meta.get("origin")
+        if (not isinstance(origin, list) or len(origin) != 3
+                or not all(math.isfinite(float(value)) for value in origin)):
+            raise ValueError(f"invalid map origin: {yaml_path}")
         self.origin_x = float(origin[0])
         self.origin_y = float(origin[1])
         self.origin_yaw = float(origin[2])
@@ -293,6 +295,18 @@ class AutoLocalize(Node):
         self._build_free_candidates()
 
     def _build_free_candidates(self) -> None:
+        self._score_fields = {}
+        self._score_floors = {}
+        self._regional_score_field = None
+        if getattr(self, "precomputed_scores", False) or getattr(self, "multiscale_coarse_search", False):
+            for sigma in (self.match_sigma_m, self.coarse_match_sigma_m):
+                self._score_fields[sigma] = np.exp(-np.minimum(self.distance_m, self.max_endpoint_dist_m) / sigma)
+                self._score_floors[sigma] = np.exp(
+                    -np.full(1, self.max_endpoint_dist_m, dtype=self.distance_m.dtype) / sigma)[0]
+            if getattr(self, "multiscale_coarse_search", False):
+                radius = max(1, int(math.ceil(self.coarse_prefilter_xy_step_m / (2 * self.resolution))))
+                kernel = np.ones((radius * 2 + 1, radius * 2 + 1), dtype=np.uint8)
+                self._regional_score_field = cv2.dilate(self._score_fields[self.coarse_match_sigma_m], kernel)
         self.free_xy = self._build_free_candidates_for_step(self.coarse_xy_step_m)
         if self.enable_fast_coarse_search and self.coarse_prefilter_xy_step_m > self.coarse_xy_step_m:
             self.prefilter_free_xy = self._build_free_candidates_for_step(self.coarse_prefilter_xy_step_m)
@@ -356,7 +370,9 @@ class AutoLocalize(Node):
         fine = self._fine_search(scan_xy, coarse[: self.top_k])
         best, second_score, gap = self._rank_scores(fine)
 
-        if getattr(self, "fallback_full_search", True) and not self._accepted_scores(best[0], gap):
+        if self.fallback_full_search and (
+            best[0] < self.fast_accept_score or not self._accepted_scores(best[0], gap)
+        ):
             if getattr(self, "fallback_limited_search", True):
                 limited_xy = build_limited_fallback_candidates(
                     coarse,
@@ -382,6 +398,14 @@ class AutoLocalize(Node):
             fine = self._fine_search(scan_xy, coarse[: self.top_k])
             best, second_score, gap = self._rank_scores(fine)
 
+            if self.fallback_limited_search and (
+                best[0] < self.fast_accept_score or not self._accepted_scores(best[0], gap)
+            ):
+                self.get_logger().info("bounded fallback inconclusive; searching full map")
+                coarse = self._full_coarse_search(scan_xy)
+                fine = self._fine_search(scan_xy, coarse[: self.top_k])
+                best, second_score, gap = self._rank_scores(fine)
+
         elapsed = time.monotonic() - start
         self.get_logger().info(
             "relocate best score=%.3f second=%.3f gap=%.3f pose=(%.3f, %.3f, %.1fdeg) time=%.2fs"
@@ -401,9 +425,25 @@ class AutoLocalize(Node):
 
         self._publish_initialpose(best[1])
         self.accepted = True
-        self.get_logger().info("auto localization accepted and /initialpose published")
+        self.get_logger().info("initial pose candidate accepted and published; STB convergence not verified")
+
+    def _distinct_candidates(self, ranked, limit, *, presorted=False):
+        """Reserve slots for separate pose hypotheses, not adjacent cells of one peak."""
+        selected = []
+        ordered = ranked if presorted else sorted(ranked, key=lambda item: item[0], reverse=True)
+        for score, pose in ordered:
+            if score < 0:
+                continue
+            if all(math.hypot(pose[0] - other[0], pose[1] - other[1]) >= self.hypothesis_separation_m
+                   or abs(self._angle_diff(pose[2], other[2])) >= self.hypothesis_separation_yaw
+                   for _, other in selected):
+                selected.append((score, pose))
+                if len(selected) >= limit:
+                    break
+        return selected
 
     def _rank_scores(self, ranked: List[Tuple[float, Pose]]) -> Tuple[Tuple[float, Pose], float, float]:
+        ranked = self._distinct_candidates(ranked, max(2, self.top_k))
         best = ranked[0] if ranked else (-1.0, (0.0, 0.0, 0.0))
         second_score = ranked[1][0] if len(ranked) > 1 else -1.0
         return best, second_score, best[0] - second_score
@@ -425,6 +465,7 @@ class AutoLocalize(Node):
             self.prefilter_free_xy,
             per_yaw_top_k=max(1, min(self.top_k, self.coarse_prefilter_top_k)),
             keep_count=prefilter_keep,
+            regional=getattr(self, "multiscale_coarse_search", False),
         )
         refined = self._refine_coarse_candidates(scan_xy, prefilter[:prefilter_keep])
         if self.debug:
@@ -449,22 +490,21 @@ class AutoLocalize(Node):
         *,
         per_yaw_top_k: int,
         keep_count: int,
+        regional: bool = False,
     ) -> List[Tuple[float, Pose]]:
         results: List[Tuple[float, Pose]] = []
         yaws = np.arange(-math.pi, math.pi, self.coarse_yaw_step, dtype=np.float32)
         for yaw in yaws:
             local = self._rotate_points(scan_xy, float(yaw))
-            scores = self._score_translations(local, translations)
+            scores = self._score_translations(local, translations, coarse=True, regional=regional)
             if scores.size == 0:
                 continue
-            count = min(max(1, per_yaw_top_k), scores.size)
-            top_idx = np.argpartition(scores, -count)[-count:]
-            for idx in top_idx:
-                x = float(translations[idx, 0])
-                y = float(translations[idx, 1])
-                results.append((float(scores[idx]), (x, y, float(yaw))))
-        results.sort(key=lambda item: item[0], reverse=True)
-        return results[:keep_count]
+            # Materialize only candidates visited before the diversity quota is met.
+            candidates = ((float(scores[idx]), (float(translations[idx, 0]),
+                           float(translations[idx, 1]), float(yaw)))
+                          for idx in np.argsort(scores)[::-1])
+            results.extend(self._distinct_candidates(candidates, per_yaw_top_k, presorted=True))
+        return self._distinct_candidates(results, keep_count)
 
     def _refine_coarse_candidates(
         self, scan_xy: np.ndarray, seeds: List[Tuple[float, Pose]]
@@ -504,21 +544,14 @@ class AutoLocalize(Node):
 
             yaw = float(yaw_key)
             local = self._rotate_points(scan_xy, yaw)
-            scores = self._score_translations(local, translations)
+            scores = self._score_translations(local, translations, coarse=True)
             if scores.size == 0:
                 continue
-            count = min(self.top_k, scores.size)
-            top_idx = np.argpartition(scores, -count)[-count:]
-            for idx in top_idx:
-                results.append(
-                    (
-                        float(scores[idx]),
-                        (float(translations[idx, 0]), float(translations[idx, 1]), yaw),
-                    )
-                )
+            candidates = ((float(scores[idx]), (float(translations[idx, 0]),
+                           float(translations[idx, 1]), yaw)) for idx in np.argsort(scores)[::-1])
+            results.extend(self._distinct_candidates(candidates, self.top_k, presorted=True))
 
-        results.sort(key=lambda item: item[0], reverse=True)
-        return results[: max(self.top_k * 3, self.top_k)]
+        return self._distinct_candidates(results, max(self.top_k * 3, self.top_k))
 
     def _fine_search(self, scan_xy: np.ndarray, seeds: List[Tuple[float, Pose]]) -> List[Tuple[float, Pose]]:
         results: List[Tuple[float, Pose]] = []
@@ -535,23 +568,120 @@ class AutoLocalize(Node):
             for dyaw in yaw_offsets:
                 yaw = self._norm_angle(syaw + float(dyaw))
                 local = self._rotate_points(scan_xy, yaw)
-                scores = self._score_translations(local, translations)
+                scores = self._score_translations(
+                    local, translations, check_rays=not getattr(self, "candidate_ray_validation", False))
                 if scores.size == 0:
                     continue
                 best_idx = int(np.argmax(scores))
                 results.append(
                     (float(scores[best_idx]), (float(translations[best_idx, 0]), float(translations[best_idx, 1]), yaw))
                 )
-        results.sort(key=lambda item: item[0], reverse=True)
-        deduped: List[Tuple[float, Pose]] = []
-        for score, pose in results:
-            if all(math.hypot(pose[0] - p[1][0], pose[1] - p[1][1]) > 0.10 or abs(self._angle_diff(pose[2], p[1][2])) > math.radians(5.0) for p in deduped):
-                deduped.append((score, pose))
-            if len(deduped) >= max(2, self.top_k):
-                break
-        return deduped or results[: max(2, self.top_k)]
+        if getattr(self, "candidate_ray_validation", False):
+            candidates = self._distinct_candidates(results, max(2, self.top_k * 3))
+            refine = getattr(self, "continuous_refinement", False)
+            limit = getattr(self, "continuous_refine_candidates", 0)
+            if refine and limit == 0:
+                candidates = self._refine_continuous(scan_xy, candidates)
+            results = self._validate_candidate_rays(scan_xy, candidates)
+            if refine and limit > 0:
+                results = self._distinct_candidates(results, max(2, self.top_k))
+                count = min(limit, len(results))
+                refined = self._validate_candidate_rays(
+                    scan_xy, self._refine_continuous(scan_xy, results[:count]))
+                # Preserve the verified seed when refinement weakens its evidence.
+                results = [new if new[0] >= old[0] else old
+                           for old, new in zip(results[:count], refined)] + results[count:]
+        return self._distinct_candidates(results, max(2, self.top_k))
 
-    def _score_translations(self, rotated_scan: np.ndarray, translations: np.ndarray) -> np.ndarray:
+    def _continuous_residuals(self, scan_xy, pose):
+        world = self._rotate_points(scan_xy, pose[2]) + np.asarray(pose[:2])
+        dx, dy = world[:, 0] - self.origin_x, world[:, 1] - self.origin_y
+        c, s = math.cos(self.origin_yaw), math.sin(self.origin_yaw)
+        cols = (dx * c + dy * s) / self.resolution - 0.5
+        rows = self.height - 0.5 - (-dx * s + dy * c) / self.resolution
+        ci, ri = np.floor(cols).astype(int), np.floor(rows).astype(int)
+        valid = (ci >= 0) & (ci + 1 < self.width) & (ri >= 0) & (ri + 1 < self.height)
+        a, b = cols - ci, rows - ri
+        ci, ri = np.clip(ci, 0, self.width - 2), np.clip(ri, 0, self.height - 2)
+        field = self.distance_m
+        values = ((1 - a) * (1 - b) * field[ri, ci] + a * (1 - b) * field[ri, ci + 1]
+                  + (1 - a) * b * field[ri + 1, ci] + a * b * field[ri + 1, ci + 1])
+        return np.where(valid, np.minimum(values, self.max_endpoint_dist_m), self.max_endpoint_dist_m)
+
+    def _refine_continuous(self, scan_xy, candidates):
+        """Bounded damped least squares on a bilinear distance field, without ICP.
+
+        Huber weights limit dynamic returns. A trial must reduce the same robust
+        objective and keep the robot in known free space before it is accepted.
+        """
+        result = []
+        delta = self.match_sigma_m
+        epsilon = np.array([0.005, 0.005, math.radians(0.1)])
+        limits = np.array([self.fine_xy_step_m, self.fine_xy_step_m, self.fine_yaw_step])
+        def loss(residual):
+            return np.minimum(residual, delta) ** 2 * 0.5 + delta * np.maximum(residual - delta, 0)
+        for _, seed in candidates:
+            pose = np.array(seed, dtype=float)
+            anchor = pose.copy()
+            residual = self._continuous_residuals(scan_xy, pose)
+            for _ in range(8):
+                jacobian = np.column_stack([
+                    (self._continuous_residuals(scan_xy, pose + np.eye(3)[axis] * epsilon[axis])
+                     - self._continuous_residuals(scan_xy, pose - np.eye(3)[axis] * epsilon[axis]))
+                    / (2 * epsilon[axis]) for axis in range(3)])
+                weights = np.minimum(1.0, delta / np.maximum(residual, 1e-6))
+                normal = jacobian.T @ (weights[:, None] * jacobian) + np.eye(3) * 0.01
+                step = -np.linalg.solve(normal, jacobian.T @ (weights * residual))
+                step = np.clip(step, -limits, limits)
+                improved = False
+                for scale in (1.0, 0.5, 0.25):
+                    trial = anchor + np.clip(pose + scale * step - anchor, -limits * 2, limits * 2)
+                    col, row = self._world_to_pixel(trial[0], trial[1])
+                    if not (0 <= col < self.width and 0 <= row < self.height and self.free[row, col]):
+                        continue
+                    candidate = self._continuous_residuals(scan_xy, trial)
+                    if loss(candidate).mean() < loss(residual).mean() - 1e-8:
+                        pose, residual, improved = trial, candidate, True
+                        break
+                if not improved or np.linalg.norm(step / limits) < 0.01:
+                    break
+            pose[2] = self._norm_angle(pose[2])
+            score = float(self._score_translations(self._rotate_points(scan_xy, pose[2]),
+                          np.asarray([pose[:2]], dtype=np.float32), check_rays=False)[0])
+            result.append((score, tuple(pose)))
+        return result
+
+    def _validate_candidate_rays(self, scan_xy, candidates):
+        """Check beam interiors at half-cell spacing only for shortlisted poses.
+
+        Short returns may be dynamic obstacles; only mapped walls before the
+        measured endpoint are contradictions. Unknown cells are not walls.
+        """
+        origin = np.array([self.scan_to_base_x_m, self.scan_to_base_y_m], dtype=np.float32)
+        rays = scan_xy[::4] - origin
+        lengths = np.linalg.norm(rays, axis=1)
+        if not len(lengths):
+            return []
+        steps = np.arange(0.10, min(float(lengths.max()), self.max_range_m),
+                          self.resolution * 0.5, dtype=np.float32)
+        if not len(steps):
+            return candidates
+        interior = origin + rays[:, None, :] / np.maximum(lengths[:, None, None], 1e-6) * steps[None, :, None]
+        usable = steps[None, :] < lengths[:, None] - max(0.10, self.resolution * 2)
+        result = []
+        for score, pose in candidates:
+            world = self._rotate_points(interior.reshape(-1, 2), pose[2]).reshape(interior.shape)
+            world += np.asarray(pose[:2], dtype=np.float32)
+            cols, rows = self._world_to_pixel(world[..., 0], world[..., 1])
+            inside = (cols >= 0) & (cols < self.width) & (rows >= 0) & (rows < self.height)
+            blocked = inside & usable & self.occupied[np.clip(rows, 0, self.height - 1),
+                                                      np.clip(cols, 0, self.width - 1)]
+            result.append((score - self.ray_obstacle_penalty * blocked.any(axis=1).mean(), pose))
+        return result
+
+    def _score_translations(self, rotated_scan: np.ndarray, translations: np.ndarray,
+                            *, coarse: bool = False, check_rays: bool = True,
+                            regional: bool = False) -> np.ndarray:
         scores = np.full((translations.shape[0],), -1.0, dtype=np.float32)
         for start in range(0, translations.shape[0], 2048):
             chunk = translations[start : start + 2048]
@@ -571,10 +701,30 @@ class AutoLocalize(Node):
             valid_ratio = in_bounds.mean(axis=1)
             safe_rows = np.clip(rows, 0, self.height - 1)
             safe_cols = np.clip(cols, 0, self.width - 1)
-            dists = self.distance_m[safe_rows, safe_cols]
-            dists = np.where(in_bounds, np.minimum(dists, self.max_endpoint_dist_m), self.max_endpoint_dist_m)
-            endpoint_score = np.exp(-dists / self.match_sigma_m).mean(axis=1)
-            scores[start : start + chunk.shape[0]] = endpoint_score * valid_ratio * center_ok.astype(np.float32)
+            sigma = self.coarse_match_sigma_m if coarse else self.match_sigma_m
+            field = (getattr(self, "_regional_score_field", None) if regional
+                     else getattr(self, "_score_fields", {}).get(sigma))
+            if field is not None:
+                endpoint_score = np.where(in_bounds, field[safe_rows, safe_cols],
+                                          self._score_floors[sigma]).mean(axis=1)
+            else:
+                dists = self.distance_m[safe_rows, safe_cols]
+                dists = np.where(in_bounds, np.minimum(dists, self.max_endpoint_dist_m), self.max_endpoint_dist_m)
+                endpoint_score = np.exp(-dists / sigma).mean(axis=1)
+            score = endpoint_score * valid_ratio
+            if not coarse and check_rays and self.ray_obstacle_penalty > 0:
+                # Sample beam interiors, excluding the uncertain endpoint and robot vicinity.
+                # A wall before the measured return contradicts this pose, even if its endpoint fits.
+                rays = rotated_scan[::4]
+                fractions = np.linspace(0.15, 0.85, 8, dtype=np.float32)
+                interior = rays[:, None, :] * fractions[None, :, None]
+                world_rays = chunk[:, None, None, :] + interior[None, :, :, :]
+                rc, rr = self._world_to_pixel(world_rays[..., 0], world_rays[..., 1])
+                inside = (rc >= 0) & (rc < self.width) & (rr >= 0) & (rr < self.height)
+                blocked = inside & self.occupied[np.clip(rr, 0, self.height - 1),
+                                                np.clip(rc, 0, self.width - 1)]
+                score -= self.ray_obstacle_penalty * blocked.any(axis=2).mean(axis=1)
+            scores[start : start + chunk.shape[0]] = np.where(center_ok, score, -1.0)
         return scores
 
     def _publish_initialpose(self, pose: Pose) -> None:

@@ -30,6 +30,9 @@ from nav_msgs.msg import Path
 from std_msgs.msg import Empty, Float32, String, UInt16
 from rclpy.node import Node
 from rclpy.time import Time
+from rclpy.parameter import Parameter
+from rcl_interfaces.msg import SetParametersResult
+from rcl_interfaces.srv import SetParametersAtomically
 from tf2_ros import Buffer, TransformException, TransformListener
 
 
@@ -155,6 +158,7 @@ class ChassisControlNav(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.create_timer(1.0 / max(self.ctrl_rate, 1.0), self._loop)
+        self.create_service(SetParametersAtomically, "~/set_speed", self._set_speed)
 
         self.get_logger().info(
             f"nav_control 启动（纯追踪）| v={self.v_max*100:.0f}cm/s | "
@@ -166,6 +170,29 @@ class ChassisControlNav(Node):
             f"accept_replan={self.accept_replanned_path} | "
             f"replan_pause={self.replan_pause_s:.2f}s"
         )
+
+    def _set_speed(self, request, response):
+        limits = {"linear_speed_mps": (0.05, 2.0), "angular_speed_degps": (1.0, math.degrees(0.8)), "drive_angular_speed_degps": (1.0, math.degrees(0.8))}
+        parameters = [Parameter.from_parameter_msg(item) for item in request.parameters]
+        if not parameters or len({item.name for item in parameters}) != len(parameters):
+            response.result = SetParametersResult(successful=False, reason="速度参数为空或重复")
+            return response
+        for parameter in parameters:
+            value = parameter.value
+            if (parameter.name not in limits or type(value) not in (int, float)
+                    or not math.isfinite(value) or not limits[parameter.name][0] <= value <= limits[parameter.name][1]):
+                response.result = SetParametersResult(successful=False, reason="速度超出范围：线速 0.05–2.0 m/s，角速 1 度/秒–0.8 rad/s（约 45.84 度/秒）")
+                return response
+        response.result = self.set_parameters_atomically([Parameter(item.name, value=float(item.value)) for item in parameters])
+        if response.result.successful:
+            for item in parameters:
+                if item.name == "linear_speed_mps":
+                    self.v_max = float(item.value)
+                elif item.name == "angular_speed_degps":
+                    self.omega_max = math.radians(float(item.value))
+                else:
+                    self.drive_omega_max = math.radians(float(item.value))
+        return response
 
     # === 工具 ================================================================
 

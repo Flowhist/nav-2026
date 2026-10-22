@@ -174,6 +174,7 @@ systemctl --user disable finav.target
 
 ### 1. 建图页
 
+- 手动控制面板提供共用的 1–5 档切换。Web 经 `/handle_control/set_gear` 请求现有手柄节点写十进制寄存器 23，再读取寄存器 3 确认；成功后 `/handle/gear` 同步更新 Web 和控制链路。协议规定 MCU 同步刷新触摸屏，屏幕显示仍需实机验收。档位是设备运行状态，不写入导航 YAML。
 - 左侧显示实时 `/map` 和 `/scan`。
 - 右侧包含：
   - 建图启动 / 结束
@@ -187,11 +188,16 @@ systemctl --user disable finav.target
 
 ### 2. 导航页
 
+- “导航速度”可设置直行上限（0.05–0.60 m/s）、原地转向及行进转向上限（1–28.6 °/s），对应 `config/nav.yaml` 的 `nav_control.ros__parameters` 下 `linear_speed_mps`、`angular_speed_degps` 和 `drive_angular_speed_degps`。保存保留其他字段与注释；角速范围不超过当前底盘 0.5 rad/s 硬限。运行中通过 `/nav_control/set_speed` 一起应用；接口离线或失败时明确显示“已保存、当前导航未确认应用”，下次启动读取 YAML。最终输出仍受手柄档位比例、路线限速和底盘硬限约束。
+- 新增设置接口使用 `rcl_interfaces/srv/SetParametersAtomically`：导航接受以上三个速度参数，手柄接受一个 `gear` 整数参数；需重启对应节点加载新接口。Web 的配置 GET/POST 接口为 `/api/nav/speed`，共用档位 POST 接口为 `/api/control/gear`。正常页面无新增周期轮询。
 - 左侧显示实时地图、雷达和规划路径。
+- 导航默认固定使用保存的 YAML/PGM，不再周期性重建底图；雷达、位姿和路径仍实时更新。
+  `config/slam_toolbox_nav.yaml` 中 `freeze_navigation_map: false` 可恢复原有地图更新，重启导航后生效。
+  STB 定位仍使用原有位姿图和扫描数据，详见 [固定地图定位](Doc/固定地图定位.md)。
 - 右侧包含：
   - 导航启动 / 结束
   - 设置初始位姿
-  - 设置目标点、选择已保存地点
+  - 设置目标点、按零散地点名字正常导航，或按路线终点名字发起巡线
   - 已保存开放路线的启动、暂停、继续和取消
   - 重定位
   - 停止 / 取消
@@ -206,6 +212,8 @@ systemctl --user disable finav.target
 
 - 从 `maps/` 目录读取地图元数据和 `.pgm`，在前端 canvas 中展示。
 - 支持地点、禁行区、开放路线编辑，路线平滑、地图导出及删除。
+- 地图页进入“编辑”后选择“画笔”，支持占据（黑）、可通行（白）、未知（灰），方形笔刷边长为 1–40 格，设为 N 时覆盖 N×N 格，支持撤销、保存和取消。仅在激活时绑定绘画事件，按需重绘；单次最多修改 100000 格，撤销最多保留 20 笔且限制历史栅格数量。
+- 栅格保存需先停止建图、导航及重定位，会校验源地图版本并原子替换 PGM，上一版保存在同目录的 `<图像文件名>.brush-backup`。未修改的像素保持原值。此功能不修改 `.posegraph` / `.data`；SLAM Toolbox 从位姿图重建的地图不会自动包含这些笔画。
 - 地点、禁行区和路线统一保存在 `maps/<地图名>/<地图名>.editor.yaml`，使用 revision 检测保存冲突并原子写入。没有编辑文档时兼容读取旧 `.locations.yaml`，之后不再双写地点文件。
 - 删除地图前必须停止建图、导航和重定位，并等待存图结束。
 - 路线执行行为见 [导航接口](Doc/navigation_topics.md#开放路线)。
@@ -257,7 +265,7 @@ systemctl --user disable finav.target
 - 订阅 `/js_state`、`/js_cmd_vel`、`/handle/gear`、`/base_control_router/status`
   - 更新手柄在线、输入、档位和网页控制锁定状态
 - 订阅 `/nav_voice_bridge/status`
-  - 更新地点名称导航的反馈状态
+  - 更新地点/路线终点名称匹配的请求反馈；执行状态查看 `/nav_status`
 - 定时器：
   - `0.02s` 处理网页命令队列
   - `0.25s` 刷新 `map` 坐标系下机器人位姿
@@ -362,7 +370,7 @@ systemctl --user disable finav.target
 - `POST /api/nav/initialpose` `{ x, y, yaw_deg }`
 - `POST /api/nav/cancel`
 - `POST /api/nav/route` `{ action, map_name, route_id }`，`action` 为 `start/pause/resume/cancel`
-- `POST /api/nav/location` `{ name }`
+- `POST /api/nav/location` `{ name }`（命中当前地图路线的 `end_name` 时巡线，命中零散地点的 `name` 时正常导航）
 - `POST /api/nav/relocate` `{ map_file }`
 - `POST /api/control/manual` `{ linear, angular }`（归一化输入，非实际速度；零输入表示停止）
 

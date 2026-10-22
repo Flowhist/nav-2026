@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import copy
 import hashlib
 import json
 import math
@@ -9,6 +10,7 @@ import shutil
 import sys
 import threading
 import time
+import zlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,13 +22,15 @@ if str(MAP_EDITOR_DIR) not in sys.path:
     sys.path.insert(0, str(MAP_EDITOR_DIR))
 
 from editor_export import ExportError
-from editor_map_io import MapFormatError, validate_map_name
+from editor_map_io import MapFormatError, load_map, validate_map_name
 from editor_server import ApiError, EditorApplication
 from editor_store import DocumentError, RevisionConflict
 from base_control.paths import config_dir as base_config_dir
-from map_utils import list_saved_maps, load_map_preview, load_map_locations
+from map_utils import list_saved_maps, load_map_preview, load_map_locations, save_map_raster
+from continued_mapping import start_mapping, mapping_action, require_continued_mapping
 from systemd_runtime import create_runtime
 from ros_bridge import RosBridge
+from speed_settings import SPEED_LIMITS, read_navigation_speed, save_navigation_speed
 from state_store import StateStore
 from web_support import (ConfigStore, LimitedHTTPServer, RequestError,
                          access_password, authorized, finite_fields, query_integer, request_errors)
@@ -236,6 +240,9 @@ class ServerApp:
                         raise RequestError(400, "invalid map name")
                     self._editor_json(lambda: load_map_preview(app.maps_dir, name))
                     return
+                if path == "/api/nav/speed":
+                    self._json(HTTPStatus.OK, read_navigation_speed(app.config_store, app.config_dir / "nav.yaml"))
+                    return
                 if path == "/api/configs":
                     self._json(HTTPStatus.OK, {"files": app._list_config_files()})
                     return
@@ -263,6 +270,28 @@ class ServerApp:
                 parsed = urlparse(self.path)
                 path = parsed.path
                 body = self._read_json()
+
+                if path == "/api/nav/speed":
+                    with app._map_lock:
+                        result = save_navigation_speed(app.config_store, app.config_dir / "nav.yaml", body)
+                        result["applied"] = False
+                        if app.runtime.snapshot().get("navigation", {}).get("running"):
+                            try:
+                                app.bridge.request_setting("navigation_speed", {key: result[key] for key in SPEED_LIMITS})
+                                result["applied"] = True
+                            except RequestError as exc:
+                                result["apply_error"] = str(exc)
+                        self._json(HTTPStatus.OK, result)
+                    return
+                if path == "/api/control/gear":
+                    gear = body.get("gear")
+                    if type(gear) is not int or not 1 <= gear <= 5:
+                        raise RequestError(400, "档位必须是 1–5 的整数")
+                    if not app.state.snapshot().get("control", {}).get("gear_online"):
+                        raise RequestError(409, "手柄档位离线，无法切换")
+                    app.bridge.request_setting("handle_gear", gear)
+                    self._json(HTTPStatus.OK, {"ok": True, "gear": gear})
+                    return
 
                 parts = self._path_segments(path)
                 if (
@@ -378,10 +407,20 @@ class ServerApp:
                     if not isinstance(name, str) or app._resolve_map_dir(name) is None or name.startswith("-"):
                         raise RequestError(400, "invalid map name")
                     with app._map_lock:
+                        on_saved = None
                         mapping = app.runtime.snapshot().get("mapping", {})
                         if not mapping.get("running") or mapping.get("stopping"):
                             raise RequestError(409, "Mapping must be running before saving")
-                        job = app.bridge.save_map(name)
+                        if mapping.get("launch_args", {}).get("map_file"):
+                            require_continued_mapping(app, {"mapping"})
+                            if name == mapping["launch_args"]["map_file"]:
+                                raise RequestError(409, "续建地图请另存新名称，保留原地图")
+                            source = app._load_editor_document(mapping["launch_args"]["map_file"])
+                            if source.get("read_only"):
+                                raise RequestError(409, "源地图编辑信息无法读取，请修复后再保存续建地图")
+                            document = copy.deepcopy(source["document"])
+                            on_saved = lambda: app._inherit_map_document(name, document)
+                        job = app.bridge.save_map(name, on_saved=on_saved)
                     self._json(HTTPStatus.ACCEPTED, {"ok": True, "job": job})
                     return
                 if path in {"/api/system/shutdown", "/api/system/restart"}:
@@ -426,7 +465,13 @@ class ServerApp:
                     self._json(HTTPStatus.OK, {"ok": True, "name": name})
                     return
                 if path == "/api/runtime/mapping/start":
-                    self._runtime_json(lambda: app.runtime.start("mapping", launch_args={}))
+                    self._runtime_json(lambda: start_mapping(app, body))
+                    return
+                if path in {"/api/mapping/initialpose", "/api/mapping/relocate", "/api/mapping/resume"}:
+                    action = path.rsplit("/", 1)[-1]
+                    if action == "initialpose":
+                        finite_fields(body, "x", "y", "yaw_deg")
+                    self._runtime_json(lambda: mapping_action(app, action, body))
                     return
                 if path == "/api/runtime/mapping/stop":
                     self._runtime_json(lambda: app.runtime.stop("mapping"))
@@ -476,6 +521,10 @@ class ServerApp:
             def do_PUT(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
                 parts = self._path_segments(parsed.path)
+                if len(parts) == 4 and parts[:2] == ["api", "maps"] and parts[3] == "raster":
+                    body = self._read_json()
+                    self._editor_json(lambda: app._save_map_raster(parts[2], body))
+                    return
                 if (
                     len(parts) == 4
                     and parts[:2] == ["api", "maps"]
@@ -498,7 +547,15 @@ class ServerApp:
             def _runtime_json(self, operation) -> None:
                 try:
                     with app._map_lock:
+                        if (app.state.snapshot().get("map_save", {}).get("state") == "running"
+                                and urlparse(self.path).path in {
+                                    "/api/runtime/mapping/start", "/api/runtime/mapping/stop",
+                                    "/api/runtime/navigation/start", "/api/runtime/navigation/stop",
+                                    "/api/mapping/initialpose", "/api/mapping/relocate", "/api/mapping/resume"}):
+                            raise RequestError(409, "请等待地图保存完成后再切换运行状态")
                         payload = operation()
+                except RequestError:
+                    raise
                 except ValueError as exc:
                     self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
                     return
@@ -562,22 +619,39 @@ class ServerApp:
                 frames = 0
                 bytes_sent = 0
                 stats_started = time.monotonic()
+                encodings = self.headers.get("Accept-Encoding", "").lower().split(",")
+                use_gzip = any(item.strip() == "gzip" for item in encodings)
+                compressor = zlib.compressobj(level=1, wbits=31) if use_gzip else None
+
+                def write_packet(packet):
+                    if compressor is not None:
+                        # Flush each event so browsers never wait for a compression block.
+                        packet = compressor.compress(packet) + compressor.flush(zlib.Z_SYNC_FLUSH)
+                    self.wfile.write(packet)
+                    self.wfile.flush()
+                    return len(packet)
 
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache, no-transform")
                 self.send_header("Connection", "keep-alive")
                 self.send_header("X-Accel-Buffering", "no")
+                self.send_header("Vary", "Accept-Encoding")
+                if use_gzip:
+                    self.send_header("Content-Encoding", "gzip")
                 self.end_headers()
+                self.close_connection = True
                 try:
                     self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    # Bound queued stale frames when Wi-Fi cannot keep up.
+                    self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+                    self.connection.settimeout(3.0)
                 except OSError:
                     pass
 
                 app.state.add_live_viewer(mode)
                 try:
-                    self.wfile.write(b"retry: 1000\n\n")
-                    self.wfile.flush()
+                    write_packet(b"retry: 1000\n\n")
                     while app._running:
                         started = time.monotonic()
                         payload = app.state.snapshot_scene(
@@ -597,10 +671,9 @@ class ServerApp:
                         }
                         encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
                         packet = b"data: " + encoded + b"\n\n"
-                        self.wfile.write(packet)
-                        self.wfile.flush()
+                        packet_size = write_packet(packet)
                         frames += 1
-                        bytes_sent += len(packet)
+                        bytes_sent += packet_size
 
                         stats_elapsed = time.monotonic() - stats_started
                         if stats_elapsed >= 1.0:
@@ -732,6 +805,18 @@ class ServerApp:
                              "map_name": body.get("map_name", ""), "route_id": body.get("route_id", "")})
         return {"ok": True, "accepted": True}
 
+    def _save_map_raster(self, map_name: str, body: dict) -> dict:
+        if self._resolve_map_dir(map_name) is None:
+            raise ValueError("无效的地图名称")
+        runtime = self.runtime.snapshot()
+        if runtime.get("busy") or any(
+            item.get("running") or item.get("stopping")
+            for key, item in runtime.items()
+            if key in {"mapping", "navigation", "relocate"} and isinstance(item, dict)
+        ) or self.state.snapshot().get("map_save", {}).get("state") == "running":
+            raise RequestError(409, "请先停止建图、导航、重定位并等待存图结束")
+        return save_map_raster(self.maps_dir, map_name, body)
+
     def _load_editor_document(self, map_name: str) -> Dict[str, object]:
         payload = self.editor.load_document(map_name, include_map=False)
         document = payload.get("document", {})
@@ -749,6 +834,26 @@ class ServerApp:
                 locations.append({"id": f"location-{digest}", **item})
             document["locations"] = locations
         return payload
+
+    def _inherit_map_document(self, map_name: str, document: dict) -> None:
+        # Map coordinates are shared by the source pose graph and the continued map.
+        with self._map_lock:
+            directory = self.maps_dir / map_name
+            if any((directory / f"{map_name}.{suffix}").exists()
+                   for suffix in ("editor.yaml", "locations.yaml")):
+                return
+            try:
+                map_data = load_map(self.maps_dir, map_name)
+                inherited = copy.deepcopy(document)
+                inherited["revision"] = 0
+                inherited["map"] = {
+                    "name": map_name,
+                    "yaml_file": f"{map_name}.yaml",
+                    "source_sha256": map_data.source_sha256,
+                }
+                self.editor.store.save(map_name, inherited, expected_revision=0)
+            except Exception as exc:
+                raise RuntimeError(f"地图文件已保存，但继承编辑信息失败：{exc}") from exc
 
     def _save_editor_document(
         self, map_name: str, body: object

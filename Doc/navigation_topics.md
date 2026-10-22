@@ -24,16 +24,40 @@
 | `/nav_status` | `std_msgs/String` | 任务状态 JSON |
 | `/plan` | `nav_msgs/Path` | 交给控制器的完整执行路径 |
 | `/planning_map` | `nav_msgs/OccupancyGrid` | 含禁行区与膨胀约束的规划栅格 |
-| `/nav_cmd_vel`、`/web_cmd_vel`、`/js_cmd_vel` | `geometry_msgs/Twist` | 导航、网页、手柄的仲裁输入 |
+| `/nav_cmd_vel`、`/follow_cmd_vel`、`/web_cmd_vel`、`/js_cmd_vel` | `geometry_msgs/Twist` | 导航、跟随、网页、手柄的独立仲裁输入 |
+| `/follow_clear` | `std_msgs/Empty` | 取消独立跟随；跟随不经过导航任务/路径管理 |
 | `/cmd_vel` | `geometry_msgs/Twist` | 仲裁器输出，外部功能不要绕过仲裁直接发布 |
 | `/nav_clear`、`/nav_clear_reason` | `std_msgs/Empty`、`std_msgs/String` | 取消导航及原因 |
 | `/base_fault`、`/js_state` | `std_msgs/Bool` | 底盘故障、手柄链路状态 |
 | `/handle/gear` | `std_msgs/UInt16` | 手柄档位 1～5 |
 | `/nav_task/speed_limit` | `std_msgs/Float32` | 路线速度限制 |
 
-规划器的 goal/path/status 与跟踪器 status 使用 `/nav_task/` 内部话题，不作为外部目标入口。可选地点语音桥接通过 `/nav_voice_bridge/voice_command` 接收地点名称，优先读取 `.editor.yaml` 中的地点，没有编辑文档时读取旧 `.locations.yaml`，随后发布 `/goal_pose`。
+规划器的 goal/path/status 与跟踪器 status 使用 `/nav_task/` 内部话题，不作为外部目标入口。语音桥接通过 `/nav_voice_bridge/voice_command` 接收目的地名字，同时匹配当前地图路线的 `end_name` 和零散地点的 `name`。命中路线终点时向 `/nav_task/command` 发布 `start` 巡线任务；命中零散地点时向 `/goal_pose` 发布含坐标与朝向的普通导航目标。路线显示名 `name` 不作为终点匹配字段。优先读取 `.editor.yaml`；没有编辑文档时兼容旧 `.locations.yaml` 中的地点。
+
+地图页的路线属性新增“终点名字”，留空的旧路线不参与语音匹配。同一地图终点名字必须唯一（忽略首尾空白及大小写）；未知、重复或闭环路线目的地会拒绝下发。每次命令读取最新保存的编辑文档，改名或删除立即对后续请求生效。终点按路线行进方向确定：正序为最后一个关键点，逆序为第一个关键点；复用原有附近入线、限速、暂停、接管取消及到达停车行为。执行结果查看 `/nav_status`，其中路线状态增加 `end_name`；语音桥接的 `route requested` 只表示已发布请求。
+
+网页“目的地导航”同时显示开放路线的终点名字和零散地点，并标注类型；`POST /api/nav/location` 保留原路径和 `{ name }` 请求格式，按同样的名字规则分流。上游负责保证两类名字不重复；意外重名时拒绝下发，不任意选择路线或地点。部署后需重新加载语音桥接节点、Web 并刷新页面；离线回归位于 `server/tests/test_voice_routes.py`。
 
 ## 地图、定位与 TF
+
+日常导航使用 Finav 的 `fixed_localization_node`，继承已安装的 STB 定位类，
+保留其扫描匹配、定位缓存、`/initialpose` 和 `map -> odom`。
+`config/slam_toolbox_nav.yaml` 的 `freeze_navigation_map: true` 为默认值：
+从所选地图的同名 YAML/PGM 加载并固定发布 `/map`，不运行周期性栅格重建和图可视化线程。
+地图查询 `/slam_toolbox/dynamic_map` 同样返回固定栅格；晚加入的订阅者使用
+Transient Local QoS 获取地图。地图不定期刷新属于正常行为。
+
+设为 `false` 并重启导航，可恢复 STB 原生定位期间的栅格更新；建图与继续建图不受影响。
+这不是运行时热切换参数。固定模式缺失 YAML/图像或位姿图时启动失败，不回退到动态地图。
+固定模式不提供 `/slam_toolbox/deserialize_map` 在线换图服务，换图或应用画笔编辑需重启导航；
+`/initialpose` 和 `/slam_toolbox/clear_localization_buffer` 仍可使用。
+
+固定地图不改变定位参考：STB 仍读取 `.posegraph/.data`，画笔只修改 PGM。
+自定义 `nav_relocate.py` 则用 PGM 搜索初始位姿，再由 STB 接管匹配。
+PGM 与位姿图必须来自同一地图坐标系；画笔不应代替禁行区编辑，也不会同步更新定位扫描。
+固定地图不提供动态避障，不应把新出现的障碍从安全检查中忽略。
+
+实现边界、构建和隔离验证见 [固定地图定位](固定地图定位.md)。
 
 | 话题 / 变换 | 来源与用途 |
 | --- | --- |
@@ -42,7 +66,7 @@
 | `/odom_encoder` | 底盘编码器 Odometry；供 EKF 和手柄速度显示使用 |
 | `/imu/data` | DM-IMU 的 Imu 数据 |
 | `/odom` | EKF 融合的 Odometry |
-| `/map` | SLAM Toolbox 的 OccupancyGrid |
+| `/map` | 建图时为 STB 栅格；导航默认是保存的固定栅格 |
 | `map -> odom` | SLAM Toolbox 建图/定位发布 |
 | `odom -> base_link` | EKF 发布 |
 | `base_link -> laser_*_frame / imu_link` | URDF 固定变换 |
@@ -62,6 +86,37 @@
 - 摇杆接管取消任务。人工继续时重新规划接入路径；保存路线后自动重新生成路径，已暂停任务保持暂停。
 - 导航速度受手柄档位比例 `gear / 5`、路线限速及底盘上限约束。
 - 支持地图编辑禁行区；不支持闭环计圈，本功能没有新增动态障碍检测或自动绕行。
+
+## 自动重定位
+
+`nav_relocate.py` 从 PGM 搜索候选，再发布 `/initialpose` 给 STB。当前搜索保留
+12 个分散的位置/朝向假设，粗搜索使用较宽的匹配尺度；默认对候选做半栅格间隔的射线验证，
+再对验证后的前三个候选做有界连续微调，验证分数下降则保留原候选。匹配评分预计算后查表。
+`continuous_refinement` 依赖 `candidate_ray_validation`；`continuous_refine_candidates: 0`
+为对全部候选先微调的实验模式。`multiscale_coarse_search` 因个别场景变慢，默认关闭。
+相距不足 0.5 m 且朝向差小于 15 度的相邻峰合并为同一假设，分差比较用于区分不同假设。
+快速结果分数低于 `fast_accept_score: 0.70` 或分差不足时，先局部扩大搜索，
+仍不明确则进行全图网格搜索。最终接受仍受 `min_score` 和 `min_score_gap` 限制，
+没有通过降低接受阈值增加通过率。参数位于 `config/nav_relocate.yaml`，下一次重定位进程读取。
+
+采集扫描期间保持机器人静止；当前多帧合并未补偿运动。
+“候选已发布”不表示 STB 已收敛，操作后仍应核对雷达与地图对齐。
+重复走廊、环境变化和原始位姿图与编辑后 PGM 不一致，仍可能造成歧义。
+
+2026-10-21 对照：17 项功能测试通过；两张保存地图及合成地图共 19 个场景，各重复 3 次。
+最终组合正确结果维持 18/19，平均搜索耗时 3.14 s -> 1.65 s，正确样本平均位置误差
+2.76 cm -> 1.72 cm；各场景中位耗时均下降。仍有一个误接受场景，未解决 STB 接管验证。
+这是带噪声、遮挡和部分视野的离线模拟，不是实机成功率，不保证每个样本误差均降低。
+计时包含评分预计算和完整搜索，不含地图文件读取、扫描采集及 STB 接管。
+原始结果：[逐项对照](benchmarks/relocate_ablation_20261021.json)、[最终组合](benchmarks/relocate_selected_20261021.json)。
+在工作区 source ROS 后运行 `python3 src/finav/tests/test_relocate.py -v`；
+复测用 `python3 src/finav/tests/benchmark_relocate.py --variant selected --repeats 3 --output /tmp/relocate.json`。
+不指定 `--baseline` 时，基线为关闭四个新增开关的现有实现；本次报告使用改动前冻结源码。
+
+后续提速保留 12 个候选及原搜索参数，仅惰性生成已排序候选并取消重复排序。
+19 场景各测 2 次，输出位姿逐项完全一致，平均搜索耗时 1.63 s -> 1.52 s。
+候选减至 10 的方案在新位姿组出现新增误接受，未采用。
+记录：[等价提速](benchmarks/relocate_speed_20261021.json)。
 
 ## 只读调试
 

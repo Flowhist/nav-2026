@@ -162,7 +162,7 @@ def generate_launch_description():
     use_nav_bridge_arg = DeclareLaunchArgument(
         "use_nav_bridge",
         default_value="true",
-        description="Enable location-based voice navigation bridge (nav_voice_bridge)",
+        description="Enable route/location voice navigation bridge (nav_voice_bridge)",
     )
 
     map_file = LaunchConfiguration("map_file")
@@ -217,7 +217,7 @@ def generate_launch_description():
         parameters=[{"map_file": map_file}],
     )
 
-    # 7. 地点导航桥接：订阅语音指令，查表发布 /goal_pose
+    # 7. 语音导航桥接：路线终点发布巡线任务，零散地点发布坐标目标
     nav_bridge_node = Node(
         package="finav",
         executable="nav_voice_bridge.py",

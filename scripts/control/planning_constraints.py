@@ -61,10 +61,11 @@ def load_planning_constraints(
     except (OSError, yaml.YAMLError, DocumentError, TypeError, ValueError) as exc:
         raise ConstraintError(f"无法加载规划约束: {exc}") from exc
     settings = document["settings"]
+    overridden = settings["safety_clearance_source"] == "editor_override"
     return PlanningConstraints(
         tuple(document["keepouts"]),
-        float(settings["safety_clearance_m"]),
-        str(settings["safety_clearance_source"]),
+        float(settings["safety_clearance_m"] if overridden else fallback_clearance_m),
+        "editor_override" if overridden else "config",
         int(document["revision"]),
         path,
     )

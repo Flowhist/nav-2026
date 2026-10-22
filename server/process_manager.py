@@ -146,15 +146,13 @@ class RuntimeManager:
         )
         watcher = threading.Thread(target=self._watch, args=(mode, proc), daemon=True)
         watcher.start()
-        if mode == "mapping" and str((launch_args or {}).get("map_file", "")).strip():
-            self.set_continued_mapping_localization(True, delay_s=0.5)
         return self.snapshot()
 
     def stop(self, mode: str) -> Dict[str, object]:
         if mode not in {"mapping", "navigation", "base", "handle", "router", "base_drive"}:
             raise ValueError(f"unsupported runtime mode: {mode}")
 
-        if mode == "navigation":
+        if mode in {"navigation", "mapping"}:
             self._stop_relocate()
 
         proc = None
@@ -316,8 +314,7 @@ class RuntimeManager:
         Relocate is not a long-running stack: nav_relocate.py auto-detects the
         running map, samples /scan, publishes /initialpose, then exits on its own.
         It can run while navigation is active, or while continued mapping is
-        waiting in localization mode. In the latter case a successful match
-        switches slam_toolbox back to mapping mode.
+        waiting in localization mode. Resuming mapping requires the user's start action.
         """
         nav = self._status_for("navigation")
         mapping = self._status_for("mapping")
@@ -373,19 +370,7 @@ class RuntimeManager:
         watcher.start()
         return self.snapshot()
 
-    def set_continued_mapping_localization(
-        self, enabled: bool, delay_s: float = 0.0
-    ) -> bool:
-        if delay_s > 0.0:
-            timer = threading.Timer(
-                delay_s,
-                self.set_continued_mapping_localization,
-                kwargs={"enabled": enabled},
-            )
-            timer.daemon = True
-            timer.start()
-            return True
-
+    def set_continued_mapping_localization(self, enabled: bool) -> bool:
         mapping = self._status_for("mapping")
         launch_args = mapping.get("launch_args", {})
         if (
@@ -436,8 +421,8 @@ class RuntimeManager:
         )
         return success
 
-    def activate_continued_mapping(self, delay_s: float = 0.0) -> bool:
-        return self.set_continued_mapping_localization(False, delay_s=delay_s)
+    def activate_continued_mapping(self) -> bool:
+        return self.set_continued_mapping_localization(False)
 
     def _stop_relocate(self) -> None:
         proc = None
@@ -653,14 +638,12 @@ class RuntimeManager:
 
     def _watch(self, mode: str, proc: subprocess.Popen) -> None:
         code = proc.wait()
-        completed_meta: Dict[str, object] = {}
         with self._lock:
             current = self._procs.get(mode)
             if current is not proc:
                 self._close_log_handle(mode)
                 return
             stopping = bool(self._meta.get(mode, {}).get("stopping", False))
-            completed_meta = dict(self._meta.get(mode, {}))
             self._close_log_handle(mode)
             self._procs.pop(mode, None)
             meta = self._meta.setdefault(mode, {})
@@ -671,13 +654,6 @@ class RuntimeManager:
         level = "info" if stopping or code == 0 else "warn"
         message = f"{mode} process exited"
         self.state_store.add_event(level, message, {"code": code})
-        if (
-            mode == "relocate"
-            and code == 0
-            and not stopping
-            and completed_meta.get("resume_mapping")
-        ):
-            self.activate_continued_mapping(delay_s=0.8)
 
     def _terminate_process_group(self, proc: subprocess.Popen) -> None:
         try:

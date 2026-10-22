@@ -31,6 +31,7 @@ const appState = {
   previewWorkspaceReady: false,
   previewEditActive: false,
   navMapName: "",
+  mappingMapName: "",
   navLocations: [],
   navLocationsFor: "",
   navRoutes: [],
@@ -61,6 +62,8 @@ const appState = {
   },
   stream: {
     source: null,
+    renderFrame: null,
+    reconnectTimer: null,
     mode: null,
     frames: 0,
     measuredHz: 0,
@@ -717,17 +720,6 @@ function renderStatus(status) {
   setText("overviewScanHz", `${fmt(hz.scan)} Hz`);
   setText("overviewOdomHz", `${fmt(hz.odom)} Hz`);
   setText("overviewTfState", fresh("tf_odom_base_link") ? "正常" : "异常");
-  setText("mappingSensorScan", fresh("scan") ? "正常" : "异常");
-  setText("mappingSensorOdom", fresh("odom") ? "正常" : "异常");
-  setText("mappingSensorTf", fresh("tf_odom_base_link") ? "正常" : "异常");
-  [
-    ["mappingSensorScan", fresh("scan")],
-    ["mappingSensorOdom", fresh("odom")],
-    ["mappingSensorTf", fresh("tf_odom_base_link")],
-  ].forEach(([id, ok]) => {
-    const node = $(id);
-    if (node) node.dataset.state = ok ? "ok" : "error";
-  });
   if (runtime.mapping?.running) {
     setText("mappingElapsed", `已运行 ${formatClockDuration(Date.now() / 1000 - Number(runtime.mapping.started_at || Date.now() / 1000))}`);
   }

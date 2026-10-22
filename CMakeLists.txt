@@ -17,7 +17,7 @@ endif()
 
 # Find dependencies
 find_package(ament_cmake REQUIRED) # 用于ROS 2的ament_cmake
-find_package(Boost REQUIRED COMPONENTS thread) # Boost库
+find_package(Boost REQUIRED COMPONENTS thread serialization) # Boost库
 find_package(rclcpp REQUIRED) # ROS 2的C++客户端库
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
@@ -29,6 +29,9 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(laser_geometry REQUIRED)
+find_package(slam_toolbox REQUIRED)
+find_package(nav2_map_server REQUIRED)
+find_package(TBB REQUIRED)
 
 set(dependencies
   rclcpp
@@ -82,6 +85,27 @@ ament_target_dependencies(scan_fusion_node ${dependencies})
 target_link_libraries(scan_fusion_node
   ${Boost_LIBRARIES}
 )
+
+add_executable(fixed_localization_node src/rosnode/fixed_localization_node.cpp)
+target_compile_features(fixed_localization_node PRIVATE cxx_std_17)
+ament_target_dependencies(fixed_localization_node slam_toolbox nav2_map_server)
+# Humble STB exports the RViz target separately from its legacy core library list.
+foreach(stb_library localization_slam_toolbox toolbox_common kartoSlamToolbox slam_toolbox__rosidl_typesupport_cpp)
+  find_library(FINAV_${stb_library}_LIBRARY NAMES ${stb_library}
+    HINTS "${slam_toolbox_DIR}/../../../lib" REQUIRED)
+  target_link_libraries(fixed_localization_node ${FINAV_${stb_library}_LIBRARY})
+endforeach()
+target_link_libraries(fixed_localization_node Boost::thread Boost::serialization TBB::tbb)
+
+add_executable(continued_mapping_node src/rosnode/continued_mapping_node.cpp)
+target_compile_features(continued_mapping_node PRIVATE cxx_std_17)
+ament_target_dependencies(continued_mapping_node slam_toolbox std_msgs nav2_map_server)
+find_library(FINAV_CONTINUED_MAPPING_LIBRARY NAMES map_and_localization_slam_toolbox
+  HINTS "${slam_toolbox_DIR}/../../../lib" REQUIRED)
+target_link_libraries(continued_mapping_node ${FINAV_CONTINUED_MAPPING_LIBRARY}
+  ${FINAV_localization_slam_toolbox_LIBRARY} ${FINAV_toolbox_common_LIBRARY}
+  ${FINAV_kartoSlamToolbox_LIBRARY} ${FINAV_slam_toolbox__rosidl_typesupport_cpp_LIBRARY}
+  Boost::thread Boost::serialization TBB::tbb)
 
 # Declare a C++ executable for serial_bridge_node
 # add_executable(serial_bridge_node 
@@ -172,7 +196,7 @@ install(DIRECTORY
   FILES_MATCHING PATTERN "*.py"
 )
 
-install(TARGETS hins_he_lidar_node scan_fusion_node # serial_bridge_node
+install(TARGETS hins_he_lidar_node scan_fusion_node fixed_localization_node continued_mapping_node # serial_bridge_node
   EXPORT export_${PROJECT_NAME}
   DESTINATION lib/${PROJECT_NAME})
 

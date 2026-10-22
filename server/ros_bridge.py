@@ -123,6 +123,18 @@ class RosBridge:
         self._stop_pending = None
         self._save_lock = threading.Lock()
         self._save_thread = None
+        self._setting_lock = threading.Lock()
+
+    def request_setting(self, kind: str, value) -> None:
+        with self._setting_lock:
+            reply = queue.Queue(maxsize=1)
+            self.command({"type": "setting", "kind": kind, "value": value, "reply": reply})
+            try:
+                result = reply.get(timeout=3.0)
+            except queue.Empty as exc:
+                raise RequestError(504, "设置回执超时，实际状态尚未确认") from exc
+            if not result["successful"]:
+                raise RequestError(503, result["reason"])
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -180,18 +192,18 @@ class RosBridge:
         if self._save_thread:
             self._save_thread.join(timeout=5.0)
 
-    def save_map(self, name):
+    def save_map(self, name, on_saved=None):
         if self._closed.is_set() or not self.state_store.snapshot()["ros"]["connected"]:
             raise RequestError(503, "ROS bridge is offline")
         if not self._save_lock.acquire(blocking=False):
             raise RequestError(409, "A map save is already running")
         job = {"id": uuid.uuid4().hex, "name": name, "state": "running", "started_at": time.time()}
         self.state_store.update_status({"map_save": {**job, "error": None, "finished_at": None}})
-        self._save_thread = threading.Thread(target=self._save_map_job, args=(job,), daemon=True)
+        self._save_thread = threading.Thread(target=self._save_map_job, args=(job, on_saved), daemon=True)
         self._save_thread.start()
         return job
 
-    def _save_map_job(self, job):
+    def _save_map_job(self, job, on_saved=None):
         process = None
         output = tempfile.TemporaryFile()
         try:
@@ -207,6 +219,8 @@ class RosBridge:
                 output.seek(max(0, output.tell() - 4096))
                 detail = output.read().decode("utf-8", errors="replace").strip()
                 raise RuntimeError(f"Map save failed (exit {process.returncode}): {detail}")
+            if on_saved is not None:
+                on_saved()
             self.state_store.update_status({"map_save": {"state": "succeeded", "finished_at": time.time()}})
             self.state_store.add_event("info", "map saved", job)
         except Exception as exc:
@@ -286,6 +300,7 @@ class _BridgeNode:
         from std_msgs.msg import Bool, Empty, String, UInt16
         from tf2_msgs.msg import TFMessage
         from tf2_ros import Buffer, TransformListener
+        from rcl_interfaces.srv import SetParametersAtomically
 
         self.state_store = state_store
         self.bridge = bridge
@@ -295,6 +310,10 @@ class _BridgeNode:
         self.Twist = Twist
         self.Empty = Empty
         self.String = String
+        self.setting_clients = {
+            "navigation_speed": self.create_client(SetParametersAtomically, "/nav_control/set_speed"),
+            "handle_gear": self.create_client(SetParametersAtomically, "/handle_control/set_gear"),
+        }
         self.handle_mapping = bridge.handle_mapping
         self.joystick_preemption_enabled = bridge.joystick_preemption_enabled
 
@@ -315,6 +334,8 @@ class _BridgeNode:
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
         self.create_subscription(OccupancyGrid, "/map", lambda m: _BridgeNode._on_map(self, m), map_qos)
+        self.create_subscription(String, "/slam_toolbox/continued_mapping_state",
+                                 lambda m: _BridgeNode._on_continued_mapping(self, m), map_qos)
         self.create_subscription(
             OccupancyGrid,
             "/planning_map",
@@ -406,7 +427,10 @@ class _BridgeNode:
             origin_yaw,
             zlib.crc32(raw_map),
         )
-        if self._last_map_signature == signature:
+        # Runtime switches clear the scene independently of this subscriber.
+        # A retained, identical map must repopulate that empty cache.
+        if (self._last_map_signature == signature
+                and self.state_store.snapshot_scene()["map"] is not None):
             return
         self._last_map_signature = signature
 
@@ -451,7 +475,8 @@ class _BridgeNode:
             origin_yaw,
             zlib.crc32(raw_map),
         )
-        if self._last_planning_map_signature == signature:
+        if (self._last_planning_map_signature == signature
+                and self.state_store.snapshot_scene()["planning_map"] is not None):
             return
         self._last_planning_map_signature = signature
         self.state_store.update_scene(
@@ -569,7 +594,7 @@ class _BridgeNode:
         )
         if pose_in_map is None:
             return
-        step = max(1, len(msg.ranges) // 720)
+        step = max(1, (len(msg.ranges) + 719) // 720)
         packed_ranges = array("H")
         for i in range(0, len(msg.ranges), step):
             distance = float(msg.ranges[i])
@@ -662,6 +687,13 @@ class _BridgeNode:
             self.state_store.update_status({"control": patch})
 
     @staticmethod
+    def _on_continued_mapping(self: Any, msg: Any) -> None:
+        prefix, separator, stage = str(msg.data).rpartition("\n")
+        if separator and stage in {"localizing", "ready", "mapping"}:
+            self.state_store.update_status({"continued_mapping": {
+                "prefix": str(Path(prefix).resolve()), "stage": stage, "updated_at": time.time()}})
+
+    @staticmethod
     def _refresh_pose_map(self: Any) -> None:
         pose = _BridgeNode._lookup_pose_in_map(self, "base_link")
         if pose is None:
@@ -724,7 +756,27 @@ class _BridgeNode:
     @staticmethod
     def _handle_command(self: Any, cmd: Dict[str, Any]) -> None:
         ctype = cmd.get("type", "")
-        if ctype == "manual_drive":
+        if ctype == "setting":
+            from rcl_interfaces.srv import SetParametersAtomically
+            from rclpy.parameter import Parameter
+
+            client = self.setting_clients[cmd["kind"]]
+            if not client.service_is_ready():
+                cmd["reply"].put_nowait({"successful": False, "reason": "设置接口未就绪，请先更新并重启对应节点"})
+                return
+            request = SetParametersAtomically.Request()
+            values = cmd["value"] if cmd["kind"] == "navigation_speed" else {"gear": cmd["value"]}
+            request.parameters = [Parameter(name, value=value).to_parameter_msg() for name, value in values.items()]
+            def completed(future):
+                try:
+                    result = future.result().result
+                    response = {"successful": result.successful, "reason": result.reason}
+                except Exception as exc:
+                    response = {"successful": False, "reason": str(exc)}
+                cmd["reply"].put_nowait(response)
+            client.call_async(request).add_done_callback(completed)
+
+        elif ctype == "manual_drive":
             _BridgeNode._publish_manual_drive(
                 self,
                 float(cmd.get("linear", 0.0)),
@@ -794,7 +846,7 @@ class _BridgeNode:
             msg.data = name
             self.pub_voice.publish(msg)
             self.state_store.update_status({"nav_voice": {"command": name, "updated_at": time.time()}})
-            _BridgeNode._event(self, "info", "location command published", {"name": name})
+            _BridgeNode._event(self, "info", "destination command published", {"name": name})
 
     @staticmethod
     def _on_voice_status(self: Any, msg: Any) -> None:
@@ -838,6 +890,7 @@ class _BridgeNode:
                     "joystick_updated_at": self._last_seen.get("js_state"),
                     "gear": self._handle_gear if gear_online else None,
                     "gear_online": gear_online,
+                    "gear_write_ready": self.setting_clients["handle_gear"].service_is_ready(),
                     "gear_updated_at": self._last_seen.get("handle_gear"),
                     "joystick_preemption_enabled": self.joystick_preemption_enabled,
                 },

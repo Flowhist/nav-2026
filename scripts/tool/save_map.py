@@ -18,7 +18,35 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
+from pathlib import Path
+
+import yaml
+
+
+def preserve_unknown_threshold(save_path: str) -> None:
+    """Keep Nav2's trinary gray-205 pixels unknown when the image is reloaded."""
+    path = Path(save_path + ".yaml")
+    metadata = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if metadata.get("mode", "trinary") != "trinary" or metadata.get("negate", 0):
+        return
+    if float(metadata.get("free_thresh", 0.25)) <= 0.196:
+        return
+    metadata["free_thresh"] = 0.196
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".map-metadata-", delete=False) as output:
+            temporary = Path(output.name)
+            yaml.safe_dump(metadata, output, sort_keys=False, allow_unicode=True)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(temporary, path.stat().st_mode & 0o777)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
 
 
 def sanitize_name(name: str) -> str:
@@ -153,6 +181,8 @@ def main():
             print(err1)
         if not ensure_pgm_yaml_with_fallback(save_path):
             sys.exit(2)
+
+    preserve_unknown_threshold(save_path)
 
     print("[INFO] 调用 /slam_toolbox/serialize_map ...")
     rc2, out2, err2 = run_cmd(cmd_serialize)

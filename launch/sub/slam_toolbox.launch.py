@@ -119,8 +119,8 @@ def generate_launch_description():
     )
 
     continued_mapping_node = Node(
-        package="slam_toolbox",
-        executable="map_and_localization_slam_toolbox_node",
+        package="finav",
+        executable="continued_mapping_node",
         name="slam_toolbox",
         output="screen",
         condition=IfCondition(
@@ -154,8 +154,8 @@ def generate_launch_description():
     # 通过map_file_name和map_start_at_dock参数指定,节点启动时会自动加载地图
     # 地图路径格式: maps/{map_name}/{map_name}
     localization_slam_toolbox_node = Node(
-        package="slam_toolbox",
-        executable="localization_slam_toolbox_node",
+        package="finav",
+        executable="fixed_localization_node",
         name="slam_toolbox",
         output="screen",
         condition=IfCondition(PythonExpression(["'", mode, "' == 'localization'"])),

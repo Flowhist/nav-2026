@@ -23,18 +23,34 @@ relocate:
     coarse_prefilter_xy_step_m: 0.50
     coarse_prefilter_top_k: 80
     coarse_refine_radius_m: 0.35
-    # 低置信 fallback：默认只在 fast 候选附近扩展，不直接全图重扫
+    # 低置信时先局部扩展，仍不明确再全图搜索
     fallback_full_search: true
     fallback_limited_search: true
     fallback_limited_radius_m: 1.2
     fallback_limited_max_candidates: 8000
+    # 快搜仅高分时直接接受；中等分数即使分差足够，也需扩大搜索验证
+    fast_accept_score: 0.70
     # 精搜索范围与分辨率，用于最终姿态微调
     fine_xy_radius_m: 0.30
     fine_xy_step_m: 0.05
     fine_yaw_radius_deg: 10.0
     fine_yaw_step_deg: 2.0
     # 保留的候选数量
-    top_k: 5
+    top_k: 12
+    # 将相邻小误差视为同一候选，保留不同位置/朝向的假设
+    hypothesis_separation_m: 0.50
+    hypothesis_separation_deg: 15.0
+    # 粗搜索容忍采样误差，精搜索仍使用下方 match_sigma_m
+    coarse_match_sigma_m: 0.30
+    # 对激光射线穿过地图障碍的候选扣分
+    ray_obstacle_penalty: 0.35
+    # 离线对照选用的组合：候选验证后只微调前三个，验证分数下降则保留原候选
+    candidate_ray_validation: true
+    continuous_refinement: true
+    continuous_refine_candidates: 3
+    precomputed_scores: true
+    # 实验项：平均更快，但个别场景变慢，因此默认关闭
+    multiscale_coarse_search: false
     # 匹配评分参数：贴墙/点云偏移时可适当放宽 sigma 或阈值
     max_endpoint_dist_m: 0.55
     match_sigma_m: 0.16

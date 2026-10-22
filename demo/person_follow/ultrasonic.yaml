@@ -1,0 +1,30 @@
+# DCCS dauxi driver configuration for the independent follow demo.
+# Positions are measured in base_link meters; yaw and height are unmeasured.
+poll_period: 0.1
+publish_period: 0.1
+buses:
+  - name: bus_0
+    port: /dev/serial/by-path/platform-3610000.usb-usb-0:2.1.4:1.0-port0
+    baudrate: 9600
+    bytesize: 8
+    parity: NONE
+    stopbits: 1
+    timeout: 0.1
+    inter_request_delay: 0.03
+    sensors:
+      # front_left: x=0.64, y=0.31
+      - name: ultrasonic_0
+        address: 0x10
+        command: 0x01
+      # front_right: x=0.64, y=-0.31
+      - name: ultrasonic_1
+        address: 0x11
+        command: 0x01
+      # left: x=0.57, y=0.32
+      - name: ultrasonic_2
+        address: 0x12
+        command: 0x01
+      # right: x=0.57, y=-0.32
+      - name: ultrasonic_3
+        address: 0x13
+        command: 0x01

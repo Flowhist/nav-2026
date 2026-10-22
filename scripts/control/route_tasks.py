@@ -66,6 +66,7 @@ class RouteTasks:
             return {}
         return {"task_type": "route", "route_id": self.route_id,
                 "route_name": self.route["name"] if self.route else self.route_id,
+                "end_name": self.route.get("end_name", "") if self.route else "",
                 "map_name": self.map_file}
 
     def _on_command(self, message):

@@ -53,6 +53,15 @@ function renderManualControlStatus(control = appState.status?.control || {}) {
   const availability = manualControlAvailability();
   const joystickPriority = control.joystick_preemption_enabled !== false;
   nodes.gear.textContent = control.gear_online ? `${control.gear} 档 · 跟随手柄` : "不可用";
+  const gearSlider = $("manualGearSlider");
+  if (!manualControl.gearEditing && !manualControl.gearPending && control.gear_online) gearSlider.value = control.gear;
+  gearSlider.disabled = !!manualControl.gearPending || !control.gear_online || control.gear_write_ready === false || !appState.status?.ros?.connected;
+  renderGearSlider();
+  if (!manualControl.gearPending && control.gear_write_ready === false) {
+    $("manualGearStatus").textContent = "档位设置接口未就绪";
+  } else if ($("manualGearStatus").textContent === "档位设置接口未就绪") {
+    $("manualGearStatus").textContent = "";
+  }
   nodes.overrideWarning.classList.toggle("hidden", joystickPriority);
   nodes.state.textContent = availability.label;
   nodes.enable.disabled = !availability.ready && !manualControl.enabled;
@@ -209,7 +218,7 @@ function isEditableTarget(target) {
 
 function manualControlOnPageChange(page) {
   const root = $("manualDrive");
-  const target = page === "mapping" ? $("mappingCanvas") : page === "navigation" ? $("navigationCanvas") : null;
+  const target = page === "mapping" ? $("mappingCanvas") : null;
   setManualPanelOpen(false);
   if (root && target) target.closest(".canvas-shell")?.appendChild(root);
   if (root) root.classList.toggle("hidden", !target);
@@ -242,7 +251,7 @@ function bindManualControl() {
 
   window.addEventListener("keydown", (event) => {
     const key = event.key.toLowerCase();
-    if (!manualControl.enabled || manualControl.pointerId !== null || isEditableTarget(event.target)) return;
+    if (appState.page !== "mapping" || !manualControl.enabled || manualControl.pointerId !== null || isEditableTarget(event.target)) return;
     if (!["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(key)) return;
     event.preventDefault();
     manualControl.keys.add(key);

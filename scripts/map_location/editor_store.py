@@ -185,7 +185,7 @@ def _normalize_routes(items: object) -> list[dict[str, object]]:
     if not isinstance(items, list):
         raise DocumentError("invalid_routes", "routes must be a list", "routes")
     result = []
-    ids, names = set(), set()
+    ids, names, end_names = set(), set(), set()
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             raise DocumentError("invalid_route", "route must be an object")
@@ -196,6 +196,15 @@ def _normalize_routes(items: object) -> list[dict[str, object]]:
             raise DocumentError("duplicate_route", f"Duplicate route: {name}", prefix)
         ids.add(ident)
         names.add(name)
+        end_name = item.get("end_name", "")
+        if not isinstance(end_name, str):
+            raise DocumentError("invalid_name", "Route end name must be text", f"{prefix}.end_name")
+        end_name = end_name.strip()
+        if end_name:
+            end_name = _name(end_name, f"{prefix}.end_name")
+            if end_name.casefold() in end_names:
+                raise DocumentError("duplicate_route_end", f"路线终点名字重复: {end_name}", f"{prefix}.end_name")
+            end_names.add(end_name.casefold())
         closed = _boolean(item.get("closed", False), f"{prefix}.closed")
         direction = str(item.get("direction", "forward")).strip()
         if direction not in ROUTE_DIRECTIONS:
@@ -249,6 +258,7 @@ def _normalize_routes(items: object) -> list[dict[str, object]]:
         route = {
             "id": ident,
             "name": name,
+            "end_name": end_name,
             "closed": closed,
             "direction": direction,
             "repeat_count": repeat_count,
@@ -395,7 +405,11 @@ class EditorStore:
                 return empty_document(
                     map_name, map_source_sha256, clearance, clearance_source
                 )
-            return self._read(path, map_name)
+            document = self._read(path, map_name)
+            if document["settings"]["safety_clearance_source"] != "editor_override":
+                document["settings"]["safety_clearance_m"] = float(clearance)
+                document["settings"]["safety_clearance_source"] = clearance_source
+            return document
 
     def save(
         self, map_name: str, document: object, expected_revision: int

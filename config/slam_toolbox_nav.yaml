@@ -89,6 +89,9 @@ slam_toolbox:
     # 交互式模式（用于SLAM Toolbox Panel）
     interactive_mode: false
     
-    # 地图更新参数
-    # 导航测试需要向 RViz 和 nav_path_plan 发布 /map；定位模式不会改写地图内容。
+    # Finav 定位扩展：默认固定发布 map_file_name 同名 YAML/PGM。
+    # 不重建栅格；STB 扫描匹配与定位缓存保留。修改后重启导航生效。
+    # false 恢复原生 STB 定位栅格更新；不影响独立建图模式。
+    freeze_navigation_map: true
+    # 仅 freeze_navigation_map: false 时用于周期性重建、发布栅格。
     map_update_interval: 1.0

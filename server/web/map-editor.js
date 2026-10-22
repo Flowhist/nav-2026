@@ -157,7 +157,8 @@ class FinavMapEditor {
   }
 
   async exit() {
-    if (!this.ready || !this.active) return;
+    if (window.finavRasterEditor?.active && !await window.finavRasterEditor.cancel()) return false;
+    if (!this.ready || !this.active) return true;
     await this.saveQueue;
     this.active = false;
     appState.previewEditActive = false;
@@ -169,11 +170,13 @@ class FinavMapEditor {
       appState.navLocationsFor = "";
       loadNavLocations(true).catch(console.error);
     }
+    return true;
   }
 
   applyMode() {
     $("previewLayout").classList.toggle("editing", this.active);
     $("editorTools").classList.toggle("hidden", !this.active);
+    $("rasterSection").classList.toggle("hidden", !this.active);
     $("previewEditActions").classList.toggle("hidden", !this.active);
     $("editorSaveState").classList.toggle("hidden", !this.active);
     $("editorCoordinates").classList.toggle("hidden", !this.active);
@@ -399,6 +402,7 @@ class FinavMapEditor {
       html += `<div class="editor-field-group"><span>位置</span><div class="editor-field-row">${this.numberField("X", "center.x", object.center.x)}${this.numberField("Y", "center.y", object.center.y)}</div></div><div class="editor-field-group"><span>尺寸</span><div class="editor-field-row">${this.numberField("长度", "width_m", object.width_m, "m", 'min="0.01"')}${this.numberField("宽度", "height_m", object.height_m, "m", 'min="0.01"')}</div></div>${this.numberField("旋转", "yaw_deg", object.yaw_deg, "°")}`;
     } else {
       const preview = this.routePreviews.get(object.id);
+      html += this.textField("终点名字", "end_name", object.end_name || "");
       const status = !preview ? "尚未预览" : preview.status === "invalid" ? `发现 ${preview.collisions?.length || 0} 个冲突路段，已标红` : preview.status === "valid_with_fallbacks" ? `有效，${preview.fallback_waypoint_ids.length} 个转角未平滑` : "有效";
       const statusKind = preview?.status === "invalid" ? "error" : preview?.status?.startsWith("valid") ? "valid" : "";
       const directionLabel = this.routeDirectionLabel(object);
@@ -432,6 +436,7 @@ class FinavMapEditor {
       const repeat = object.closed ? (object.repeat_count === 0 ? "持续巡航" : `${object.repeat_count} 圈`) : "单次";
       rows = `<section class="map-detail-section"><h3>路线信息</h3><div class="map-detail-row"><span>形式</span><strong>${object.closed ? "闭环路线" : "开放路线"}</strong></div><div class="map-detail-row"><span>方向</span><strong>${escapeHtml(this.routeDirectionLabel(object))}</strong></div><div class="map-detail-row"><span>巡航次数</span><strong>${repeat}</strong></div><div class="map-detail-row"><span>路线限速</span><strong>${this.round(object.speed_limit_mps)} m/s</strong></div><div class="map-detail-row"><span>关键点</span><strong>${object.waypoints.length}</strong></div><div class="map-detail-row"><span>安全净空</span><strong>${this.round(this.document.settings.safety_clearance_m)} m</strong></div></section>`;
     }
+    if (this.selection.type === "route") rows += `<div class="map-detail-row"><span>终点名字</span><strong>${escapeHtml(object.end_name || "未设置")}</strong></div>`;
     return `<div class="editor-property-type">${typeLabel}</div><div class="map-detail-name">${escapeHtml(object.name)}</div>${rows}`;
   }
 

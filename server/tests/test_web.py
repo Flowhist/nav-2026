@@ -11,6 +11,7 @@ import threading
 import time
 from types import SimpleNamespace
 import unittest
+import zlib
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -62,6 +63,162 @@ def make_map(app, name="test"):
 
 
 class WebTests(unittest.TestCase):
+    def test_route_end_name_survives_http_save_and_fresh_reader(self):
+        from editor_store import EditorStore
+        directory = make_map(self.app)
+        status, loaded = self.request("GET", "/api/maps/test/editor")
+        self.assertEqual(status, 200)
+        document = loaded["document"]
+        document["routes"] = [{"id": "route", "name": "Corridor", "end_name": "Lobby",
+            "closed": False, "direction": "forward", "repeat_count": 1,
+            "speed_limit_mps": .25, "waypoints": [
+                {"id": "a", "x": 5, "y": 5}, {"id": "b", "x": 12, "y": 5}]}]
+        status, saved = self.request("PUT", "/api/maps/test/editor", {
+            "expected_revision": document["revision"], "document": document})
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["document"]["routes"][0]["end_name"], "Lobby")
+        status, reloaded = self.request("GET", "/api/maps/test/editor")
+        self.assertEqual(status, 200)
+        self.assertEqual(reloaded["document"]["routes"][0]["end_name"], "Lobby")
+        fresh = EditorStore(directory.parent).load("test", "hash", .6)
+        self.assertEqual(fresh["routes"][0]["end_name"], "Lobby")
+
+    def test_navigation_speed_accepts_raised_limits(self):
+        import math
+        path = self.app.config_dir / "nav.yaml"
+        path.write_text("nav_control:\n  ros__parameters:\n    linear_speed_mps: 0.6\n    angular_speed_degps: 28.0\n    drive_angular_speed_degps: 25.0\n")
+        _, loaded = self.request("GET", "/api/nav/speed")
+        self.assertEqual(loaded["limits"]["linear_speed_mps"][1], 2.0)
+        self.assertAlmostEqual(math.radians(loaded["limits"]["angular_speed_degps"][1]), 0.8)
+        body = {"linear_speed_mps": 2.0, "angular_speed_degps": math.degrees(0.8),
+                "drive_angular_speed_degps": math.degrees(0.8), "expected_revision": loaded["revision"]}
+        status, saved = self.request("POST", "/api/nav/speed", body)
+        self.assertEqual(status, 200)
+        body["expected_revision"] = saved["revision"]
+        for key in ("linear_speed_mps", "angular_speed_degps", "drive_angular_speed_degps"):
+            self.assertEqual(self.request("POST", "/api/nav/speed", {**body, key: body[key] + 0.01})[0], 400)
+
+    def test_navigation_speed_preserves_yaml_and_checks_revision(self):
+        path = self.app.config_dir / "nav.yaml"
+        original = "# navigation\nnav_control:\n  ros__parameters:\n    linear_speed_mps: 0.5 # limit\n    angular_speed_degps: 20.0\n    drive_angular_speed_degps: 25.0\n"
+        path.write_text(original)
+        status, data = self.request("GET", "/api/nav/speed")
+        self.assertEqual(status, 200)
+        body = {"linear_speed_mps": 0.3, "angular_speed_degps": 15.0, "drive_angular_speed_degps": 18.0, "expected_revision": data["revision"]}
+        status, result = self.request("POST", "/api/nav/speed", body)
+        self.assertEqual(status, 200)
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["applied"])
+        self.assertEqual(path.read_text(), original.replace("0.5", "0.3").replace("20.0", "15.0").replace("25.0", "18.0"))
+        self.assertEqual(self.request("POST", "/api/nav/speed", body)[0], 409)
+
+    def test_navigation_speed_rejects_invalid_and_reports_apply_failure(self):
+        path = self.app.config_dir / "nav.yaml"
+        path.write_text("nav_control:\n  ros__parameters:\n    linear_speed_mps: 0.5\n    angular_speed_degps: 20.0\n    drive_angular_speed_degps: 25.0\n")
+        _, data = self.request("GET", "/api/nav/speed")
+        for value in (True, "0.3", -1, 0, 2.01, float("nan")):
+            self.assertEqual(self.request("POST", "/api/nav/speed", {
+                "linear_speed_mps": value, "expected_revision": data["revision"]})[0], 400)
+        self.app.runtime.snapshot = lambda: {"navigation": {"running": True}}
+        with patch.object(self.app.bridge, "request_setting", side_effect=RequestError(503, "offline")):
+            status, result = self.request("POST", "/api/nav/speed", {
+                "linear_speed_mps": 0.25, "angular_speed_degps": 20.0, "drive_angular_speed_degps": 25.0, "expected_revision": data["revision"]})
+        self.assertEqual(status, 200)
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["applied"])
+        self.assertEqual(result["apply_error"], "offline")
+        with patch.object(self.app.bridge, "request_setting") as apply:
+            status, result = self.request("POST", "/api/nav/speed", {
+                "linear_speed_mps": 0.35, "angular_speed_degps": 20.0, "drive_angular_speed_degps": 25.0, "expected_revision": result["revision"]})
+        self.assertEqual(status, 200)
+        self.assertTrue(result["applied"])
+        apply.assert_called_once_with("navigation_speed", {"linear_speed_mps": 0.35, "angular_speed_degps": 20.0, "drive_angular_speed_degps": 25.0})
+        previous = path.read_text()
+        self.assertEqual(self.request("POST", "/api/nav/speed", {
+            "linear_speed_mps": 0.2, "angular_speed_degps": 90, "drive_angular_speed_degps": 20.0, "expected_revision": result["revision"]})[0], 400)
+        self.assertEqual(path.read_text(), previous)
+
+    def test_remote_gear_requires_online_and_acknowledgment(self):
+        self.assertEqual(self.request("POST", "/api/control/gear", {"gear": 2})[0], 409)
+        self.app.state.update_status({"control": {"gear_online": True}})
+        for gear in (0, 6, True, 2.0, "2"):
+            self.assertEqual(self.request("POST", "/api/control/gear", {"gear": gear})[0], 400)
+        with patch.object(self.app.bridge, "request_setting") as apply:
+            self.assertEqual(self.request("POST", "/api/control/gear", {"gear": 3})[0], 200)
+            apply.assert_called_once_with("handle_gear", 3)
+        with patch.object(self.app.bridge, "request_setting", side_effect=RequestError(504, "timeout")):
+            self.assertEqual(self.request("POST", "/api/control/gear", {"gear": 4})[0], 504)
+
+    def test_identical_maps_repopulate_scene_after_runtime_clear(self):
+        state = self.app.state
+        node = SimpleNamespace(state_store=state, _last_map_signature=None,
+                               _last_planning_map_signature=None)
+        msg = SimpleNamespace(
+            header=SimpleNamespace(frame_id="map"), data=[-1, 0, 100],
+            info=SimpleNamespace(width=3, height=1, resolution=0.05,
+                origin=SimpleNamespace(position=SimpleNamespace(x=0.0, y=0.0),
+                    orientation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0))))
+        with patch.object(_BridgeNode, "_touch"):
+            for key, callback in (("map", _BridgeNode._on_map),
+                                  ("planning_map", _BridgeNode._on_planning_map)):
+                with self.subTest(map_type=key):
+                    callback(node, msg)
+                    first = state.snapshot_scene()
+                    callback(node, msg)
+                    self.assertEqual(state.snapshot_scene()[key + "_version"],
+                                     first[key + "_version"])
+                    RuntimeManager._clear_live_scene(SimpleNamespace(state_store=state))
+                    cleared = state.snapshot_scene()
+                    self.assertIsNone(cleared[key])
+                    callback(node, msg)
+                    restored = state.snapshot_scene()
+                    self.assertEqual(restored[key]["width"], 3)
+                    self.assertEqual(restored[key]["encoding"], first[key]["encoding"])
+                    self.assertGreater(restored[key + "_version"], cleared[key + "_version"])
+
+    def test_raster_save_preserves_other_pixels_and_checks_version(self):
+        directory = make_map(self.app)
+        original = (directory / "test.pgm").read_bytes()
+        preview = load_map_preview(self.app.maps_dir, "test")
+        body = {"source_sha256": preview["source_sha256"], "cells": [[0, 100], [21, -1], [399, 0]]}
+        self.assertEqual(self.request("PUT", "/api/maps/test/raster", body)[0], 200)
+        from editor_map_io import load_map
+        data = load_map(self.app.maps_dir, "test")
+        self.assertEqual(data.occupancy[0, 0], 100)
+        self.assertEqual(data.occupancy[1, 1], -1)
+        self.assertEqual(data.pixels[0, 1], 255)
+        self.assertEqual((directory / "test.pgm.brush-backup").read_bytes(), original)
+        self.assertEqual(self.request("PUT", "/api/maps/test/raster", body)[0], 409)
+
+    def test_raster_rejects_invalid_cells_and_active_navigation(self):
+        directory = make_map(self.app)
+        original = (directory / "test.pgm").read_bytes()
+        body = {"source_sha256": load_map_preview(self.app.maps_dir, "test")["source_sha256"], "cells": [[400, 0]]}
+        self.assertEqual(self.request("PUT", "/api/maps/test/raster", body)[0], 400)
+        self.assertEqual((directory / "test.pgm").read_bytes(), original)
+        body["cells"] = [[0, 100]]
+        self.app.runtime.snapshot = lambda: {"navigation": {"running": True}}
+        self.assertEqual(self.request("PUT", "/api/maps/test/raster", body)[0], 409)
+
+    def test_raster_negated_map_unknown(self):
+        directory = make_map(self.app)
+        metadata = directory / "test.yaml"
+        metadata.write_text(metadata.read_text().replace("negate: 0", "negate: 1"))
+        body = {"source_sha256": load_map_preview(self.app.maps_dir, "test")["source_sha256"], "cells": [[0, 100], [1, 0], [2, -1]]}
+        self.assertEqual(self.request("PUT", "/api/maps/test/raster", body)[0], 200)
+        from editor_map_io import load_map
+        self.assertEqual(load_map(self.app.maps_dir, "test").occupancy[0, :3].tolist(), [100, 0, -1])
+
+    def test_raster_failed_replace_keeps_original(self):
+        directory = make_map(self.app)
+        original = (directory / "test.pgm").read_bytes()
+        body = {"source_sha256": load_map_preview(self.app.maps_dir, "test")["source_sha256"], "cells": [[0, 100]]}
+        with patch("map_utils.os.replace", side_effect=OSError("disk error")):
+            with self.assertRaises(OSError):
+                self.app._save_map_raster("test", body)
+        self.assertEqual((directory / "test.pgm").read_bytes(), original)
+        self.assertEqual(list(directory.glob(".raster-*")), [])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
@@ -295,6 +452,37 @@ class WebTests(unittest.TestCase):
             for _ in range(8):
                 self.server.stream_slots.release()
 
+    def test_stream_flushes_events_and_preserves_map_versions(self):
+        self.app.state.update_scene({"map": {"width": 400, "data": [0] * 160000}}, map_changed=True)
+        for encoding in ("gzip, deflate", "identity", "gzip;q=0"):
+            with self.subTest(encoding=encoding):
+                client = http.client.HTTPConnection(*self.server.server_address, timeout=3)
+                client.request("GET", "/api/stream?mode=mapping", headers={
+                    "Accept-Encoding": encoding,
+                    "Authorization": "Basic " + base64.b64encode(b"finav:offline-test-password").decode(),
+                })
+                response = client.getresponse()
+                compressed = encoding == "gzip, deflate"
+                self.assertEqual(response.getheader("Content-Encoding"), "gzip" if compressed else None)
+                decoder = zlib.decompressobj(31) if compressed else None
+                received = b""
+                wire_bytes = 0
+                try:
+                    while received.count(b"data: ") < 2 or not received.endswith(b"\n\n"):
+                        chunk = response.read1(65536)
+                        self.assertTrue(chunk)
+                        wire_bytes += len(chunk)
+                        received += decoder.decompress(chunk) if decoder else chunk
+                    events = [json.loads(part[6:]) for part in received.split(b"\n\n") if part.startswith(b"data: ")]
+                    self.assertEqual(events[0]["map"]["width"], 400)
+                    self.assertIsNone(events[1]["map"])
+                    self.assertFalse(events[1]["map_changed"])
+                    if compressed:
+                        self.assertLess(wire_bytes, len(received) // 10)
+                finally:
+                    response.close()
+                    client.close()
+
     def test_config_concurrent_writers(self):
         path = self.app.config_dir / "nav.yaml"
         path.write_text("node: 1\n")
@@ -325,6 +513,27 @@ class WebTests(unittest.TestCase):
             self.assertEqual(result["id"], job["id"])
             self.assertEqual(result["state"], expected)
             self.assertIsNotNone(result["finished_at"])
+
+    def test_save_map_waits_for_annotations_and_reports_failure(self):
+        bridge = self.app.bridge
+        self.app.state.update_status({"ros": {"connected": True}})
+        def inherit():
+            self.assertEqual(self.app.state.snapshot()["map_save"]["state"], "running")
+            raise RuntimeError("annotation write failed")
+        for code in (0, 1):
+            process = MagicMock(returncode=code)
+            process.poll.return_value = code
+            callback = MagicMock(side_effect=inherit)
+            with patch("ros_bridge.subprocess.Popen", return_value=process):
+                bridge.save_map("test", on_saved=callback)
+                bridge._save_thread.join(timeout=2)
+            result = self.app.state.snapshot()["map_save"]
+            self.assertEqual(result["state"], "failed")
+            if code == 0:
+                callback.assert_called_once_with()
+                self.assertIn("annotation write failed", result["error"])
+            else:
+                callback.assert_not_called()
 
     def test_save_map_shutdown_kills_only_its_process_group(self):
         bridge = self.app.bridge
@@ -411,7 +620,7 @@ def preview(port):
     with tempfile.TemporaryDirectory(prefix="finav-web-preview-") as directory:
         app = isolated_app(Path(directory))
         make_map(app)
-        (app.config_dir / "nav.yaml").write_text("nav_control:\n  ros__parameters:\n    max_speed: 0.3\n")
+        (app.config_dir / "nav.yaml").write_text("nav_control:\n  ros__parameters:\n    linear_speed_mps: 0.3\n    angular_speed_degps: 20.0\n    drive_angular_speed_degps: 25.0\n")
         def unavailable(*args, **kwargs):
             raise RequestError(503, "Offline preview: hardware operations are disabled")
         app.runtime.start = app.runtime.stop = app.runtime.restart = unavailable

@@ -71,10 +71,15 @@
                 <button type="button" data-view-action="reset-rotation" aria-label="重置旋转">复位</button>
               </div>
               <div id="manualDrive" class="manual-drive">
-                <button class="manual-drive-trigger" type="button" aria-controls="manualDrivePanel" aria-expanded="false"><span aria-hidden="true">⌁</span>手动控制</button>
+                <button class="manual-drive-trigger" type="button" aria-controls="manualDrivePanel" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 17a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2Z"/><path d="M6 15v-2M12 15V9"/><circle cx="12" cy="6" r="3"/></svg>手动控制</button>
                 <section id="manualDrivePanel" class="manual-drive-panel hidden" aria-label="手动控制面板">
                   <header class="manual-drive-head"><div><strong>手动控制</strong><span class="manual-drive-state">尚未启用</span></div><button class="manual-drive-close" type="button" aria-label="关闭手动控制">×</button></header>
                   <div class="manual-gear"><span>当前档位</span><strong>--</strong></div>
+                  <div class="manual-gear-slider">
+                    <input id="manualGearSlider" type="range" min="1" max="5" step="1" value="1" aria-label="速度档位" aria-valuetext="1 档" disabled />
+                    <div class="manual-gear-ticks" aria-hidden="true"><span>1 档</span><span>2 档</span><span>3 档</span><span>4 档</span><span>5 档</span></div>
+                  </div>
+                  <p id="manualGearStatus" class="field-help" role="status"></p>
                   <p class="manual-override-warning hidden">测试模式：已忽略实体摇杆抢停</p>
                   <div class="manual-front" aria-hidden="true">↑&nbsp; 车头</div>
                   <div class="manual-stick" aria-label="连续方向与速度控制">
@@ -93,16 +98,26 @@
               <span id="mappingRunState" class="run-state idle">未启动</span>
             </div>
             <div id="mappingIdleActions" class="session-state">
-              <p class="state-lead">准备就绪</p>
-              <div class="inspector-list preflight-list">
-                <div><span>雷达</span><strong id="mappingSensorScan">检查中</strong></div>
-                <div><span>里程计</span><strong id="mappingSensorOdom">检查中</strong></div>
-                <div><span>TF</span><strong id="mappingSensorTf">检查中</strong></div>
-              </div>
               <button id="btnStartMapping" class="primary wide" type="button">开始建图</button>
+              <div class="inspector-divider mapping-session-divider" role="separator"></div>
+              <label id="mappingMapFieldLabel" class="field-label">地图</label>
+              <div id="mappingMapPanel" class="nav-select" data-control="mappingMapToggle">
+                <button id="mappingMapToggle" class="nav-select-control" type="button" aria-expanded="false" aria-haspopup="listbox" aria-controls="mappingMapOptions" aria-labelledby="mappingMapFieldLabel mappingMapLabel" disabled><span id="mappingMapLabel">未发现地图</span><span class="nav-select-chevron" aria-hidden="true"></span></button>
+                <div class="nav-select-menu"><div id="mappingMapOptions" class="nav-select-options" role="listbox" aria-label="可用续建地图"></div></div>
+              </div>
+              <button id="btnContinueMapping" class="primary wide" type="button" disabled>继续建图</button>
             </div>
             <div id="mappingActiveActions" class="session-state hidden">
               <p id="mappingElapsed" class="session-elapsed">已运行 --</p>
+              <div id="mappingLocalizationActions" class="hidden">
+                <p id="mappingLocalizationState" class="state-lead">正在加载旧地图</p>
+                <div class="mode-tools">
+                  <button id="btnMappingInitialPose" class="secondary wide" type="button">手动重定位</button>
+                  <button id="btnMappingRelocate" class="secondary wide" type="button">自动重定位</button>
+                  <button id="btnMappingResume" class="primary wide" type="button">开始续建</button>
+                </div>
+                <div class="inspector-divider mapping-session-divider"></div>
+              </div>
               <button id="btnSaveMap" class="primary wide" type="button">保存地图</button>
               <div class="inspector-divider"></div>
               <button id="btnStopMapping" class="tertiary danger-text wide" type="button">结束建图</button>
@@ -154,6 +169,25 @@
               <div class="canvas-toolbar" data-canvas="navigationCanvas" aria-label="导航视图工具">
                 <button type="button" data-view-action="zoom-out" aria-label="缩小">−</button><span class="zoom-value">100%</span><button type="button" data-view-action="zoom-in" aria-label="放大">＋</button><button type="button" data-view-action="fit">适合</button><button type="button" data-view-action="reset-rotation">复位</button>
               </div>
+              <details id="navSpeedPanel" class="nav-speed-popover">
+                <summary aria-controls="navSpeedForm"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg><span>速度设置</span></summary>
+                <section class="nav-speed-section" aria-label="导航速度设置">
+                  <div class="manual-drive-head"><strong>导航速度</strong><button id="btnCloseNavSpeed" class="manual-drive-close" type="button" aria-label="收起速度设置" title="收起速度设置">×</button></div>
+                  <form id="navSpeedForm">
+                    <label class="field-label" for="navSpeedInput">直行速度上限 (m/s)</label>
+                    <div class="nav-speed-row"><input id="navSpeedInput" type="number" min="0.05" max="2" step="0.01" inputmode="decimal" required disabled /></div>
+                    <label class="field-label" for="navRotateSpeedInput">原地转向上限 (°/s)</label>
+                    <div class="nav-speed-row"><input id="navRotateSpeedInput" type="number" min="1" max="45.836623610465864" step="0.1" inputmode="decimal" required disabled /></div>
+                    <label class="field-label" for="navDriveTurnSpeedInput">行进转向上限 (°/s)</label>
+                    <div class="nav-speed-row"><input id="navDriveTurnSpeedInput" type="number" min="1" max="45.836623610465864" step="0.1" inputmode="decimal" required disabled /></div>
+                    <div class="nav-speed-actions">
+                      <button id="btnSaveNavSpeed" class="primary" type="submit" disabled>保存</button>
+                      <button id="btnReloadNavSpeed" class="editor-icon-button" type="button" aria-label="重新加载导航速度" title="重新加载导航速度">↻</button>
+                    </div>
+                    <p id="navSpeedStatus" class="field-help" role="status"></p>
+                  </form>
+                </section>
+              </details>
             </div>
           </section>
 
@@ -179,13 +213,13 @@
                 <label class="field-label" for="navLocationInput">目的地导航</label>
                 <div class="nav-location-row">
                   <div id="navLocationPanel" class="nav-select" data-control="navLocationInput">
-                    <input id="navLocationInput" class="nav-select-control" type="text" placeholder="选择地点" autocomplete="off" role="combobox" aria-autocomplete="none" aria-haspopup="listbox" aria-controls="navLocationOptions" aria-expanded="false" />
+                    <input id="navLocationInput" class="nav-select-control" type="text" placeholder="选择目的地" autocomplete="off" role="combobox" aria-autocomplete="none" aria-haspopup="listbox" aria-controls="navLocationOptions" aria-expanded="false" />
                     <span class="nav-select-chevron" aria-hidden="true"></span>
-                    <div id="navLocationMenu" class="nav-select-menu"><div id="navLocationOptions" class="nav-select-options" role="listbox" aria-label="当前地图可导航地点"></div></div>
+                    <div id="navLocationMenu" class="nav-select-menu"><div id="navLocationOptions" class="nav-select-options" role="listbox" aria-label="当前地图目的地"></div></div>
                   </div>
                   <button id="btnNavLocation" class="primary" type="button">前往</button>
                 </div>
-                <p id="navLocationHint" class="field-help">当前地图尚未标注地点</p>
+                <p id="navLocationHint" class="field-help">当前地图暂无目的地</p>
                 <label class="field-label" for="navRouteSelect">巡线导航</label>
                 <div class="nav-location-row">
                   <div id="navRoutePanel" class="nav-select" data-control="navRouteSelect">
@@ -242,13 +276,33 @@
             </div>
           </header>
           <aside class="preview-side inspector">
+            <div id="editorTools" class="editor-tool-section hidden"><h3>编辑工具</h3><div class="editor-tools" role="toolbar" aria-label="地图编辑工具">
+              <button class="editor-tool active" data-editor-tool="select" type="button" title="选择和移动对象"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 8-6 2-3 6z"/></svg><span>选择</span></button>
+              <button class="editor-tool" data-editor-tool="location" type="button" title="添加地点"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span>地点</span></button>
+              <button class="editor-tool" data-editor-tool="keepout" type="button" title="绘制禁行区"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 2"/><path d="m7 17 10-10"/></svg><span>禁行区</span></button>
+              <button class="editor-tool" data-editor-tool="route" type="button" title="绘制巡航路线"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h3a3 3 0 0 0 3-3v-6a3 3 0 0 1 3-3"/></svg><span>路线</span></button>
+            </div></div>
+            <div id="rasterSection" class="raster-section hidden">
+              <h3>栅格画笔</h3>
+              <button id="btnRasterMode" class="editor-tool" type="button" title="修改地图栅格" aria-pressed="false"><span aria-hidden="true">✎</span><span>画笔</span></button>
+            <div id="rasterTools" class="raster-tools hidden">
+              <div class="raster-swatches" role="group" aria-label="栅格类型">
+                <button type="button" data-raster-value="100" aria-label="占据" title="占据" aria-pressed="true" style="--swatch:#000"></button>
+                <button type="button" data-raster-value="0" aria-label="可通行" title="可通行" aria-pressed="false" style="--swatch:#fff"></button>
+                <button type="button" data-raster-value="-1" aria-label="未知" title="未知" aria-pressed="false" style="--swatch:#888"></button>
+                <span id="rasterColorLabel">占据</span>
+              </div>
+              <label for="rasterRadius">边长 <output id="rasterRadiusValue">3 × 3 格</output></label>
+              <input id="rasterRadius" type="range" min="1" max="40" value="3" />
+              <div class="raster-actions">
+                <button id="btnRasterUndo" type="button" title="撤销笔画" aria-label="撤销笔画" disabled>↶</button>
+                <button id="btnRasterSave" class="primary" type="button" disabled>保存</button>
+                <button id="btnRasterCancel" type="button">取消</button>
+              </div>
+              <span id="rasterStatus" role="status">未修改</span>
+            </div>
+            </div>
             <div id="previewObjectSidebar" class="editor-sidebar">
-              <div id="editorTools" class="editor-tool-section hidden"><h3>编辑工具</h3><div class="editor-tools" role="toolbar" aria-label="地图编辑工具">
-                <button class="editor-tool active" data-editor-tool="select" type="button" title="选择和移动对象"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 8-6 2-3 6z"/></svg><span>选择</span></button>
-                <button class="editor-tool" data-editor-tool="location" type="button" title="添加地点"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span>地点</span></button>
-                <button class="editor-tool" data-editor-tool="keepout" type="button" title="绘制禁行区"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 2"/><path d="m7 17 10-10"/></svg><span>禁行区</span></button>
-                <button class="editor-tool" data-editor-tool="route" type="button" title="绘制巡航路线"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h3a3 3 0 0 0 3-3v-6a3 3 0 0 1 3-3"/></svg><span>路线</span></button>
-              </div></div>
               <div class="editor-section-head"><div><h1>地图对象</h1><span id="editorObjectCount" class="count-label">0 个对象</span></div><button id="btnToggleObjectSearch" class="editor-icon-button" type="button" aria-label="搜索地图对象"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></button></div>
               <input id="editorObjectSearch" class="editor-search hidden" type="search" placeholder="搜索地图对象…" autocomplete="off" />
               <div id="editorObjectTree" class="editor-object-tree"></div>
@@ -329,7 +383,9 @@
   <script src="/app-dock.js?v=20260821-map-workspace-6"></script>
   <script src="/app-pages.js?v=20260821-map-workspace-6"></script>
   <script src="/app-manual-control.js?v=20260821-map-workspace-6"></script>
+  <script src="/app-speed-settings.js?v=1"></script>
   <script src="/map-editor.js?v=20260824-route-segment-1"></script>
+  <script src="/map-raster-editor.js?v=1"></script>
   <script src="/app.js?v=20260821-map-workspace-6"></script>
 </body>
 </html>
