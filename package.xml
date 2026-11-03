@@ -7,6 +7,13 @@
   <author email="denis.dillenberger@gmail.com">Denis Dillenberger</author>
   <license>BSD</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
+  <depend>libmrpt-nav-dev</depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>interfaces</depend>
+  <exec_depend>xacro</exec_depend>
   <exec_depend>base_control</exec_depend>
 
   <depend>rclcpp</depend>

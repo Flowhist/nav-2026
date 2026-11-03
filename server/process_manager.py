@@ -57,12 +57,12 @@ class RuntimeManager:
                 "planning_map": None,
                 "scan": {
                     "frame_id": "base_link",
-                    "encoding": "uint16-mm-base64",
+                    "encoding": "uint16-le",
                     "pose_map": None,
                     "angle_min": 0.0,
                     "angle_increment": 0.0,
                     "count": 0,
-                    "ranges_b64": "",
+                    "ranges_bytes": b"",
                     "updated_at": now,
                 },
                 "plan": {"points": 0, "points_xy": [], "length_m": 0.0, "updated_at": now},
@@ -451,7 +451,7 @@ class RuntimeManager:
             self._sync_status()
 
     def read_log(self, mode: str, tail: int = 300) -> Dict[str, object]:
-        if mode not in {"mapping", "navigation", "relocate", "base", "handle", "router", "base_drive"}:
+        if mode not in {"mapping", "navigation", "relocate", "base", "handle", "router", "base_drive", "perception"}:
             raise ValueError(f"unsupported runtime mode: {mode}")
 
         log_path = self.runtime_dir / f"{mode}.log"

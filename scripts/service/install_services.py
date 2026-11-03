@@ -16,7 +16,7 @@ def unit_quote(value: str) -> str:
 def render_units(repo_dir: Path, state_dir: Path) -> dict[str, str]:
     units = {}
     units["base-control.service"] = render_base_unit(repo_dir.parent.parent / "install/local_setup.bash", state_dir)
-    for mode in ("web", "mapping", "navigation"):
+    for mode in ("web", "mapping", "navigation", "perception", "lidar"):
         relationships = "PartOf=finav.target\n"
         if mode in ("mapping", "navigation"):
             other = "navigation" if mode == "mapping" else "mapping"
@@ -25,12 +25,15 @@ def render_units(repo_dir: Path, state_dir: Path) -> dict[str, str]:
             if mode == "navigation":
                 relationships = relationships.replace("After=finav-mapping.service\n", "")
             relationships += "BindsTo=base-control.service\nAfter=base-control.service\n"
+        if mode in ("mapping", "navigation", "perception"):
+            relationships += "Requires=finav-lidar.service\nAfter=finav-lidar.service\n"
         units[f"finav-{mode}.service"] = (
             f"[Unit]\nDescription=Finav {mode}\n{relationships}\n"
             "[Service]\nType=exec\n"
             f"Environment={unit_quote('FINAV_REPO_DIR=' + str(repo_dir))}\n"
             f"Environment={unit_quote('FINAV_STATE_DIR=' + str(state_dir))}\n"
             "Environment=FINAV_RUNTIME_BACKEND=systemd\n"
+            "Environment=FINAV_SHARED_LIDAR=true\n"
             f"ExecStart=/bin/bash {unit_quote(str(repo_dir / 'scripts/service/run_service.sh'))} {mode}\n"
             "KillMode=control-group\nKillSignal=SIGINT\nTimeoutStopSec=15\n"
             f"Restart={'on-failure' if mode == 'web' else 'no'}\nRestartSec=3\n"

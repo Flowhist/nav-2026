@@ -16,6 +16,7 @@ from launch.actions import (
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch.conditions import UnlessCondition
 
 
 def _resolve_repo_dir(pkg_share: str) -> str:
@@ -96,7 +97,8 @@ def generate_launch_description():
 
     # 1. 雷达驱动
     lidar_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
+        condition=UnlessCondition(os.environ.get("FINAV_SHARED_LIDAR", "false")),
+        launch_description_source=PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "sub", "lidar.launch.py")
         ),
         launch_arguments={
@@ -121,7 +123,8 @@ def generate_launch_description():
 
     # 4. 机器人模型发布
     robot_model_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
+        condition=UnlessCondition(os.environ.get("FINAV_SHARED_LIDAR", "false")),
+        launch_description_source=PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "sub", "robot_model.launch.py")
         )
     )

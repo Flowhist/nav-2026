@@ -1,6 +1,0 @@
-*.pt
-*.engine
-*.onnx
-__pycache__/
-Log/
-*.log

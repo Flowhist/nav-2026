@@ -12,11 +12,11 @@
   <!-- ==================== 参数定义（单位：米、千克） ==================== -->
 
   <!-- 车体外形（由四角点给定）：
-       左前(0.84, 0.45), 右前(0.84, -0.45), 左后(-0.25, 0.45), 右后(-0.25, -0.45)
-       因此：长 1.09, 宽 0.90, 高 0.50
+       左前(0.84, 0.375), 右前(0.84, -0.375), 左后(-0.25, 0.375), 右后(-0.25, -0.375)
+       因此：长 1.09, 宽 0.75, 高 0.50（2026-10-22 用户修正宽度）
        几何中心相对原点偏移：(0.295, 0.0, 0.25)
   -->
-  <xacro:property name="body_width" value="0.90"/>
+  <xacro:property name="body_width" value="0.75"/>
   <xacro:property name="body_length" value="1.09"/>
   <xacro:property name="body_height" value="0.50"/>
   <xacro:property name="body_center_x" value="0.295"/>
@@ -44,11 +44,35 @@
   <xacro:property name="laser_size" value="0.10"/>
   <xacro:property name="laser_mass" value="0.6"/>
 
-  <!-- 2026-10-16 暂用实测值；z 为距地高度。demo 读取这些数值常量。 -->
+  <!-- 前置相机安装记录；z 为距地高度。光学系对应纠正倒置后的图像。 -->
   <xacro:property name="front_camera_x" value="0.575"/>
   <xacro:property name="front_camera_y" value="0.2775"/>
   <xacro:property name="front_camera_z" value="0.727"/>
   <xacro:property name="front_camera_yaw_deg" value="-30.0"/>
+
+  <!-- 2026-10-22 用户确认：前四路高 0.28 m，后两路高 0.10 m。
+       传感器 visual 仅为位置标记，不是实测外壳，不加入 collision 外廓。 -->
+  <xacro:macro name="ultrasonic_mount" params="name x y z yaw">
+    <joint name="ultrasonic_${name}_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="ultrasonic_${name}_link"/>
+      <origin xyz="${x} ${y} ${z}" rpy="0 0 ${yaw}"/>
+    </joint>
+    <link name="ultrasonic_${name}_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 ${pi/2} 0"/>
+        <geometry><cylinder radius="0.012" length="0.015"/></geometry>
+        <material name="black"/>
+      </visual>
+    </link>
+  </xacro:macro>
+  <xacro:ultrasonic_mount name="front_left" x="0.64" y="0.31" z="0.28" yaw="0"/>
+  <xacro:ultrasonic_mount name="front_right" x="0.64" y="-0.31" z="0.28" yaw="0"/>
+  <xacro:ultrasonic_mount name="left" x="0.57" y="0.32" z="0.28" yaw="${pi/2}"/>
+  <xacro:ultrasonic_mount name="right" x="0.57" y="-0.32" z="0.28" yaw="${-pi/2}"/>
+  <!-- 后两路位置已记录，地址与通信交叉验证未完成。 -->
+  <xacro:ultrasonic_mount name="rear_left" x="-0.10" y="0.1675" z="0.10" yaw="${pi}"/>
+  <xacro:ultrasonic_mount name="rear_right" x="-0.10" y="-0.1675" z="0.10" yaw="${pi}"/>
 
   <!-- 颜色 -->
   <material name="white">
@@ -168,7 +192,12 @@
     <origin xyz="${front_camera_x} ${front_camera_y} ${front_camera_z}"
             rpy="0 0 ${front_camera_yaw_deg * pi/180}"/>
   </joint>
-  <link name="front_camera_link"/>
+  <link name="front_camera_link">
+    <visual>
+      <geometry><box size="0.025 0.08 0.03"/></geometry>
+      <material name="blue"/>
+    </visual>
+  </link>
   <joint name="front_camera_upright_optical_joint" type="fixed">
     <parent link="front_camera_link"/>
     <child link="front_camera_upright_optical_frame"/>

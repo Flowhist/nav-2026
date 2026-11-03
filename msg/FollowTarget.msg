@@ -1,0 +1,9 @@
+std_msgs/Header header
+string session
+uint64 sequence
+int64 track_id
+bool valid
+geometry_msgs/Point position
+float32 confidence
+float32 similarity
+string state

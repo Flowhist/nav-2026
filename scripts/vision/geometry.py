@@ -1,4 +1,4 @@
-"""Small, hardware-independent person-following policy."""
+"""RGB-D geometry and robust torso depth shared by person tracking."""
 import math
 from dataclasses import dataclass
 import xml.etree.ElementTree as ET
@@ -47,38 +47,3 @@ def target_depth(depth, box):
     if np.percentile(values, 80) - np.percentile(values, 20) > .5:
         return None
     return float(np.median(values))
-
-
-def velocity(distance, bearing, follow_distance=2.1):
-    if not all(math.isfinite(v) for v in (distance, bearing, follow_distance)):
-        return 0., 0.
-    if distance <= follow_distance or distance > 5.:
-        return 0., 0.
-    angular = max(-.3, min(.3, .8 * bearing))
-    linear = min(.15, .3 * (distance-follow_distance))
-    if abs(bearing) > math.radians(25):
-        linear = 0.
-    return linear, angular
-
-
-class TargetLock:
-    """Acquire one stable ID; never silently switch after losing it."""
-    def __init__(self):
-        self.target = None
-        self.candidate = None
-        self.count = 0
-
-    def select(self, detections):
-        # Each item is (track_id, xyxy). Ambiguous first acquisition waits.
-        if self.target is not None:
-            return next((d for d in detections if d[0] == self.target), None)
-        if len(detections) != 1:
-            self.candidate, self.count = None, 0
-            return None
-        item = detections[0]
-        self.count = self.count + 1 if self.candidate == item[0] else 1
-        self.candidate = item[0]
-        if self.count >= 3:
-            self.target = item[0]
-            return item
-        return None

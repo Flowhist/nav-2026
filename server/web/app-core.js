@@ -20,7 +20,7 @@ const appState = {
   scene: {
     map: null,
     planning_map: null,
-    scan: { count: 0, ranges_b64: "" },
+    scan: { count: 0, ranges: new Uint16Array() },
     plan: { points: 0, points_xy: [] },
     robot_pose_map: null,
     goal_pose: null,
@@ -44,11 +44,13 @@ const appState = {
   dockView: "events",
   dockAutoFollow: {
     events: true,
+    base: true,
     mapping: true,
     navigation: true,
   },
   events: [],
   runtimeLogs: {
+    base: { lines: [], updatedAt: null },
     mapping: { lines: [], updatedAt: null },
     navigation: { lines: [], updatedAt: null },
   },
@@ -63,12 +65,9 @@ const appState = {
   stream: {
     source: null,
     renderFrame: null,
-    reconnectTimer: null,
-    mode: null,
+    finishRender: null,
     frames: 0,
     measuredHz: 0,
-    latencyMs: null,
-    lastFrameAt: null,
     sampleStartedAt: performance.now(),
   },
   navPlacementMode: null,
@@ -185,17 +184,7 @@ function decodeOccupancy(mapData) {
     });
     return occupancy;
   }
-  let occupancy = mapData.data;
-  if (!occupancy && mapData.encoding === "int8-base64" && mapData.data_b64) {
-    const binary = window.atob(mapData.data_b64);
-    const decoded = new Int8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      const value = binary.charCodeAt(index);
-      decoded[index] = value > 127 ? value - 256 : value;
-    }
-    occupancy = decoded;
-  }
-  return occupancy || [];
+  return mapData.data || [];
 }
 
 function buildMapRaster(mapData, prefix) {
@@ -415,18 +404,16 @@ function drawArrow(ctx, view, canvas, pose, color, label) {
 function scanWorldPoints(scan) {
   if (!scan) return [];
   if (scan._decodedAt === scan.updated_at && scan._worldPoints) return scan._worldPoints;
-  if (scan.encoding !== "uint16-mm-base64" || !scan.ranges_b64 || !scan.pose_map) return [];
+  if (!scan.ranges || !scan.pose_map) return [];
 
-  const binary = window.atob(scan.ranges_b64);
-  const count = Math.floor(binary.length / 2);
+  const count = scan.ranges.length;
   const pose = scan.pose_map;
   const poseYaw = (pose.yaw_deg || 0) * Math.PI / 180;
   const cosYaw = Math.cos(poseYaw);
   const sinYaw = Math.sin(poseYaw);
   const points = [];
   for (let index = 0; index < count; index += 1) {
-    const offset = index * 2;
-    const millimeters = binary.charCodeAt(offset) | (binary.charCodeAt(offset + 1) << 8);
+    const millimeters = scan.ranges[index];
     if (!millimeters) continue;
     const distance = millimeters / 1000;
     const angle = Number(scan.angle_min || 0) + index * Number(scan.angle_increment || 0);
@@ -666,6 +653,7 @@ function renderStatus(status) {
   const plan = robot.plan || {};
   const navigation = robot.navigation || {};
   const control = status.control || {};
+  if (typeof renderAvoidanceSwitch === "function") renderAvoidanceSwitch();
   if (typeof renderManualControlStatus === "function") renderManualControlStatus(control);
   const runtime = status.runtime || {};
   const lastSeen = ros.last_seen || {};

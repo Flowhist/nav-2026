@@ -1,11 +1,10 @@
 function stopSceneStream() {
   if (appState.stream.renderFrame !== null) cancelAnimationFrame(appState.stream.renderFrame);
-  clearTimeout(appState.stream.reconnectTimer);
+  appState.stream.finishRender?.();
+  appState.stream.finishRender = null;
   appState.stream.renderFrame = null;
-  appState.stream.reconnectTimer = null;
   if (appState.stream.source) appState.stream.source.close();
   appState.stream.source = null;
-  appState.stream.mode = null;
   setConnectionState(null, "stream");
 }
 
@@ -14,22 +13,16 @@ function startSceneStream() {
   if (!isLivePage() || document.hidden) return;
 
   const mode = appState.page;
-  const source = new EventSource(
-    `/api/stream?mode=${encodeURIComponent(mode)}&map_version=${appState.mapVersion}&planning_map_version=${appState.planningMapVersion}&plan_version=${appState.planVersion}`,
-  );
-  appState.stream.source = source;
-  appState.stream.mode = mode;
   appState.stream.frames = 0;
   appState.stream.sampleStartedAt = performance.now();
 
-  setConnectionState("pending", "stream");
-  source.onopen = () => {
-    if (appState.stream.source === source) setConnectionState("online", "stream");
-  };
-  source.onmessage = (event) => {
-    if (appState.stream.source !== source) return;
-    try {
-      const payload = JSON.parse(event.data);
+  const source = realtime.subscribe("scene", {
+    hz: mode === "mapping" ? 10 : 15, mode,
+    onstate: (state) => {
+      if (appState.stream.source === source) setConnectionState(state, "stream");
+    },
+    ondata: (payload) => {
+      if (appState.stream.source !== source) return;
       applyManualControlStatus(payload.control);
       appState.mapVersion = payload.map_version ?? appState.mapVersion;
       appState.planningMapVersion = payload.planning_map_version ?? appState.planningMapVersion;
@@ -51,34 +44,27 @@ function startSceneStream() {
 
       const now = performance.now();
       appState.stream.frames += 1;
-      appState.stream.lastFrameAt = Date.now();
-      if (payload.stream?.server_sent_at) {
-        appState.stream.latencyMs = Math.max(0, Date.now() - payload.stream.server_sent_at * 1000);
-      }
       const elapsed = now - appState.stream.sampleStartedAt;
       if (elapsed >= 1000) {
         appState.stream.measuredHz = appState.stream.frames * 1000 / elapsed;
         appState.stream.frames = 0;
         appState.stream.sampleStartedAt = now;
       }
-      if (appState.stream.renderFrame === null) {
+      // Rendering completes before acknowledging, bounding browser work as well as network queues.
+      return new Promise((resolve, reject) => {
+        appState.stream.finishRender = resolve;
         appState.stream.renderFrame = requestAnimationFrame(() => {
           appState.stream.renderFrame = null;
-          renderLiveCanvases();
-          updateSceneHints();
+          appState.stream.finishRender = null;
+          try {
+            if (appState.stream.source === source) { renderLiveCanvases(); updateSceneHints(); }
+            resolve();
+          } catch (error) { reject(error); }
         });
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-  source.onerror = () => {
-    if (appState.stream.source !== source) return;
-    source.close();
-    setConnectionState("offline", "stream");
-    // Reconnect with the versions already received, not the original URL.
-    appState.stream.reconnectTimer = setTimeout(startSceneStream, 1000);
-  };
+      });
+    },
+  });
+  appState.stream.source = source;
 }
 
 function isLivePage() {
@@ -92,7 +78,7 @@ function resetLiveScene() {
   appState.scene = {
     map: null,
     planning_map: null,
-    scan: { count: 0, ranges_b64: "" },
+    scan: { count: 0, ranges: new Uint16Array() },
     plan: { points: 0, points_xy: [] },
     robot_pose_map: null,
     goal_pose: null,
@@ -703,6 +689,34 @@ async function loadConfigs() {
   }
 }
 
+let avoidanceSwitchBusy = false;
+
+function renderAvoidanceSwitch() {
+  const control = appState.status?.control || {};
+  const fresh = connectionState.realtime === "online" && appState.status?.ros?.connected &&
+    Date.now() / 1000 - (control.avoidance_updated_at || 0) < 2.5;
+  const toggle = $("avoidanceEnabled");
+  toggle.checked = control.avoidance_enabled === true;
+  toggle.disabled = avoidanceSwitchBusy || !fresh;
+  $("avoidanceSwitchState").textContent = avoidanceSwitchBusy ? "切换中" :
+    !fresh ? "状态未知" : toggle.checked ? "已开启" : "已关闭";
+}
+
+async function toggleAvoidance(event) {
+  const enabled = event.target.checked;
+  avoidanceSwitchBusy = true;
+  renderAvoidanceSwitch();
+  try {
+    await api("/api/avoidance/control", "POST", {enabled}, {timeoutMs: 30000});
+    showToast(enabled ? "避障已开启" : "避障已关闭", "ok");
+  } catch (error) {
+    showToast(error.message, "error");
+  } finally {
+    avoidanceSwitchBusy = false;
+    renderAvoidanceSwitch();
+  }
+}
+
 async function loadSystemSupervisor() {
   try {
     const data = await api("/api/system");
@@ -839,7 +853,7 @@ async function saveConfigEditor() {
 async function restartBaseControl(button) {
   const confirmed = await showAnnotationConfirmDialog({
     title: "重启底盘控制",
-    message: "将重启底盘控制，并停止当前建图或导航任务。任务不会自动恢复，Web 服务保持运行，是否继续？",
+    message: "将停止底盘、复位 PCAN USB 适配器后重新启动，并停止当前建图或导航任务。请确认车辆安全、手柄回中。任务不会自动恢复，Web 服务保持运行，是否继续？",
     confirmText: "确认重启",
     danger: true,
   });

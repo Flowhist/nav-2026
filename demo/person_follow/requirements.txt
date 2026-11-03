@@ -1,7 +1,0 @@
-# CPU baseline for ARM64; Jetson CUDA PyTorch must be selected separately.
-numpy==1.26.4
-torch==2.5.1
-torchvision==0.20.1
-ultralytics==8.3.253
-lap==0.5.13
-# Install SDK separately with --no-deps to avoid its optional visualization stack.

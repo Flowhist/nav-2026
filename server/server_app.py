@@ -4,13 +4,11 @@ import hashlib
 import json
 import math
 import mimetypes
-import socket
 import subprocess
 import shutil
 import sys
 import threading
 import time
-import zlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -32,6 +30,7 @@ from systemd_runtime import create_runtime
 from ros_bridge import RosBridge
 from speed_settings import SPEED_LIMITS, read_navigation_speed, save_navigation_speed
 from state_store import StateStore
+from realtime import PacketEncoder, perception_snapshot, serve_realtime
 from web_support import (ConfigStore, LimitedHTTPServer, RequestError,
                          access_password, authorized, finite_fields, query_integer, request_errors)
 
@@ -150,6 +149,7 @@ class ServerApp:
 
     def _build_handler(self):
         app = self
+        realtime_encoder = PacketEncoder()
 
         class Handler(BaseHTTPRequestHandler):
             server_version = "FinavWeb/0.1"
@@ -177,23 +177,14 @@ class ServerApp:
                 if path == "/api/status":
                     self._json(HTTPStatus.OK, app.state.snapshot())
                     return
+                if path == "/api/perception":
+                    self._json(HTTPStatus.OK, perception_snapshot(app))
+                    return
+                if path == "/api/realtime":
+                    serve_realtime(self, app, realtime_encoder)
+                    return
                 if path == "/api/system":
                     self._json(HTTPStatus.OK, app.runtime.finav_supervisor_status())
-                    return
-                if path == "/api/stream":
-                    self._stream_scene(parsed)
-                    return
-                if path == "/api/scene":
-                    query = parse_qs(parsed.query)
-                    map_version = query_integer(query, "map_version", -1, -1, 2**63 - 1)
-                    planning_map_version = query_integer(query, "planning_map_version", -1, -1, 2**63 - 1)
-                    self._json(
-                        HTTPStatus.OK,
-                        app.state.snapshot_scene(
-                            known_map_version=map_version,
-                            known_planning_map_version=planning_map_version,
-                        ),
-                    )
                     return
                 if path == "/api/history":
                     query = parse_qs(parsed.query)
@@ -270,6 +261,28 @@ class ServerApp:
                 parsed = urlparse(self.path)
                 path = parsed.path
                 body = self._read_json()
+
+                if path == "/api/avoidance/control":
+                    if type(body.get("enabled")) is not bool:
+                        raise RequestError(400, "enabled 必须为布尔值")
+                    if not hasattr(app.runtime, "perception_status"):
+                        raise RequestError(409, "避障需要观测服务")
+                    with app._map_lock:
+                        if body["enabled"]:
+                            was_running = app.runtime.perception_status().get("running", False)
+                            app.runtime.start("perception")
+                            try:
+                                app.bridge.request_setting("avoidance", True)
+                            except RequestError:
+                                # Roll back only the service started by this request.
+                                if not was_running:
+                                    app.runtime.stop("perception")
+                                raise
+                        else:
+                            app.bridge.request_setting("avoidance", False)
+                            app.runtime.stop("perception")
+                    self._json(HTTPStatus.OK, {"enabled": body["enabled"]})
+                    return
 
                 if path == "/api/nav/speed":
                     with app._map_lock:
@@ -496,7 +509,8 @@ class ServerApp:
                         return
                     self._json(HTTPStatus.OK, payload)
                     return
-                if path.startswith("/api/runtime/") and path.endswith("/restart"):
+                if path in {f"/api/runtime/{mode}/restart" for mode in
+                            ("base", "base_drive", "handle", "router", "mapping", "navigation")}:
                     mode = unquote(path.removeprefix("/api/runtime/").removesuffix("/restart")).strip("/")
                     self._runtime_json(lambda: app.runtime.restart(mode))
                     return
@@ -596,107 +610,6 @@ class ServerApp:
                 if field:
                     detail["field"] = field
                 self._json(status, {"ok": False, "error": detail})
-
-            def _stream_scene(self, parsed) -> None:
-                query = parse_qs(parsed.query)
-                mode = str(query.get("mode", ["mapping"])[0]).strip().lower()
-                if mode not in {"mapping", "navigation"}:
-                    self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid stream mode"})
-                    return
-                map_version = query_integer(query, "map_version", -1, -1, 2**63 - 1)
-                planning_map_version = query_integer(query, "planning_map_version", -1, -1, 2**63 - 1)
-                plan_version = query_integer(query, "plan_version", -1, -1, 2**63 - 1)
-                if not self.server.stream_slots.acquire(blocking=False):
-                    raise RequestError(503, "Too many live streams")
-                try:
-                    self._send_scene_stream(mode, map_version, planning_map_version, plan_version)
-                finally:
-                    self.server.stream_slots.release()
-
-            def _send_scene_stream(self, mode, map_version, planning_map_version, plan_version):
-                target_hz = 10.0 if mode == "mapping" else 15.0
-                interval = 1.0 / target_hz
-                frames = 0
-                bytes_sent = 0
-                stats_started = time.monotonic()
-                encodings = self.headers.get("Accept-Encoding", "").lower().split(",")
-                use_gzip = any(item.strip() == "gzip" for item in encodings)
-                compressor = zlib.compressobj(level=1, wbits=31) if use_gzip else None
-
-                def write_packet(packet):
-                    if compressor is not None:
-                        # Flush each event so browsers never wait for a compression block.
-                        packet = compressor.compress(packet) + compressor.flush(zlib.Z_SYNC_FLUSH)
-                    self.wfile.write(packet)
-                    self.wfile.flush()
-                    return len(packet)
-
-                self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache, no-transform")
-                self.send_header("Connection", "keep-alive")
-                self.send_header("X-Accel-Buffering", "no")
-                self.send_header("Vary", "Accept-Encoding")
-                if use_gzip:
-                    self.send_header("Content-Encoding", "gzip")
-                self.end_headers()
-                self.close_connection = True
-                try:
-                    self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    # Bound queued stale frames when Wi-Fi cannot keep up.
-                    self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
-                    self.connection.settimeout(3.0)
-                except OSError:
-                    pass
-
-                app.state.add_live_viewer(mode)
-                try:
-                    write_packet(b"retry: 1000\n\n")
-                    while app._running:
-                        started = time.monotonic()
-                        payload = app.state.snapshot_scene(
-                            known_map_version=map_version,
-                            known_planning_map_version=planning_map_version,
-                            known_plan_version=plan_version,
-                        )
-                        map_version = int(payload.get("map_version", map_version))
-                        planning_map_version = int(
-                            payload.get("planning_map_version", planning_map_version)
-                        )
-                        plan_version = int(payload.get("plan_version", plan_version))
-                        payload["stream"] = {
-                            "mode": mode,
-                            "target_hz": target_hz,
-                            "server_sent_at": time.time(),
-                        }
-                        encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-                        packet = b"data: " + encoded + b"\n\n"
-                        packet_size = write_packet(packet)
-                        frames += 1
-                        bytes_sent += packet_size
-
-                        stats_elapsed = time.monotonic() - stats_started
-                        if stats_elapsed >= 1.0:
-                            app.state.update_status(
-                                {
-                                    "transport": {
-                                        "stream_hz": round(frames / stats_elapsed, 2),
-                                        "bytes_per_sec": round(bytes_sent / stats_elapsed),
-                                        "last_frame_at": time.time(),
-                                    }
-                                }
-                            )
-                            frames = 0
-                            bytes_sent = 0
-                            stats_started = time.monotonic()
-
-                        remaining = interval - (time.monotonic() - started)
-                        if remaining > 0:
-                            time.sleep(remaining)
-                except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
-                    pass
-                finally:
-                    app.state.remove_live_viewer(mode)
 
             def _read_json(self) -> Dict[str, Any]:
                 if self.headers.get("Transfer-Encoding"):

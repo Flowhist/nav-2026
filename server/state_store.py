@@ -3,11 +3,13 @@ import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional
+from perception_view import PerceptionView
 
 
 class StateStore:
     def __init__(self, max_history: int = 2000) -> None:
         self._lock = threading.Lock()
+        self.perception = PerceptionView()
         self._seq = 0
         self.session_id = uuid.uuid4().hex
         self._max_history = max_history
@@ -55,27 +57,27 @@ class StateStore:
             "transport": {
                 "active_streams": 0,
                 "last_mode": None,
-                "stream_hz": 0.0,
-                "bytes_per_sec": 0,
-                "last_frame_at": None,
+                "realtime_clients": {},
+                "realtime_bytes_per_sec": 0,
             },
         }
         self._scene_map_version = 0
         self._scene_planning_map_version = 0
         self._scene_plan_version = 0
         self._live_viewers = 0
-        self._viewer_modes = {"mapping": 0, "navigation": 0}
+        self._realtime_clients = {}
+        self._viewer_rates = {}
         self._scene: Dict[str, Any] = {
             "map": None,
             "planning_map": None,
             "scan": {
                 "frame_id": "base_link",
-                "encoding": "uint16-mm-base64",
+                "encoding": "uint16-le",
                 "pose_map": None,
                 "angle_min": 0.0,
                 "angle_increment": 0.0,
                 "count": 0,
-                "ranges_b64": "",
+                "ranges_bytes": b"",
                 "updated_at": None,
             },
             "plan": {"points": 0, "points_xy": [], "length_m": 0.0, "updated_at": None},
@@ -184,28 +186,39 @@ class StateStore:
                 payload["plan"] = None
             return payload
 
-    def add_live_viewer(self, mode: str) -> int:
+    def update_realtime_client(self, client_id, metrics):
+        with self._lock:
+            if metrics is None:
+                self._realtime_clients.pop(client_id, None)
+            else:
+                self._realtime_clients[client_id] = metrics
+            transport = self._status["transport"]
+            transport["realtime_clients"] = self._deep_copy(self._realtime_clients)
+            transport["realtime_bytes_per_sec"] = sum(
+                item["bytes_per_sec"] for item in self._realtime_clients.values())
+
+    def add_live_viewer(self, mode: str, hz: float) -> int:
         with self._lock:
             self._live_viewers += 1
-            self._viewer_modes[mode] = self._viewer_modes.get(mode, 0) + 1
+            self._viewer_rates[hz] = self._viewer_rates.get(hz, 0) + 1
             self._status.setdefault("transport", {})["active_streams"] = self._live_viewers
             self._status["transport"]["last_mode"] = mode
             return self._live_viewers
 
-    def remove_live_viewer(self, mode: str) -> int:
+    def remove_live_viewer(self, hz: float) -> int:
         with self._lock:
             self._live_viewers = max(0, self._live_viewers - 1)
-            self._viewer_modes[mode] = max(0, self._viewer_modes.get(mode, 0) - 1)
+            count = self._viewer_rates.get(hz, 0) - 1
+            if count > 0:
+                self._viewer_rates[hz] = count
+            else:
+                self._viewer_rates.pop(hz, None)
             self._status.setdefault("transport", {})["active_streams"] = self._live_viewers
             return self._live_viewers
 
     def live_stream_hz(self) -> float:
         with self._lock:
-            if self._viewer_modes.get("navigation", 0):
-                return 15.0
-            if self._viewer_modes.get("mapping", 0):
-                return 10.0
-            return 0.0
+            return max(self._viewer_rates, default=0.0)
 
     def add_event(self, level: str, message: str, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         with self._lock:

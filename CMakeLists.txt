@@ -33,6 +33,32 @@ find_package(slam_toolbox REQUIRED)
 find_package(nav2_map_server REQUIRED)
 find_package(TBB REQUIRED)
 
+option(FINAV_BUILD_AVOIDANCE "Build independent avoidance observation node" ON)
+find_package(rosidl_default_generators REQUIRED)
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/FollowTarget.msg" "msg/AvoidanceRequest.msg" "msg/AvoidanceResult.msg" "msg/FusedScan.msg"
+  DEPENDENCIES std_msgs geometry_msgs sensor_msgs)
+ament_export_dependencies(rosidl_default_runtime)
+if(FINAV_BUILD_AVOIDANCE)
+  find_package(mrpt-nav 2.4.2 EXACT REQUIRED)
+  find_package(nav_msgs REQUIRED)
+  find_package(diagnostic_msgs REQUIRED)
+  find_package(interfaces REQUIRED)
+  add_library(finav_avoidance_core src/avoidance/core.cpp)
+  target_compile_features(finav_avoidance_core PUBLIC cxx_std_17)
+  target_include_directories(finav_avoidance_core PUBLIC include)
+  target_link_libraries(finav_avoidance_core PUBLIC mrpt::nav)
+  add_executable(obstacle_avoidance_node src/rosnode/obstacle_avoidance_node.cpp)
+  ament_target_dependencies(obstacle_avoidance_node
+    rclcpp std_msgs sensor_msgs geometry_msgs nav_msgs diagnostic_msgs interfaces)
+  rosidl_get_typesupport_target(avoidance_typesupport ${PROJECT_NAME} rosidl_typesupport_cpp)
+  target_link_libraries(obstacle_avoidance_node finav_avoidance_core "${avoidance_typesupport}")
+  install(TARGETS finav_avoidance_core DESTINATION lib)
+  install(TARGETS obstacle_avoidance_node DESTINATION lib/${PROJECT_NAME})
+  install(FILES scripts/control/avoidance_model.py
+    DESTINATION lib/${PROJECT_NAME})
+endif()
+
 set(dependencies
   rclcpp
   rclcpp_lifecycle
@@ -81,9 +107,11 @@ add_executable(scan_fusion_node
 )
 
 ament_target_dependencies(scan_fusion_node ${dependencies})
+rosidl_get_typesupport_target(scan_typesupport ${PROJECT_NAME} rosidl_typesupport_cpp)
 
 target_link_libraries(scan_fusion_node
   ${Boost_LIBRARIES}
+  "${scan_typesupport}"
 )
 
 add_executable(fixed_localization_node src/rosnode/fixed_localization_node.cpp)
@@ -107,21 +135,6 @@ target_link_libraries(continued_mapping_node ${FINAV_CONTINUED_MAPPING_LIBRARY}
   ${FINAV_kartoSlamToolbox_LIBRARY} ${FINAV_slam_toolbox__rosidl_typesupport_cpp_LIBRARY}
   Boost::thread Boost::serialization TBB::tbb)
 
-# Declare a C++ executable for serial_bridge_node
-# add_executable(serial_bridge_node 
-#   src/rosnode/serial_bridge_node.cpp
-# )
-
-# ament_target_dependencies(serial_bridge_node ${dependencies})
-
-# target_include_directories(serial_bridge_node PUBLIC
-#   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-#   $<INSTALL_INTERFACE:include>)
-
-# target_link_libraries(serial_bridge_node
-#   ${Boost_LIBRARIES}
-# )
-
 # Install launch files.
 set(finav_share_dirs
   launch
@@ -139,14 +152,10 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}/
 )
 
-install(
-  DIRECTORY sim
-  DESTINATION share/${PROJECT_NAME}/
-  PATTERN "__pycache__" EXCLUDE
-)
-
 # Install Python scripts
 install(PROGRAMS
+  scripts/control/person_follow.py
+  scripts/service/run_vision.sh
   scripts/control/nav_voice_bridge.py
   scripts/control/nav_path_plan.py
   scripts/control/nav_task_manager.py
@@ -159,18 +168,12 @@ install(PROGRAMS
   scripts/tool/save_map.sh
   scripts/tool/save_map.py
   scripts/map_location/location_visualizer.py
-  sim/scripts/sim_relocate.py
-  sim/scripts/sim_relocate.sh
-  sim/scripts/sim_chassis_sensor_pub.py
-  sim/scripts/sim_gazebo_drive.py
-  sim/scripts/sim_plan_visualizer.py
-  sim/scripts/sim_send_goal.py
-  sim/scripts/gz_topic_adapter.py
   start_finav.sh
   DESTINATION lib/${PROJECT_NAME}
 )
 
 install(FILES
+  scripts/control/ultrasonic_gate.py
   scripts/map_location/location_utils.py
   scripts/map_location/editor_server.py
   scripts/map_location/editor_map_io.py
@@ -190,13 +193,16 @@ install(DIRECTORY
 )
 
 # Install IMU Python modules (dm_serial, dm_crc, etc.)
+install(DIRECTORY scripts/vision/ DESTINATION lib/${PROJECT_NAME}/vision
+  FILES_MATCHING PATTERN "*.py")
+
 install(DIRECTORY
   third_party/dm_imu/dm_imu_modules/
   DESTINATION lib/${PROJECT_NAME}/dm_imu_modules
   FILES_MATCHING PATTERN "*.py"
 )
 
-install(TARGETS hins_he_lidar_node scan_fusion_node fixed_localization_node continued_mapping_node # serial_bridge_node
+install(TARGETS hins_he_lidar_node scan_fusion_node fixed_localization_node continued_mapping_node
   EXPORT export_${PROJECT_NAME}
   DESTINATION lib/${PROJECT_NAME})
 

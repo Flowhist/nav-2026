@@ -16,8 +16,9 @@ from process_manager import RuntimeManager
 
 UNITS = {mode: f"finav-{mode}.service" for mode in ("base", "web", "mapping", "navigation")}
 UNITS["base"] = "base-control.service"
+UNITS["perception"] = "finav-perception.service"
 BASE_MODES = {"base", "base_drive", "handle", "router"}
-MANAGED_MODES = BASE_MODES | {"mapping", "navigation"}
+MANAGED_MODES = BASE_MODES | {"mapping", "navigation", "perception"}
 
 
 def service_marker() -> Path:
@@ -185,7 +186,8 @@ class SystemdRuntimeManager(RuntimeManager):
             raise ValueError(f"Unsupported runtime mode: {mode}")
         key = "base" if mode in BASE_MODES else mode
         with self._operation():
-            self._stop_relocate()
+            if mode != "perception":
+                self._stop_relocate()
             self._systemctl("stop", UNITS[key])
             self._refresh_services()
             if mode in {"mapping", "navigation"} or mode in BASE_MODES:
@@ -199,7 +201,34 @@ class SystemdRuntimeManager(RuntimeManager):
         with self._operation():
             values = self._read_arguments(mode) if launch_args is None else launch_args
             self.stop(mode)
+            if mode in BASE_MODES:
+                self._reset_base_adapter()
             return self.start(mode, values)
+
+    def _reset_base_adapter(self):
+        from base_control.pcan_reset import reset_pcan_usb
+
+        try:
+            message = reset_pcan_usb()
+        except Exception as exc:
+            message = f"PCAN reset failed; base remains stopped: {exc}"
+            self.state_store.add_event("error", message)
+            with (self.runtime_dir / "base.log").open("a", encoding="utf-8") as log:
+                log.write(f"[base_service] [ERROR] [{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+            raise RuntimeError(message) from exc
+        self.state_store.add_event("info", message)
+        with (self.runtime_dir / "base.log").open("a", encoding="utf-8") as log:
+            log.write(f"[base_service] [INFO] [{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+
+    def perception_status(self):
+        status = self._status_for("perception")
+        status["available"] = status.get("load_state") == "loaded"
+        if status.get("active_state") == "failed":
+            lines = self.read_log("perception", tail=8).get("lines", [])
+            status["error"] = "\n".join(lines)[-1200:] or "观测进程启动失败"
+        elif not status["available"]:
+            status["error"] = "观测服务尚未安装"
+        return status
 
     def stop_all(self):
         with self._operation():

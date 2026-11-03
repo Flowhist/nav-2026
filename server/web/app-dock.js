@@ -38,8 +38,8 @@ function renderDockStream() {
   }
 
   const log = appState.runtimeLogs[view] || { lines: [], updatedAt: null };
-  title.textContent = view === "mapping" ? "建图日志" : "导航日志";
-  meta.textContent = `${view === "mapping" ? "mapping.log" : "navigation.log"} · ${log.updatedAt ? `最近更新 ${formatTs(log.updatedAt)}` : "暂无日志"}`;
+  title.textContent = { base: "底盘日志", mapping: "建图日志", navigation: "导航日志" }[view];
+  meta.textContent = `${view}.log · ${log.updatedAt ? `最近更新 ${formatTs(log.updatedAt)}` : "暂无日志"}`;
   clearBtn.textContent = "清空日志";
   box.className = "dock-stream";
   box.innerHTML = "";
@@ -102,7 +102,7 @@ async function loadRuntimeLog(mode) {
 function setDockView(view) {
   appState.dockView = view;
   renderDockStream();
-  if (view === "mapping" || view === "navigation") {
+  if (Object.hasOwn(appState.runtimeLogs, view)) {
     loadRuntimeLog(view).catch(console.error);
   }
 }
@@ -121,33 +121,30 @@ async function withBlockingModal(task, message) {
   }
 }
 
-async function pollStatus() {
-  try {
-    const status = await api("/api/status");
-    if (appState.serverSession && appState.serverSession !== status.session_id) {
-      resetLiveScene();
-      if (isLivePage() && $("statusDock").classList.contains("collapsed")) startSceneStream();
-      if (appState.mapSaveJob) showToast("服务已重启，请检查地图保存结果", "error");
-      appState.mapSaveJob = null;
-    }
-    appState.serverSession = status.session_id;
-    const save = status.map_save;
-    if (save?.id === appState.mapSaveJob && save.state !== "running") {
-      appState.mapSaveJob = null;
-      if (save.state === "succeeded") {
-        showToast(`地图“${save.name}”已保存`, "ok");
-        loadSavedMaps().catch(console.error);
-      } else showToast(save.error || "地图保存失败", "error");
-    }
-    const control = appState.status?.control;
-    appState.status = { ...status, control };
-    applyManualControlStatus(status.control);
-    renderStatus(appState.status);
-  } catch (err) {
-    console.error(err);
-  } finally {
-    window.setTimeout(pollStatus, document.hidden ? 3000 : 1000);
+function receiveStatus(status) {
+  if (appState.serverSession && appState.serverSession !== status.session_id) {
+    resetLiveScene();
+    if (appState.mapSaveJob) showToast("服务已重启，请检查地图保存结果", "error");
+    appState.mapSaveJob = null;
   }
+  appState.serverSession = status.session_id;
+  const save = status.map_save;
+  if (save?.id === appState.mapSaveJob && save.state !== "running") {
+    appState.mapSaveJob = null;
+    if (save.state === "succeeded") {
+      showToast(`地图“${save.name}”已保存`, "ok");
+      loadSavedMaps().catch(console.error);
+    } else showToast(save.error || "地图保存失败", "error");
+  }
+  const control = appState.status?.control;
+  appState.status = { ...status, control };
+  applyManualControlStatus(status.control);
+  renderStatus(appState.status);
+}
+
+function startStatusStream() {
+  realtime.subscribe("status", {hz: document.hidden ? 1 / 3 : 1, ondata: receiveStatus,
+    onstate: (state) => setConnectionState(state, "realtime")});
 }
 
 async function pollEvents() {
@@ -177,7 +174,7 @@ async function pollDockLogs() {
     if (
       appState.statusPanel === "logs"
       && !$("statusDock").classList.contains("collapsed")
-      && (appState.dockView === "mapping" || appState.dockView === "navigation")
+      && Object.hasOwn(appState.runtimeLogs, appState.dockView)
     ) {
       await loadRuntimeLog(appState.dockView);
     }

@@ -1,0 +1,24 @@
+obstacle_avoidance:
+  ros__parameters:
+    resolution: 0.05
+    range: 2.0
+    memory_seconds: 0.5
+    margin: 0.15
+    min_height: 0.05
+    depth_margin: 0.10
+    max_linear: 0.15
+    max_angular: 0.30
+    reaction_seconds: 0.15
+    linear_deceleration: 0.30
+    angular_deceleration: 0.60
+    paths: 61
+    intent_lookahead: 1.0
+    sensor_timeout: 0.5
+    goal_timeout: 0.5
+    ultrasonic_stop: 0.25
+    # Per-sensor meters: front-left, front-right, left, right, rear-left, rear-right (0x10-0x15).
+    # Omit or use [] to apply ultrasonic_stop to all four sensors.
+    ultrasonic_stop_distances: [0.40, 0.40, 0.25, 0.25, 0.35, 0.35]
+    ultrasonic_bus: bus_0
+    odom_topic: /odom_encoder
+    ultrasonic_topic: /ultrasonic/device/state

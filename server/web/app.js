@@ -375,22 +375,24 @@ function confirmPageSwitchStop(mode, page) {
 }
 
 async function setPage(page) {
+  const previousPage = appState.page === "perception" ? appState.perceptionReturnPage : appState.page;
   if (appState.page === "preview" && page !== "preview" && appState.previewEditActive) {
     if (await window.finavMapEditor?.exit() === false) return;
   }
-  if (page !== appState.page) {
-    if (appState.page === "mapping" && page !== "mapping" && getRuntime("mapping").running) {
+  if (page !== appState.page && page !== "perception") {
+    if (previousPage === "mapping" && page !== "mapping" && getRuntime("mapping").running) {
       const confirmed = await confirmPageSwitchStop("mapping", page);
       if (!confirmed) return;
       await stopRuntime("mapping", { showModal: true });
     }
-    if (appState.page === "navigation" && page !== "navigation" && getRuntime("navigation").running) {
+    if (previousPage === "navigation" && page !== "navigation" && getRuntime("navigation").running) {
       const confirmed = await confirmPageSwitchStop("navigation", page);
       if (!confirmed) return;
       await stopRuntime("navigation", { showModal: true });
     }
   }
 
+  if (page === "perception" && appState.page !== "perception") appState.perceptionReturnPage = appState.page;
   appState.page = page;
   $("navSpeedPanel").open = false;
   manualControlOnPageChange(page);
@@ -417,6 +419,7 @@ async function setPage(page) {
   if (isLivePage() && $("statusDock").classList.contains("collapsed")) startSceneStream();
   else stopSceneStream();
   renderCurrentPageCanvases();
+  perceptionView.setActive(page === "perception");
 }
 
 function setStatusExpanded(expanded) {
@@ -505,7 +508,12 @@ function bind() {
     menu.classList.toggle("hidden", !opening);
     $("systemMenuToggle").setAttribute("aria-expanded", String(opening));
     if (opening) loadSystemSupervisor().catch(console.error);
+    if (opening) renderAvoidanceSwitch();
   });
+  $("avoidanceEnabled").addEventListener("change", toggleAvoidance);
+  window.setInterval(() => {
+    if (!$("systemMenu").classList.contains("hidden")) renderAvoidanceSwitch();
+  }, 1000);
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".help-wrap")) document.querySelectorAll(".map-help").forEach((panel) => panel.classList.add("hidden"));
     if (!event.target.closest("#navMapPanel")) toggleNavSelect("navMapPanel", false);
@@ -765,6 +773,7 @@ function bind() {
     renderCurrentPageCanvases();
   });
   document.addEventListener("visibilitychange", () => {
+    startStatusStream();
     if (document.hidden) {
       stopManualControl("页面已隐藏");
       stopSceneStream();
@@ -797,6 +806,6 @@ function bind() {
 
 bind();
 enhanceSelects();
-pollStatus();
+startStatusStream();
 pollEvents();
 pollDockLogs();

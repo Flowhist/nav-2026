@@ -1,4 +1,4 @@
-const connectionState = { http: "pending", ros: "pending", stream: null };
+const connectionState = { http: "pending", ros: "pending", realtime: "pending", stream: null };
 
 async function api(path, method = "GET", body = null, options = {}) {
   const { headers = {}, timeoutMs = 8000, ...rest } = options;
@@ -33,7 +33,7 @@ function setConnectionState(state, channel = "http") {
   const pending = Object.values(connectionState).includes("pending");
   badge.classList.remove("pending", "online", "offline");
   badge.classList.add(failed ? "offline" : pending ? "pending" : "online");
-  label.textContent = failed ? { http: "服务连接中断", ros: "ROS 未连接", stream: "画面连接中断" }[failed]
+  label.textContent = failed ? { http: "服务连接中断", ros: "ROS 未连接", realtime: "数据连接中断", stream: "画面连接中断" }[failed]
     : pending ? "正在连接" : "在线";
 }
 

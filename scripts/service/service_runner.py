@@ -43,6 +43,8 @@ def check_process_ownership(mode: str, proc_root: Path = Path("/proc")) -> None:
         "mapping": {"map.launch.py", "nav.launch.py"},
         "navigation": {"map.launch.py", "nav.launch.py"},
         "web": {"run_server.py"},
+        "perception": {"vision.camera", "avoidance_camera.py", "obstacle_avoidance_node", "dauxi"},
+        "lidar": {"hins_he_lidar_node", "scan_fusion_node", "robot_state_publisher", "joint_state_publisher"},
     }[mode]
     for entry in proc_root.iterdir():
         if not entry.name.isdigit() or int(entry.name) == os.getpid():
@@ -57,7 +59,7 @@ def check_process_ownership(mode: str, proc_root: Path = Path("/proc")) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("web", "mapping", "navigation"))
+    parser.add_argument("mode", choices=("web", "mapping", "navigation", "perception", "lidar"))
     args = parser.parse_args()
     repo_dir = Path(os.environ["FINAV_REPO_DIR"])
     state_dir = Path(os.environ["FINAV_STATE_DIR"])
@@ -68,6 +70,10 @@ def main() -> int:
         command = [sys.executable, str(repo_dir / "server" / "run_server.py"),
                    "--host", str(values.get("host", "0.0.0.0")),
                    "--port", str(values.get("port", 8010))]
+    elif args.mode == "perception":
+        command = ["ros2", "launch", str(repo_dir / "launch/perception.launch.py")]
+    elif args.mode == "lidar":
+        command = ["ros2", "launch", str(repo_dir / "launch/lidar_service.launch.py")]
     else:
         command = launch_command(args.mode, load_arguments(state_dir, args.mode))
     os.execvp(command[0], command)

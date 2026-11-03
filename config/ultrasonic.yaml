@@ -1,7 +1,7 @@
-# DCCS dauxi driver configuration for the independent follow demo.
-# Positions are measured in base_link meters; yaw and height are unmeasured.
+# DCCS dauxi driver configuration for Finav six-sensor proximity checks.
+# Mount geometry is maintained in urdf/whillcar.urdf.
 poll_period: 0.1
-publish_period: 0.1
+publish_period: 0.05
 buses:
   - name: bus_0
     port: /dev/serial/by-path/platform-3610000.usb-usb-0:2.1.4:1.0-port0
@@ -10,7 +10,7 @@ buses:
     parity: NONE
     stopbits: 1
     timeout: 0.1
-    inter_request_delay: 0.03
+    inter_request_delay: 0.01
     sensors:
       # front_left: x=0.64, y=0.31
       - name: ultrasonic_0
@@ -27,4 +27,12 @@ buses:
       # right: x=0.57, y=-0.32
       - name: ultrasonic_3
         address: 0x13
+        command: 0x01
+      # rear_left: x=-0.10, y=0.1675
+      - name: ultrasonic_4
+        address: 0x14
+        command: 0x01
+      # rear_right: x=-0.10, y=-0.1675
+      - name: ultrasonic_5
+        address: 0x15
         command: 0x01

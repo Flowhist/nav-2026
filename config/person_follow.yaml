@@ -1,0 +1,23 @@
+# Vision and controller share these limits; units are meters and seconds.
+frame_timeout: 0.35
+follow_distance: 2.1
+max_linear: 0.15
+max_angular: 0.3
+linear_acceleration: 0.15
+angular_acceleration: 0.5
+ultrasonic_stop: 0.5
+ultrasonic_topic: /ultrasonic/device/state
+ultrasonic_bus: bus_0
+max_people: 8
+confirm_frames: 3
+enroll_confidence: 0.6
+match_similarity: 0.8
+match_margin: 0.08
+update_similarity: 0.9
+recovery_seconds: 3.0
+max_target_speed: 2.0
+position_slack: 0.35
+gallery_size: 8
+min_crop_height: 64
+min_sharpness: 20.0
+max_overlap: 0.35

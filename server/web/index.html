@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f4f4f1" />
   <title>Finav 控制台</title>
-  <link rel="stylesheet" href="/styles.css?v=20260821-map-workspace-6" />
+  <link rel="stylesheet" href="/styles.css?v=20261028-switch" />
 </head>
 <body>
   <div class="shell">
@@ -14,6 +14,7 @@
       <nav class="tabs" aria-label="主要页面">
         <button class="tab active" data-page="mapping" type="button">建图</button>
         <button class="tab" data-page="navigation" type="button">导航</button>
+        <button class="tab" data-page="perception" type="button">避障可视化</button>
         <button class="tab" data-page="preview" type="button">地图</button>
         <button class="tab" data-page="configs" type="button">配置</button>
       </nav>
@@ -28,6 +29,8 @@
             <div class="menu-title">系统</div>
             <span id="systemSupervisorState" class="supervisor-state">正在检查运行状态…</span>
             <div class="menu-divider"></div>
+            <label class="avoidance-switch-row"><span>避障</span><span id="avoidanceSwitchState" class="subtle">状态未知</span><input id="avoidanceEnabled" type="checkbox" role="switch" disabled /></label>
+            <div class="menu-divider"></div>
             <button id="btnRestartBaseControl" class="menu-action" type="button" role="menuitem">重启底盘控制</button>
             <button id="btnRestartFinav" class="menu-action" type="button" role="menuitem">重启 Finav</button>
             <button id="btnShutdownFinav" class="menu-action danger-text" type="button" role="menuitem">关闭 Finav</button>
@@ -37,6 +40,20 @@
     </header>
 
     <main class="workspace">
+      <section id="page-perception" class="page" aria-label="避障可视化">
+        <div class="perception-layout">
+          <header class="perception-head"><div><h1>避障可视化</h1></div><span id="perceptionState" role="status">等待数据</span></header>
+          <div class="perception-tools">
+            <label>范围 <select id="perceptionRange"><option value="1.5">±1.5 m</option><option value="2" selected>±2 m</option><option value="3">±3 m</option><option value="4">±4 m</option></select></label>
+            <label><input id="perceptionUltrasound" type="checkbox" checked />超声</label>
+            <label><input id="perceptionDepth" type="checkbox" checked />雷达</label>
+          </div>
+          <div class="perception-stage"><canvas id="perceptionCanvas" aria-label="车体周围障碍物俯视图，车头向上，左侧为正 Y" role="img"></canvas><span id="perceptionEmpty" class="perception-empty">等待观测数据</span><div class="perception-legend"><span><i class="perception-depth-dot"></i>深度轮廓</span><span title="超声仅测距；弧带表示可能位置，宽度为示意，未标定声束角。"><i class="perception-echo-dot"></i>超声疑似轮廓</span><span><i class="perception-near-dot"></i>近距 ≤ 0.5 m</span></div></div>
+          <p id="perceptionServiceError" role="alert" hidden></p>
+          <div id="perceptionReadings" class="perception-readings" aria-label="四路超声距离"></div>
+          <div class="perception-foot"><span id="perceptionDepthState">双雷达等待中</span><span>六路超声</span></div>
+        </div>
+      </section>
       <section id="page-mapping" class="page active">
         <div class="page-layout">
           <section class="map-pane">
@@ -364,7 +381,7 @@
         <div class="status-table"><div class="status-table-head"><span>数据</span><span>频率</span><span>最近更新</span><span>状态</span></div><div><strong>/map</strong><span id="hzMap">Event</span><span id="ageMap">--</span><span id="stateMap" class="state-pill">--</span></div><div><strong>/scan</strong><span id="hzScan">--</span><span id="ageScan">--</span><span id="stateScan" class="state-pill">--</span></div><div><strong>/odom</strong><span id="hzOdom">--</span><span id="ageOdom">--</span><span id="stateOdom" class="state-pill">--</span></div><div><strong>map → odom</strong><span id="tfMapOdom">--</span><span id="ageTfMap">--</span><span id="stateTfMap" class="state-pill">--</span></div><div><strong>odom → base_link</strong><span id="tfOdomBase">--</span><span id="ageTfOdom">--</span><span id="stateTfOdom" class="state-pill">--</span></div><div><strong>/plan</strong><span id="hzPlan">--</span><span id="agePlan">--</span><span id="statePlan" class="state-pill">--</span></div></div>
       </div>
       <div id="statusPanelLogs" class="status-panel">
-        <div class="dock-log-toolbar"><div class="dock-log-tabs" role="tablist" aria-label="日志切换"><button id="dockTabEvents" class="dock-tab active" type="button" data-log-view="events">事件</button><button id="dockTabMappingLog" class="dock-tab" type="button" data-log-view="mapping">建图</button><button id="dockTabNavigationLog" class="dock-tab" type="button" data-log-view="navigation">导航</button></div><button id="btnClearDockPane" class="tertiary" type="button">清空</button></div>
+        <div class="dock-log-toolbar"><div class="dock-log-tabs" role="tablist" aria-label="日志切换"><button id="dockTabEvents" class="dock-tab active" type="button" data-log-view="events">事件</button><button id="dockTabBaseLog" class="dock-tab" type="button" data-log-view="base">底盘</button><button id="dockTabMappingLog" class="dock-tab" type="button" data-log-view="mapping">建图</button><button id="dockTabNavigationLog" class="dock-tab" type="button" data-log-view="navigation">导航</button></div><button id="btnClearDockPane" class="tertiary" type="button">清空</button></div>
         <div class="dock-event-filters"><label>事件级别 <select id="eventLevel"><option value="all">全部</option><option value="info">信息</option><option value="warn">警告</option><option value="error">错误</option></select></label><label>保留条数 <select id="eventLimit"><option value="240">240</option><option value="500">500</option><option value="1000">1000</option></select></label></div>
         <h3 id="dockLogTitle" class="sr-only">事件</h3><div id="dockStreamMeta" class="dock-meta">显示后端事件流</div><div id="dockStream" class="dock-stream events"></div>
       </div>
@@ -377,15 +394,17 @@
   <div id="editorExportDialog" class="annotation-dialog hidden" aria-hidden="true"><form id="editorExportForm" class="annotation-card" role="dialog" aria-modal="true" aria-labelledby="editorExportTitle"><div class="annotation-head"><h2 id="editorExportTitle">导出衍生地图</h2><p class="subtle">禁行区将写入新的占据栅格，原地图不会修改；地点和路线会一并复制。</p></div><label class="annotation-name-field"><span>地图名称</span><input id="editorExportName" name="target_name" autocomplete="off" required /></label><p id="editorExportError" class="annotation-message subtle"></p><div class="annotation-actions"><button id="btnCancelEditorExport" type="button">取消</button><button id="btnConfirmEditorExport" class="primary" type="submit">导出</button></div></form></div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="/app-core.js?v=20260917-web"></script>
-  <script src="/app-api.js?v=20260917-web"></script>
+  <script src="/app-core.js?v=20261028-realtime"></script>
+  <script src="/app-api.js?v=20261028-realtime"></script>
+  <script src="/app-realtime.js?v=20261028-realtime"></script>
   <script src="/app-select.js?v=20260917"></script>
-  <script src="/app-dock.js?v=20260821-map-workspace-6"></script>
-  <script src="/app-pages.js?v=20260821-map-workspace-6"></script>
+  <script src="/app-dock.js?v=20261028-realtime"></script>
+  <script src="/app-pages.js?v=20261028-realtime"></script>
   <script src="/app-manual-control.js?v=20260821-map-workspace-6"></script>
   <script src="/app-speed-settings.js?v=1"></script>
   <script src="/map-editor.js?v=20260824-route-segment-1"></script>
   <script src="/map-raster-editor.js?v=1"></script>
-  <script src="/app.js?v=20260821-map-workspace-6"></script>
+  <script src="/app-perception.js?v=20261028-realtime"></script>
+  <script src="/app.js?v=20261028-realtime"></script>
 </body>
 </html>

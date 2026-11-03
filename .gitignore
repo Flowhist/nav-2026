@@ -3,12 +3,10 @@ maps/
 
 # Build and dependencies
 build/
-tests/
-!tests/test_fixed_localization.py
-!tests/test_relocate.py
-!tests/benchmark_relocate.py
 devel/
-Doc/plans
+Doc/plans/*
+!Doc/plans/独立避障.md
+!Doc/plans/视觉跟随方案调研.md
 install/
 *.egg-info/
 __pycache__/

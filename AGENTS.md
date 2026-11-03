@@ -3,7 +3,7 @@
 ## Project Overview
 - Finav is a ROS 2 Humble navigation project for a WHILL-based robot.
 - It includes chassis control, Hinson HE lidar, DM-IMU, EKF fusion, SLAM Toolbox mapping/localization, custom planning/control, a web debug backend, and Gazebo/RViz simulation.
-- Read `Doc/项目Wiki.md` before deep subsystem work.
+- Read `README.md` for the documentation index and `Doc/系统架构.md` before deep subsystem work.
 
 ## Tech Stack
 - ROS 2 Humble with `ament_cmake`
@@ -21,8 +21,8 @@
   - `ros2 launch finav map.launch.py`
   - `ros2 launch finav nav.launch.py`
   - `python3 server/run_server.py --host 0.0.0.0 --port 8010`
-- Test:
-  - `colcon test --base-paths src/finav --packages-select finav`
+- Test: test sources and targets were removed at the user's request on 2026-10-30.
+  Historical verification is recorded in `Doc/开发与验证.md`.
 - Lint: Not confirmed.
 - Build:
   - `source /opt/ros/humble/setup.bash`
@@ -50,6 +50,13 @@
 - Do not delete files or rewrite large modules unless explicitly requested.
 - Do not read `.env`, credential, token, private key, or secret files.
 - Prefer scoped builds because this workspace may contain duplicate `finav` packages.
+
+## Documentation
+
+- Keep README as the project entry point; use `Doc/部署与运维.md` for service commands, `Doc/操作指南.md` for workflows, and `Doc/开发与验证.md` for development and validation.
+- Keep interface contracts in `Doc/reference/`, internal Web details in `server/README.md`, and proposed designs in `Doc/plans/`.
+- Maintain each fact in one owning document and link to it elsewhere. Distinguish implemented behavior, deployed behavior, and offline or hardware validation.
+- Update relative links and heading anchors when moving documentation. Mark missing historical evidence explicitly.
 
 ## Context7 Rule
 - When working with third-party libraries, frameworks, APIs, SDKs, configuration formats, or version-specific behavior, use Context7 to fetch current documentation before implementing or explaining.

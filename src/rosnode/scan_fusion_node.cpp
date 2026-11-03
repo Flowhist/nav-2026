@@ -3,6 +3,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -16,6 +17,7 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
 #include "sensor_msgs/point_cloud2_iterator.hpp"
+#include "finav/msg/fused_scan.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 #include "tf2_sensor_msgs/tf2_sensor_msgs.hpp"
@@ -70,6 +72,7 @@ public:
       std::floor((angle_max_ - angle_min_) / angle_increment_)) + 1U;
 
     scan_pub_ = create_publisher<LaserScan>(output_topic_, rclcpp::SensorDataQoS());
+    observation_pub_ = create_publisher<finav::msg::FusedScan>("/avoidance/scan", rclcpp::SensorDataQoS());
 
     left_watch_sub_ = create_subscription<LaserScan>(
       left_topic_,
@@ -82,9 +85,15 @@ public:
 
     left_sub_.subscribe(this, left_topic_, rmw_qos_profile_sensor_data);
     right_sub_.subscribe(this, right_topic_, rmw_qos_profile_sensor_data);
+    // Record arrival validity before the synchronizer can retain a future/old frame.
+    left_arrival_connection_=left_sub_.registerCallback(std::function<void(const LaserScan::ConstSharedPtr&)>(
+      [this](const LaserScan::ConstSharedPtr& s) { record_arrival(s,left_arrivals_); }));
+    right_arrival_connection_=right_sub_.registerCallback(std::function<void(const LaserScan::ConstSharedPtr&)>(
+      [this](const LaserScan::ConstSharedPtr& s) { record_arrival(s,right_arrivals_); }));
 
     sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
       SyncPolicy(sync_queue_size_), left_sub_, right_sub_);
+    sync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(.1));
     sync_->registerCallback(
       std::bind(&ScanFusionNode::on_scan_pair, this, std::placeholders::_1, std::placeholders::_2));
 
@@ -105,6 +114,13 @@ public:
   }
 
 private:
+  void record_arrival(const LaserScan::ConstSharedPtr& scan,std::map<int64_t,bool>& arrivals) {
+    const auto t=rclcpp::Time(scan->header.stamp);
+    const double age=(now()-t).seconds();
+    arrivals.emplace(t.nanoseconds(),t.nanoseconds()>0 && age>=0 && age<.5);
+    while (arrivals.size()>128) arrivals.erase(arrivals.begin());
+  }
+
   void on_left_watch(const LaserScan::SharedPtr)
   {
     last_left_seen_ = now();
@@ -152,12 +168,32 @@ private:
 
   void on_scan_pair(const LaserScan::ConstSharedPtr left, const LaserScan::ConstSharedPtr right)
   {
+    const double wall=now().seconds();
+    const double lt=rclcpp::Time(left->header.stamp).seconds();
+    const double rt=rclcpp::Time(right->header.stamp).seconds();
+    const auto la=left_arrivals_.find(rclcpp::Time(left->header.stamp).nanoseconds());
+    const auto ra=right_arrivals_.find(rclcpp::Time(right->header.stamp).nanoseconds());
+    if (la==left_arrivals_.end() || ra==right_arrivals_.end() || !la->second || !ra->second ||
+        count_publishers(left_topic_)!=1 || count_publishers(right_topic_)!=1) return;
+    auto valid=[wall](const LaserScan& scan,double t) {
+      return t>0 && t<=wall && wall-t<.5 && !scan.header.frame_id.empty() &&
+        scan.ranges.size()>=2 && scan.ranges.size()<=10000 &&
+        std::isfinite(scan.angle_min) && std::isfinite(scan.angle_max) &&
+        std::isfinite(scan.angle_increment) && scan.angle_increment>0 &&
+        std::isfinite(scan.range_min) && std::isfinite(scan.range_max) &&
+        scan.range_min>=0 && scan.range_max>scan.range_min && scan.range_max<=100 &&
+        std::abs(scan.angle_max-scan.angle_min-(scan.ranges.size()-1)*scan.angle_increment)<.01;
+    };
+    if (!valid(*left,lt) || !valid(*right,rt) || std::abs(lt-rt)>.1 ||
+        lt<=last_left_stamp_ || rt<=last_right_stamp_) return;
+    last_left_stamp_=lt; last_right_stamp_=rt;
+    finav::msg::FusedScan observation;
     std::vector<float> fused_ranges(bin_count_, std::numeric_limits<float>::infinity());
 
-    if (!accumulate_scan(left, fused_ranges, "left")) {
+    if (!accumulate_scan(left, fused_ranges, "left",observation.left,observation.left_origin)) {
       return;
     }
-    if (!accumulate_scan(right, fused_ranges, "right")) {
+    if (!accumulate_scan(right, fused_ranges, "right",observation.right,observation.right_origin)) {
       return;
     }
 
@@ -179,12 +215,17 @@ private:
     out.ranges = std::move(fused_ranges);
 
     scan_pub_->publish(out);
+    // Both sensors must contribute actual finite measurements to authorize driving.
+    if (!observation.left.points.empty() && !observation.right.points.empty())
+      observation_pub_->publish(observation);
   }
 
   bool accumulate_scan(
     const LaserScan::ConstSharedPtr & scan,
     std::vector<float> & fused_ranges,
-    const char * source_name)
+    const char * source_name,
+    sensor_msgs::msg::PointCloud& observation,
+    geometry_msgs::msg::Point32& origin)
   {
     sensor_msgs::msg::PointCloud2 cloud;
     sensor_msgs::msg::PointCloud2 transformed;
@@ -197,6 +238,11 @@ private:
         rclcpp::Time(scan->header.stamp),
         rclcpp::Duration::from_seconds(tf_timeout_sec_));
       tf2::doTransform(cloud, transformed, transform);
+      origin.x=transform.transform.translation.x;
+      origin.y=transform.transform.translation.y;
+      origin.z=transform.transform.translation.z;
+      observation.header.frame_id=output_frame_;
+      observation.header.stamp=scan->header.stamp;
     } catch (const tf2::TransformException & ex) {
       RCLCPP_WARN_THROTTLE(
         get_logger(),
@@ -234,6 +280,9 @@ private:
       if (!std::isfinite(range) || range < range_min_ || range > range_max_) {
         continue;
       }
+      geometry_msgs::msg::Point32 point;
+      point.x=x; point.y=y;
+      observation.points.push_back(point);
 
       const double angle = std::atan2(y, x);
       if (angle < angle_min_ || angle > angle_max_) {
@@ -280,10 +329,14 @@ private:
   message_filters::Subscriber<LaserScan> left_sub_;
   message_filters::Subscriber<LaserScan> right_sub_;
   std::shared_ptr<message_filters::Synchronizer<SyncPolicy>> sync_;
+  message_filters::Connection left_arrival_connection_,right_arrival_connection_;
+  std::map<int64_t,bool> left_arrivals_,right_arrivals_;
 
   rclcpp::Subscription<LaserScan>::SharedPtr left_watch_sub_;
   rclcpp::Subscription<LaserScan>::SharedPtr right_watch_sub_;
   rclcpp::Publisher<LaserScan>::SharedPtr scan_pub_;
+  rclcpp::Publisher<finav::msg::FusedScan>::SharedPtr observation_pub_;
+  double last_left_stamp_=0,last_right_stamp_=0;
   rclcpp::TimerBase::SharedPtr watchdog_timer_;
 };
 

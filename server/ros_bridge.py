@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import base64
 import json
 import math
 import os
@@ -289,6 +288,8 @@ class _BridgeNode:
         bridge: RosBridge,
     ) -> None:
         from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
+        from diagnostic_msgs.msg import DiagnosticArray
+        from sensor_msgs.msg import PointCloud
         from nav_msgs.msg import OccupancyGrid, Odometry, Path
         from rclpy.qos import (
             QoSProfile,
@@ -301,6 +302,7 @@ class _BridgeNode:
         from tf2_msgs.msg import TFMessage
         from tf2_ros import Buffer, TransformListener
         from rcl_interfaces.srv import SetParametersAtomically
+        from std_srvs.srv import SetBool
 
         self.state_store = state_store
         self.bridge = bridge
@@ -311,10 +313,16 @@ class _BridgeNode:
         self.Empty = Empty
         self.String = String
         self.setting_clients = {
+            "avoidance": self.create_client(SetBool, "/base_control_router/set_avoidance"),
             "navigation_speed": self.create_client(SetParametersAtomically, "/nav_control/set_speed"),
             "handle_gear": self.create_client(SetParametersAtomically, "/handle_control/set_gear"),
         }
         self.handle_mapping = bridge.handle_mapping
+        self.create_subscription(Bool, "/base_control_router/avoidance_enabled",
+                                 lambda msg: self.state_store.update_status({"control": {
+                                     "avoidance_enabled": bool(msg.data),
+                                     "avoidance_updated_at": time.time(),
+                                 }}), 1)
         self.joystick_preemption_enabled = bridge.joystick_preemption_enabled
 
         self.tf_buffer = Buffer()
@@ -354,6 +362,9 @@ class _BridgeNode:
             depth=10,
         )
         self.create_subscription(LaserScan, "/scan", lambda m: _BridgeNode._on_scan(self, m), scan_qos)
+        self.create_subscription(DiagnosticArray, "/avoidance/status", state_store.perception.update_status, 1)
+        self.create_subscription(PointCloud, "/avoidance/obstacles", state_store.perception.update_points,
+                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
 
         self.create_subscription(Bool, "/js_state", lambda m: _BridgeNode._on_js_state(self, m), 10)
         self.create_subscription(Twist, "/js_cmd_vel", lambda m: _BridgeNode._on_js_cmd(self, m), 10)
@@ -448,8 +459,8 @@ class _BridgeNode:
                         "yaw_deg": origin_yaw,
                     },
                     "updated_at": time.time(),
-                    "encoding": "int8-base64",
-                    "data_b64": base64.b64encode(raw_map).decode("ascii"),
+                    "encoding": "int8",
+                    "data_bytes": raw_map,
                 }
             },
             map_changed=True,
@@ -614,11 +625,11 @@ class _BridgeNode:
                     "stamp": msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
                     "updated_at": time.time(),
                     "pose_map": pose_payload,
-                    "encoding": "uint16-mm-base64",
+                    "encoding": "uint16-le",
                     "angle_min": float(msg.angle_min),
                     "angle_increment": float(msg.angle_increment) * step,
                     "count": len(packed_ranges),
-                    "ranges_b64": base64.b64encode(packed_ranges.tobytes()).decode("ascii"),
+                    "ranges_bytes": packed_ranges.tobytes(),
                 },
             }
         )
@@ -759,18 +770,26 @@ class _BridgeNode:
         if ctype == "setting":
             from rcl_interfaces.srv import SetParametersAtomically
             from rclpy.parameter import Parameter
+            from std_srvs.srv import SetBool
 
             client = self.setting_clients[cmd["kind"]]
             if not client.service_is_ready():
                 cmd["reply"].put_nowait({"successful": False, "reason": "设置接口未就绪，请先更新并重启对应节点"})
                 return
-            request = SetParametersAtomically.Request()
-            values = cmd["value"] if cmd["kind"] == "navigation_speed" else {"gear": cmd["value"]}
-            request.parameters = [Parameter(name, value=value).to_parameter_msg() for name, value in values.items()]
+            if cmd["kind"] == "avoidance":
+                request = SetBool.Request(data=cmd["value"])
+            else:
+                request = SetParametersAtomically.Request()
+                values = cmd["value"] if cmd["kind"] == "navigation_speed" else {"gear": cmd["value"]}
+                request.parameters = [Parameter(name, value=value).to_parameter_msg() for name, value in values.items()]
             def completed(future):
                 try:
-                    result = future.result().result
-                    response = {"successful": result.successful, "reason": result.reason}
+                    if cmd["kind"] == "avoidance":
+                        result = future.result()
+                        response = {"successful": result.success, "reason": result.message}
+                    else:
+                        result = future.result().result
+                        response = {"successful": result.successful, "reason": result.reason}
                 except Exception as exc:
                     response = {"successful": False, "reason": str(exc)}
                 cmd["reply"].put_nowait(response)
